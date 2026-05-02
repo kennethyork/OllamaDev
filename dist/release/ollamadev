@@ -958,53 +958,90 @@ class Session {
         $h = $this->tui->getHeight();
         $w = $this->tui->getWidth();
 
+        $this->tui->clear();
+
+        // Header
         $this->tui->move(1, 1);
-        $this->tui->write("╔", TUI::CYAN);
-        echo str_repeat("═", $w - 2);
-        $this->tui->write("╗", TUI::CYAN);
+        $this->tui->write("┌", TUI::CYAN);
+        $this->tui->write(str_repeat("─", $w - 2), TUI::CYAN);
+        $this->tui->write("┐", TUI::CYAN);
 
-        $this->tui->move(2, 1);
-        $this->tui->write("║ ", TUI::CYAN);
-        $this->tui->write("OllamaDev - {$this->model}", TUI::GREEN, true);
-
-        $toolCount = count($this->messages);
-        echo str_repeat(" ", max(0, $w - 40));
-        $this->tui->write("msgs:$toolCount", TUI::DIM);
-        $this->tui->write(" ║", TUI::CYAN);
+        $this->tui->move(2, 2);
+        $this->tui->write("OllamaDev", TUI::GREEN, true);
+        $this->tui->write(" | ", TUI::DIM);
+        $this->tui->write($this->model, TUI::CYAN);
+        $this->tui->write(" | " . count($this->messages) . " msgs", TUI::DIM);
 
         $this->tui->move(3, 1);
-        $this->tui->write("╚", TUI::CYAN);
-        echo str_repeat("═", $w - 2);
-        $this->tui->write("╝", TUI::CYAN);
+        $this->tui->write("└", TUI::CYAN);
+        $this->tui->write(str_repeat("─", $w - 2), TUI::CYAN);
+        $this->tui->write("┘", TUI::CYAN);
 
-        $msgTop = 4;
-        $msgBottom = 4;
+        $contentTop = 4;
+        $contentBottom = 3;
 
+        // If overlay is shown, draw panel on left side
         if ($this->showModels && !empty($this->models)) {
-            $listH = min(count($this->models) + 4, 15);
-            $this->tui->renderModelList($this->models, $this->model, 5, 10, $listH, 50);
-            $msgTop += $listH + 1;
+            $panelW = 45;
+            $panelH = min(count($this->models) + 5, $h - 8);
+            $this->tui->box($contentTop, 2, $panelH, $panelW, "Models (Esc close)");
+            $row = $contentTop + 2;
+            foreach ($this->models as $m) {
+                $name = $m['name'] ?? 'unknown';
+                $size = isset($m['size']) ? $this->formatBytes($m['size']) : '';
+                $sel = $name === $this->model ? " ◀" : "";
+                $this->tui->move($row++, 4);
+                $this->tui->write(sprintf("%-25s %s%s", $name, $size, $sel), $sel ? TUI::GREEN : TUI::WHITE);
+            }
+            $contentTop += $panelH + 1;
         }
 
         if ($this->showSessions && !empty($this->sessions)) {
-            $listH = min(count($this->sessions) + 4, 15);
-            $this->tui->renderSessionList($this->sessions, 5, 10, $listH, 50);
-            $msgTop += $listH + 1;
+            $panelW = 45;
+            $panelH = min(count($this->sessions) + 5, $h - 8);
+            $this->tui->box($contentTop, 2, $panelH, $panelW, "Sessions (Esc close)");
+            $row = $contentTop + 2;
+            foreach ($this->sessions as $s) {
+                $title = substr($s['title'] ?? 'Untitled', 0, 30);
+                $this->tui->move($row++, 4);
+                $this->tui->write($title, TUI::WHITE);
+            }
+            $contentTop += $panelH + 1;
         }
 
         if ($this->showHelp) {
-            $this->renderHelpBox(5, 10, 18, 50);
-            $msgTop += 20;
+            $panelW = 45;
+            $panelH = 15;
+            $this->tui->box($contentTop, 2, $panelH, $panelW, "Help");
+            $cmds = [
+                ["Ctrl+C", "Quit"],
+                ["Ctrl+O", "Models"],
+                ["Ctrl+N", "New Session"],
+                ["Ctrl+S", "Sessions"],
+                ["Ctrl+K", "Help"],
+            ];
+            $row = $contentTop + 2;
+            foreach ($cmds as $c) {
+                $this->tui->move($row++, 4);
+                $this->tui->write(str_pad($c[0], 10), TUI::CYAN, true);
+                $this->tui->write($c[1], TUI::DIM);
+            }
+            $contentTop += $panelH + 1;
         }
 
-        $maxMsgHeight = $h - $msgBottom - $msgTop;
-        $this->tui->renderMessages($this->messages, $msgTop, $msgBottom);
+        // Messages area
+        $msgAreaH = $h - $contentBottom - $contentTop - 1;
+        $this->tui->renderMessages($this->messages, $contentTop, $contentBottom);
 
-        $this->tui->move($h - 2, 1);
-        $this->tui->write("─", TUI::DIM);
-        echo str_repeat("─", $w - 2);
+        // Separator line
+        $sep = $h - $contentBottom - 1;
+        $this->tui->move($sep, 1);
+        $this->tui->write("└", TUI::CYAN);
+        $this->tui->write(str_repeat("─", $w - 2), TUI::CYAN);
+        $this->tui->write("┘", TUI::CYAN);
 
-        $this->tui->statusBar("[Ctrl+C] Quit  [Ctrl+O] Models  [Ctrl+N] New  [Ctrl+S] Sessions  [Ctrl+K] Help", "", $h);
+        // Status bar
+        $this->tui->statusBar("[C-c] Quit  [C-o] Models  [C-n] New  [C-s] Sessions  [C-k] Help", "", $h);
     }
 
     private function renderHelpBox(int $top, int $left, int $height, int $width): void {
