@@ -442,7 +442,7 @@ TOOLS AVAILABLE:
    - Applies unified diff patch to file
 
 10. diagnostics <file_path>
-    - Shows syntax/lint errors for: php, go, js, ts, py, rb
+    - Shows syntax/lint errors for: php, js, ts, py, rb, java, c, cpp, rs
     - Returns line numbers and error messages
 
 11. mcp_servers
