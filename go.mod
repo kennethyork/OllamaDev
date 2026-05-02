@@ -6,7 +6,10 @@ require (
 	github.com/charmbracelet/bubbletea v0.27.0
 	github.com/charmbracelet/lipgloss v0.11.0
 	github.com/google/uuid v1.6.0
+	github.com/mattn/go-runewidth v0.0.16
+	github.com/ncruces/go-sqlite3 v0.10.2
 	github.com/spf13/cobra v1.8.0
+	github.com/spf13/viper v1.18.2
 )
 
 require (
@@ -16,10 +19,10 @@ require (
 	github.com/charmbracelet/x/exp v0.2.0 // indirect
 	github.com/charmbracelet/x/input v0.1.0 // indirect
 	github.com/charmbracelet/x/term v0.1.0 // indirect
+	github.com/frankban/quicktest v1.14.6 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/muesli/ansi v0.0.0-20230316142956-30a8027152d5 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/reflow v0.3.0 // indirect

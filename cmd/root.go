@@ -12,17 +12,17 @@ import (
 )
 
 var (
-	debug     bool
-	cwd       string
-	prompt    string
-	jsonOut   bool
-	quiet     bool
+	debug bool
+	cwd   string
+	prompt string
+	jsonOut bool
+	quiet  bool
 )
 
 var rootCmd = &cobra.Command{
 	Use:   "ollamadev",
 	Short: "Local AI coding agent using Ollama",
-	Long:  "OllamaDev is a terminal-based AI coding agent that uses local Ollama models.",
+	Long:  "OllamaDev is a terminal-based AI coding agent that uses local Ollama models.\nPrivacy-first, fully offline.",
 	Run: func(cmd *cobra.Command, args []string) {
 		cfg, err := config.Load()
 		if err != nil {
@@ -39,7 +39,13 @@ var rootCmd = &cobra.Command{
 			return
 		}
 
-		p := tea.NewProgram(tui.New(cfg))
+		m, err := tui.New(cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating TUI: %v\n", err)
+			os.Exit(1)
+		}
+
+		p := tea.NewProgram(m)
 		if err := p.Start(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error starting TUI: %v\n", err)
 			os.Exit(1)
