@@ -223,6 +223,10 @@ class OllamaClient {
 
     public function chat(array $messages, callable $handler = null): string {
         $model = Config::get('ollama.defaultModel', 'llama3.2:latest');
+        return $this->chatWithModel($model, $messages, $handler);
+    }
+
+    public function chatWithModel(string $model, array $messages, callable $handler = null): string {
         $params = ['model' => $model, 'messages' => $messages, 'stream' => true];
         $ch = curl_init($this->host . '/api/chat');
         curl_setopt_array($ch, [
@@ -505,7 +509,7 @@ You have full access to this codebase. Act like a senior developer who gets thin
     public function run(array $messages, callable $handler = null): string {
         $allMessages = array_merge([$this->systemPrompt], $messages);
         $response = '';
-        $this->client->chat($allMessages, function($chunk) use (&$response, $handler) {
+        $this->client->chatWithModel($this->model, $allMessages, function($chunk) use (&$response, $handler) {
             $response .= $chunk;
             if ($handler) $handler($chunk);
         });
@@ -755,35 +759,15 @@ class Session {
     private string $model;
     private array $messages = [];
     private Agent $agent;
-    private TUI $tui;
-    private bool $showHelp = false;
-    private bool $showModels = false;
-    private bool $showSessions = false;
-    private int $modelIdx = 0;
-    private int $sessionIdx = 0;
-    private array $models = [];
-    private array $sessions = [];
-    private bool $streaming = false;
-    private string $streamingResponse = '';
 
     public function __construct(array $config, ?string $sessionId = null) {
         $this->config = $config;
         $this->ensureDataDir();
-        $this->tui = new TUI();
         MCP::load($config);
         LSP::load($config);
         $this->agent = new Agent();
         if ($sessionId) { $this->load($sessionId); }
         else { $this->id = 'session_' . time() . '_' . substr(md5(mt_rand()), 0, 8); $this->title = "Session " . date('Y-m-d H:i'); $this->model = $this->getLatestModel(); }
-        $this->loadLists();
-    }
-
-    private function loadLists(): void {
-        $this->models = $this->agent->listModelsDetailed();
-        $this->sessions = Session::listAll($this->config);
-        foreach ($this->models as $i => $m) {
-            if (($m['name'] ?? '') === $this->model) { $this->modelIdx = $i; break; }
-        }
     }
 
     private function ensureDataDir(): void { $dir = Config::sessionsDir(); if (!is_dir($dir)) mkdir($dir, 0755, true); }
@@ -894,173 +878,54 @@ class Session {
     }
 
     public function start(): void {
-        $this->tui->clear();
-        $this->render();
+        $this->renderBanner();
+        if (!$this->agent->checkConnection()) {
+            echo "⚠️  Cannot connect to Ollama at " . Config::get('ollama.host') . "\n";
+            echo "   Make sure Ollama is running: `ollama serve`\n\n";
+        }
+
+        if (!empty($this->messages)) {
+            echo "📜 Loading previous messages...\n";
+            foreach ($this->messages as $msg) {
+                $icon = match($msg['role']) { 'user' => '👤', 'assistant' => '🤖', 'tool' => '🔧', default => '•' };
+                echo "\n{$icon} [{$msg['role']}]\n{$msg['content']}\n";
+            }
+            echo "\n";
+        }
+        $this->renderStatus();
 
         while (true) {
-            $this->render();
-            $input = $this->tui->input(">");
-            $this->tui->clearLine($this->tui->getHeight());
+            $this->renderPrompt();
+            $input = trim(fgets(STDIN));
 
-            if ($input === "\x1b") {
-                if ($this->showHelp) { $this->showHelp = false; continue; }
-                if ($this->showModels) { $this->showModels = false; continue; }
-                if ($this->showSessions) { $this->showSessions = false; continue; }
-                continue;
-            }
-
-            if (trim($input) === '') continue;
-
-            if (strlen($input) === 1) {
-                $c = ord($input);
-                if ($c === 3) break; // Ctrl+C
-                if ($c === 14) { $this->showSessions = !$this->showSessions; $this->showHelp = false; $this->showModels = false; continue; }
-                if ($c === 16) { $this->showModels = !$this->showModels; $this->showHelp = false; $this->showSessions = false; continue; }
-                if ($c === 11) { $this->showHelp = !$this->showHelp; $this->showModels = false; $this->showSessions = false; continue; }
-            }
-
-            if ($this->showModels || $this->showSessions || $this->showHelp) continue;
+            if ($this->handleCommand($input)) break;
+            if (empty($input)) continue;
 
             $this->addMessage('user', $input);
-            $this->streaming = true;
-            $this->streamingResponse = '';
+            echo "\n🤖 [assistant]\n";
 
-            $this->render();
-            echo "\n";
-
-            $this->agent->run($this->getMessages(), function($chunk) {
-                $this->streamingResponse .= $chunk;
-                $this->tui->write($chunk, TUI::GREEN);
+            $response = '';
+            $this->agent->run($this->getMessages(), function($chunk) use (&$response) {
+                echo $chunk;
+                $response .= $chunk;
             });
 
             echo "\n";
-            $this->streaming = false;
 
-            $toolResults = $this->agent->parseAndExecuteTools($this->streamingResponse);
+            $toolResults = $this->agent->parseAndExecuteTools($response);
             foreach ($toolResults as $result) {
                 $this->addMessage($result['role'], $result['content']);
+                echo "\n🔧 [tool]\n{$result['content']}\n";
             }
 
-            if (empty($toolResults) && !empty(trim($this->streamingResponse))) {
-                $this->addMessage('assistant', $this->streamingResponse);
+            if (empty($toolResults) && !empty(trim($response))) {
+                $this->addMessage('assistant', $response);
             } elseif (!empty($toolResults)) {
-                $this->addMessage('assistant', $this->streamingResponse);
+                $this->addMessage('assistant', $response);
             }
 
             $this->save();
-        }
-
-        $this->tui->clear();
-        echo "Goodbye!\n";
-    }
-
-    private function render(): void {
-        $h = $this->tui->getHeight();
-        $w = $this->tui->getWidth();
-
-        $this->tui->clear();
-
-        // Header
-        $this->tui->move(1, 1);
-        $this->tui->write("┌", TUI::CYAN);
-        $this->tui->write(str_repeat("─", $w - 2), TUI::CYAN);
-        $this->tui->write("┐", TUI::CYAN);
-
-        $this->tui->move(2, 2);
-        $this->tui->write("OllamaDev", TUI::GREEN, true);
-        $this->tui->write(" | ", TUI::DIM);
-        $this->tui->write($this->model, TUI::CYAN);
-        $this->tui->write(" | " . count($this->messages) . " msgs", TUI::DIM);
-
-        $this->tui->move(3, 1);
-        $this->tui->write("└", TUI::CYAN);
-        $this->tui->write(str_repeat("─", $w - 2), TUI::CYAN);
-        $this->tui->write("┘", TUI::CYAN);
-
-        $contentTop = 4;
-        $contentBottom = 3;
-
-        // If overlay is shown, draw panel on left side
-        if ($this->showModels && !empty($this->models)) {
-            $panelW = 45;
-            $panelH = min(count($this->models) + 5, $h - 8);
-            $this->tui->box($contentTop, 2, $panelH, $panelW, "Models (Esc close)");
-            $row = $contentTop + 2;
-            foreach ($this->models as $m) {
-                $name = $m['name'] ?? 'unknown';
-                $size = isset($m['size']) ? $this->formatBytes($m['size']) : '';
-                $sel = $name === $this->model ? " ◀" : "";
-                $this->tui->move($row++, 4);
-                $this->tui->write(sprintf("%-25s %s%s", $name, $size, $sel), $sel ? TUI::GREEN : TUI::WHITE);
-            }
-            $contentTop += $panelH + 1;
-        }
-
-        if ($this->showSessions && !empty($this->sessions)) {
-            $panelW = 45;
-            $panelH = min(count($this->sessions) + 5, $h - 8);
-            $this->tui->box($contentTop, 2, $panelH, $panelW, "Sessions (Esc close)");
-            $row = $contentTop + 2;
-            foreach ($this->sessions as $s) {
-                $title = substr($s['title'] ?? 'Untitled', 0, 30);
-                $this->tui->move($row++, 4);
-                $this->tui->write($title, TUI::WHITE);
-            }
-            $contentTop += $panelH + 1;
-        }
-
-        if ($this->showHelp) {
-            $panelW = 45;
-            $panelH = 15;
-            $this->tui->box($contentTop, 2, $panelH, $panelW, "Help");
-            $cmds = [
-                ["Ctrl+C", "Quit"],
-                ["Ctrl+O", "Models"],
-                ["Ctrl+N", "New Session"],
-                ["Ctrl+S", "Sessions"],
-                ["Ctrl+K", "Help"],
-            ];
-            $row = $contentTop + 2;
-            foreach ($cmds as $c) {
-                $this->tui->move($row++, 4);
-                $this->tui->write(str_pad($c[0], 10), TUI::CYAN, true);
-                $this->tui->write($c[1], TUI::DIM);
-            }
-            $contentTop += $panelH + 1;
-        }
-
-        // Messages area
-        $msgAreaH = $h - $contentBottom - $contentTop - 1;
-        $this->tui->renderMessages($this->messages, $contentTop, $contentBottom);
-
-        // Separator line
-        $sep = $h - $contentBottom - 1;
-        $this->tui->move($sep, 1);
-        $this->tui->write("└", TUI::CYAN);
-        $this->tui->write(str_repeat("─", $w - 2), TUI::CYAN);
-        $this->tui->write("┘", TUI::CYAN);
-
-        // Status bar
-        $this->tui->statusBar("[C-c] Quit  [C-o] Models  [C-n] New  [C-s] Sessions  [C-k] Help", "", $h);
-    }
-
-    private function renderHelpBox(int $top, int $left, int $height, int $width): void {
-        $this->tui->box($top, $left, $height, $width, "Help");
-        $commands = [
-            ['key' => 'Ctrl+C', 'desc' => 'Quit'],
-            ['key' => 'Ctrl+O', 'desc' => 'Toggle Models'],
-            ['key' => 'Ctrl+N', 'desc' => 'New Session'],
-            ['key' => 'Ctrl+S', 'desc' => 'Toggle Sessions'],
-            ['key' => 'Ctrl+K', 'desc' => 'Toggle Help'],
-            ['key' => '↑/↓', 'desc' => 'Navigate'],
-            ['key' => 'Enter', 'desc' => 'Select'],
-            ['key' => 'Esc', 'desc' => 'Close dialog'],
-        ];
-        $row = $top + 2;
-        foreach ($commands as $cmd) {
-            $this->tui->move($row++, $left + 3);
-            $this->tui->write(str_pad($cmd['key'], 10), TUI::CYAN, true);
-            $this->tui->write($cmd['desc'], TUI::DIM);
+            $this->renderStatus();
         }
     }
 }
