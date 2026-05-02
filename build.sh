@@ -566,6 +566,200 @@ You have full access to this codebase. Act like a senior developer who gets thin
     }
 }
 
+class TUI {
+    const CLEAR = "\033[2J";
+    const HOME = "\033[H";
+    const RESET = "\033[0m";
+    const BOLD = "\033[1m";
+    const DIM = "\033[2m";
+    const RED = "\033[31m";
+    const GREEN = "\033[32m";
+    const YELLOW = "\033[33m";
+    const BLUE = "\033[34m";
+    const CYAN = "\033[36m";
+    const WHITE = "\033[37m";
+
+    private int $width = 80;
+    private int $height = 24;
+
+    public function __construct() {
+        if (function_exists('exec')) {
+            $size = [];
+            exec('stty size 2>/dev/null', $size);
+            if (count($size) === 2) {
+                $this->height = (int)$size[0];
+                $this->width = (int)$size[1];
+            }
+        }
+    }
+
+    public function clear(): void { echo self::CLEAR . self::HOME; }
+    public function move(int $row, int $col): void { echo "\033[{$row};{$col}H"; }
+    public function reset(): void { echo self::RESET; }
+
+    public function write(string $text, ?string $color = null, bool $bold = false): void {
+        if ($color) echo $color;
+        if ($bold) echo self::BOLD;
+        echo $text;
+        if ($bold || $color) echo self::RESET;
+    }
+
+    public function writeAt(int $row, int $col, string $text, ?string $color = null): void {
+        $this->move($row, $col);
+        $this->write($text, $color);
+    }
+
+    public function clearLine(int $row): void {
+        $this->move($row, 1);
+        echo "\033[2K";
+    }
+
+    public function clearLines(int $start, int $end): void {
+        for ($i = $start; $i <= $end; $i++) {
+            $this->clearLine($i);
+        }
+    }
+
+    public function box(int $top, int $left, int $height, int $width, ?string $title = null): void {
+        $this->move($top, $left);
+        echo '+' . str_repeat('─', $width - 2) . '+';
+        for ($i = 1; $i < $height - 1; $i++) {
+            $this->move($top + $i, $left);
+            echo '│' . str_repeat(' ', $width - 2) . '│';
+        }
+        $this->move($top + $height - 1, $left);
+        echo '+' . str_repeat('─', $width - 2) . '+';
+        if ($title) {
+            $this->move($top, $left + 2);
+            echo " $title ";
+        }
+    }
+
+    public function hline(int $row, int $left, int $width): void {
+        $this->move($row, $left);
+        echo str_repeat('─', $width);
+    }
+
+    public function statusBar(string $left, string $right, int $row = 0): void {
+        $row = $row ?: $this->height;
+        $this->move($row, 1);
+        echo "\033[7m"; // reverse
+        $padLen = $this->width - strlen($right);
+        echo str_pad($left, $padLen);
+        echo $right;
+        echo self::RESET;
+    }
+
+    public function input(string $prompt, int $row = null): string {
+        $row = $row ?: $this->height;
+        $this->move($row, 1);
+        echo "\033[7m$prompt\033[0m ";
+        $input = '';
+        while (true) {
+            $c = $this->getChar();
+            if ($c === "\n" || $c === "\r" || ord($c) === 13) {
+                echo "\n";
+                break;
+            } elseif (ord($c) === 127 || ord($c) === 8) {
+                if (strlen($input) > 0) {
+                    $input = substr($input, 0, -1);
+                    echo "\033[1D \033[1D";
+                }
+            } elseif (ord($c) >= 32) {
+                $input .= $c;
+                echo $c;
+            }
+        }
+        return $input;
+    }
+
+    public function getChar(): string {
+        $fp = fopen('/dev/tty', 'r');
+        stream_set_blocking($fp, false);
+        $c = fgetc($fp);
+        fclose($fp);
+        return $c ?? '';
+    }
+
+    public function keyPress(int $timeout = 0): ?string {
+        if ($timeout > 0) {
+            $fp = fopen('/dev/tty', 'r');
+            stream_set_blocking($fp, false);
+            usleep($timeout * 1000);
+            $c = fgetc($fp);
+            fclose($fp);
+            return $c ?: null;
+        }
+        return $this->getChar();
+    }
+
+    public function getWidth(): int { return $this->width; }
+    public function getHeight(): int { return $this->height; }
+
+    public function renderMessages(array $messages, int $top = 2, int $bottom = 3): void {
+        $maxLines = $this->height - $bottom - $top;
+        $line = $top;
+
+        foreach ($messages as $msg) {
+            if ($line >= $this->height - $bottom) break;
+
+            $role = $msg['role'] ?? 'unknown';
+            $content = $msg['content'] ?? '';
+            $icon = match($role) { 'user' => '👤', 'assistant' => '🤖', 'tool' => '🔧', default => '•' };
+            $color = match($role) { 'user' => self::CYAN, 'assistant' => self::GREEN, 'tool' => self::YELLOW, default => self::DIM };
+
+            $this->clearLine($line);
+            $this->write(" $icon ", self::BOLD . $color);
+            $this->write("[{$role}]", $color);
+            $line++;
+
+            foreach (explode("\n", $content) as $l) {
+                if ($line >= $this->height - $bottom) break;
+                $this->clearLine($line);
+                $this->move($line++, 4);
+                echo substr($l, 0, $this->width - 5);
+            }
+            if ($line < $this->height - $bottom) {
+                $this->clearLine($line++);
+            }
+        }
+
+        while ($line < $this->height - $bottom) {
+            $this->clearLine($line++);
+        }
+    }
+
+    public function renderModelList(array $models, string $current, int $top = 5, int $left = 10, int $height = 12, int $width = 50): void {
+        $this->box($top, $left, $height, $width, "Models (Esc to close)");
+        $row = $top + 2;
+        foreach ($models as $i => $m) {
+            $name = $m['name'] ?? 'unknown';
+            $size = isset($m['size']) ? $this->formatBytes($m['size']) : '';
+            $selected = $name === $current ? ' ◀' : '';
+            $this->clearLine($row);
+            $this->move($row++, $left + 3);
+            $this->write(sprintf("%-25s %10s%s", $name, $size, $selected), $selected ? self::GREEN : self::DIM);
+        }
+    }
+
+    public function renderSessionList(array $sessions, int $top = 5, int $left = 10, int $height = 12, int $width = 50): void {
+        $this->box($top, $left, $height, $width, "Sessions (Enter to select, Esc close)");
+        $row = $top + 2;
+        foreach ($sessions as $s) {
+            $title = substr($s['title'] ?? 'Untitled', 0, $width - 10);
+            $this->clearLine($row);
+            $this->move($row++, $left + 3);
+            $this->write($title, self::DIM);
+        }
+    }
+
+    private function formatBytes(int $bytes): string {
+        if ($bytes >= 1073741824) return round($bytes / 1073741824, 1) . ' GB';
+        if ($bytes >= 1048576) return round($bytes / 1048576, 1) . ' MB';
+        return round($bytes / 1024) . ' KB';
+    }
+}
+
 class Session {
     private array $config;
     private string $id;
@@ -573,15 +767,35 @@ class Session {
     private string $model;
     private array $messages = [];
     private Agent $agent;
+    private TUI $tui;
+    private bool $showHelp = false;
+    private bool $showModels = false;
+    private bool $showSessions = false;
+    private int $modelIdx = 0;
+    private int $sessionIdx = 0;
+    private array $models = [];
+    private array $sessions = [];
+    private bool $streaming = false;
+    private string $streamingResponse = '';
 
     public function __construct(array $config, ?string $sessionId = null) {
         $this->config = $config;
         $this->ensureDataDir();
+        $this->tui = new TUI();
         MCP::load($config);
         LSP::load($config);
         $this->agent = new Agent();
         if ($sessionId) { $this->load($sessionId); }
         else { $this->id = 'session_' . time() . '_' . substr(md5(mt_rand()), 0, 8); $this->title = "Session " . date('Y-m-d H:i'); $this->model = $this->getLatestModel(); }
+        $this->loadLists();
+    }
+
+    private function loadLists(): void {
+        $this->models = $this->agent->listModelsDetailed();
+        $this->sessions = Session::listAll($this->config);
+        foreach ($this->models as $i => $m) {
+            if (($m['name'] ?? '') === $this->model) { $this->modelIdx = $i; break; }
+        }
     }
 
     private function ensureDataDir(): void { $dir = Config::sessionsDir(); if (!is_dir($dir)) mkdir($dir, 0755, true); }
@@ -692,59 +906,136 @@ class Session {
     }
 
     public function start(): void {
-        echo "\033[2J\033[H";
-        $this->renderBanner();
-        if (!$this->agent->checkConnection()) { echo "⚠️  Cannot connect to Ollama at " . Config::get('ollama.host') . "\n   Make sure Ollama is running: `ollama serve`\n\n"; }
-        if (!empty($this->messages)) {
-            echo "📜 Loading previous messages...\n";
-            foreach ($this->messages as $msg) { $icon = $msg['role'] === 'user' ? '👤' : ($msg['role'] === 'assistant' ? '🤖' : '🔧'); echo "\n{$icon} [{$msg['role']}]\n{$msg['content']}\n"; }
-            echo "\n";
-        }
-        $this->renderStatus();
+        $this->tui->clear();
+        $this->renderTUI();
 
         while (true) {
-            $this->renderPrompt();
-            $input = trim(fgets(STDIN));
-            if ($this->handleCommand($input)) break;
-            if (empty($input)) continue;
+            $this->render();
+            $input = $this->tui->input(">");
+            $this->tui->clearLine($this->tui->getHeight());
 
-            $this->addMessage('user', $input);
-
-            $iteration = 0;
-            $maxIterations = 10;
-
-            while ($iteration < $maxIterations) {
-                $iteration++;
-                echo "\n🤖 [assistant]\n";
-
-                $response = '';
-                $this->agent->run($this->getMessages(), function($chunk) use (&$response) { echo $chunk; $response .= $chunk; });
-                echo "\n";
-
-                $toolResults = $this->agent->parseAndExecuteTools($response);
-
-                foreach ($toolResults as $result) {
-                    $this->addMessage($result['role'], $result['content']);
-                    echo "\n🔧 [tool]\n{$result['content']}\n";
-                }
-
-                if (empty($toolResults)) {
-                    if (!empty(trim($response))) {
-                        $this->addMessage('assistant', $response);
-                    }
-                    break;
-                }
-
-                $this->save();
+            if ($input === "\x1b") {
+                if ($this->showHelp) { $this->showHelp = false; continue; }
+                if ($this->showModels) { $this->showModels = false; continue; }
+                if ($this->showSessions) { $this->showSessions = false; continue; }
+                continue;
             }
 
-            if ($iteration >= $maxIterations) {
-                echo "\n⚠️  Max tool iterations reached. Continuing conversation...\n";
-                $this->addMessage('assistant', $response);
+            if (trim($input) === '') continue;
+
+            if (strlen($input) === 1) {
+                $c = ord($input);
+                if ($c === 3) break; // Ctrl+C
+                if ($c === 14) { $this->showSessions = !$this->showSessions; $this->showHelp = false; $this->showModels = false; continue; }
+                if ($c === 16) { $this->showModels = !$this->showModels; $this->showHelp = false; $this->showSessions = false; continue; }
+                if ($c === 11) { $this->showHelp = !$this->showHelp; $this->showModels = false; $this->showSessions = false; continue; }
+            }
+
+            if ($this->showModels || $this->showSessions || $this->showHelp) continue;
+
+            $this->addMessage('user', $input);
+            $this->streaming = true;
+            $this->streamingResponse = '';
+
+            $this->render();
+            echo "\n";
+
+            $this->agent->run($this->getMessages(), function($chunk) {
+                $this->streamingResponse .= $chunk;
+                $this->tui->write($chunk, TUI::GREEN);
+            });
+
+            echo "\n";
+            $this->streaming = false;
+
+            $toolResults = $this->agent->parseAndExecuteTools($this->streamingResponse);
+            foreach ($toolResults as $result) {
+                $this->addMessage($result['role'], $result['content']);
+            }
+
+            if (empty($toolResults) && !empty(trim($this->streamingResponse))) {
+                $this->addMessage('assistant', $this->streamingResponse);
+            } elseif (!empty($toolResults)) {
+                $this->addMessage('assistant', $this->streamingResponse);
             }
 
             $this->save();
-            $this->renderStatus();
+        }
+
+        $this->tui->clear();
+        echo "Goodbye!\n";
+    }
+
+    private function render(): void {
+        $h = $this->tui->getHeight();
+        $w = $this->tui->getWidth();
+
+        $this->tui->move(1, 1);
+        $this->tui->write("╔", TUI::CYAN);
+        echo str_repeat("═", $w - 2);
+        $this->tui->write("╗", TUI::CYAN);
+
+        $this->tui->move(2, 1);
+        $this->tui->write("║ ", TUI::CYAN);
+        $this->tui->write("OllamaDev - {$this->model}", TUI::GREEN, true);
+
+        $toolCount = count($this->messages);
+        echo str_repeat(" ", max(0, $w - 40));
+        $this->tui->write("msgs:$toolCount", TUI::DIM);
+        $this->tui->write(" ║", TUI::CYAN);
+
+        $this->tui->move(3, 1);
+        $this->tui->write("╚", TUI::CYAN);
+        echo str_repeat("═", $w - 2);
+        $this->tui->write("╝", TUI::CYAN);
+
+        $msgTop = 4;
+        $msgBottom = 4;
+
+        if ($this->showModels && !empty($this->models)) {
+            $listH = min(count($this->models) + 4, 15);
+            $this->tui->renderModelList($this->models, $this->model, 5, 10, $listH, 50);
+            $msgTop += $listH + 1;
+        }
+
+        if ($this->showSessions && !empty($this->sessions)) {
+            $listH = min(count($this->sessions) + 4, 15);
+            $this->tui->renderSessionList($this->sessions, 5, 10, $listH, 50);
+            $msgTop += $listH + 1;
+        }
+
+        if ($this->showHelp) {
+            $this->renderHelpBox(5, 10, 18, 50);
+            $msgTop += 20;
+        }
+
+        $maxMsgHeight = $h - $msgBottom - $msgTop;
+        $this->tui->renderMessages($this->messages, $msgTop, $msgBottom);
+
+        $this->tui->move($h - 2, 1);
+        $this->tui->write("─", TUI::DIM);
+        echo str_repeat("─", $w - 2);
+
+        $this->tui->statusBar("[Ctrl+C] Quit  [Ctrl+O] Models  [Ctrl+N] New  [Ctrl+S] Sessions  [Ctrl+K] Help", "", $h);
+    }
+
+    private function renderHelpBox(int $top, int $left, int $height, int $width): void {
+        $this->tui->box($top, $left, $height, $width, "Help");
+        $commands = [
+            ['key' => 'Ctrl+C', 'desc' => 'Quit'],
+            ['key' => 'Ctrl+O', 'desc' => 'Toggle Models'],
+            ['key' => 'Ctrl+N', 'desc' => 'New Session'],
+            ['key' => 'Ctrl+S', 'desc' => 'Toggle Sessions'],
+            ['key' => 'Ctrl+K', 'desc' => 'Toggle Help'],
+            ['key' => '↑/↓', 'desc' => 'Navigate'],
+            ['key' => 'Enter', 'desc' => 'Select'],
+            ['key' => 'Esc', 'desc' => 'Close dialog'],
+        ];
+        $row = $top + 2;
+        foreach ($commands as $cmd) {
+            $this->tui->move($row++, $left + 3);
+            $this->tui->write(str_pad($cmd['key'], 10), TUI::CYAN, true);
+            $this->tui->write($cmd['desc'], TUI::DIM);
         }
     }
 }
