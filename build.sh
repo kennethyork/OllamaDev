@@ -914,7 +914,9 @@ class Session {
             if (empty($input)) continue;
 
             $this->addMessage('user', $input);
-            echo "\n🤖 [assistant]\n";
+            $thinkingMsgs = ['Thinking...', 'Working on it...', 'Let me check that...', 'Analyzing...', 'Processing...', ' figuring it out...', 'On it...', 'Checking...', 'Searching...'];
+            $thinkMsg = $thinkingMsgs[array_rand($thinkingMsgs)];
+            echo "\n🤖 $thinkMsg\n\n";
 
             $response = '';
             $this->agent->run($this->getMessages(), function($chunk) use (&$response) {
