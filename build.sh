@@ -55,6 +55,151 @@ class Config {
     public static function sessionsDir(): string { return self::dataDir() . '/sessions'; }
 }
 
+class MCPClient {
+    private ?string $command;
+    private string $type;
+    private string $url;
+    private array $headers;
+
+    public function __construct(array $config) {
+        $this->command = $config['command'] ?? null;
+        $this->type = $config['type'] ?? 'stdio';
+        $this->url = $config['url'] ?? '';
+        $this->headers = $config['headers'] ?? [];
+    }
+
+    public function listTools(): array {
+        if ($this->type === 'sse' && !empty($this->url)) {
+            $ch = curl_init($this->url . '/tools');
+            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10, CURLOPT_HTTPHEADER => array_map(fn($k, $v) => "$k: $v", array_keys($this->headers), $this->headers)]);
+            $resp = curl_exec($ch);
+            curl_close($ch);
+            return json_decode($resp, true) ?? [];
+        }
+        return [];
+    }
+
+    public function callTool(string $name, array $args): string {
+        if ($this->type === 'sse' && !empty($this->url)) {
+            $ch = curl_init($this->url . '/rpc');
+            curl_setopt_array($ch, [
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => json_encode(['method' => 'tools/call', 'params' => ['name' => $name, 'input' => $args]]),
+                CURLOPT_HTTPHEADER => array_merge(['Content-Type: application/json'], array_map(fn($k, $v) => "$k: $v", array_keys($this->headers), $this->headers)),
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 30
+            ]);
+            $resp = curl_exec($ch);
+            curl_close($ch);
+            $data = json_decode($resp, true) ?? [];
+            if (isset($data['content'][0]['text'])) return $data['content'][0]['text'];
+            return $resp;
+        }
+        return "MCP tool call not supported for type: {$this->type}";
+    }
+}
+
+class MCP {
+    private static array $servers = [];
+    private static array $tools = [];
+
+    public static function load(array $config): void {
+        $servers = $config['mcpServers'] ?? [];
+        foreach ($servers as $name => $cfg) {
+            if (($cfg['disabled'] ?? false)) continue;
+            $client = new MCPClient($cfg);
+            self::$servers[$name] = $client;
+            $tools = $client->listTools();
+            foreach ($tools as $tool) {
+                self::$tools[$name . '/' . ($tool['name'] ?? '')] = ['name' => $name, 'tool' => $tool['name'] ?? ''];
+            }
+        }
+    }
+
+    public static function listTools(): array {
+        $result = [];
+        foreach (self::$tools as $key => $info) {
+            $result[] = $key;
+        }
+        return $result;
+    }
+
+    public static function call(string $name, array $args): string {
+        if (!isset(self::$tools[$name])) return "Tool not found: $name";
+        $info = self::$tools[$name];
+        $server = self::$servers[$info['name']] ?? null;
+        if (!$server) return "Server not found: {$info['name']}";
+        return $server->callTool($info['tool'], $args);
+    }
+}
+
+class LSPClient {
+    private string $command;
+    private array $args;
+    private array $caps;
+
+    public function __construct(string $command, array $args = []) {
+        $this->command = $command;
+        $this->args = $args;
+    }
+
+    public function initialize(): void {
+        $this->caps = ['textDocumentSync' => 1];
+    }
+
+    public function diagnostics(string $filePath): array {
+        if (!file_exists($filePath)) return [];
+        $ext = pathinfo($filePath, PATHINFO_EXTENSION);
+        $diags = [];
+
+        if ($ext === 'php') {
+            $output = shell_exec("php -l " . escapeshellarg($filePath) . " 2>&1");
+            if (strpos($output, 'error') !== false || strpos($output, 'Parse error') !== false) {
+                if (preg_match('/Parse error.*on line (\d+)/', $output, $m)) {
+                    $diags[] = ['line' => (int)$m[1], 'col' => 1, 'severity' => 'error', 'message' => trim($output)];
+                }
+            }
+        } elseif (in_array($ext, ['go', 'js', 'ts', 'py', 'rb'])) {
+            $cmd = $ext === 'go' ? 'go vet' : ($ext === 'js' || $ext === 'ts' ? 'npx' : $ext);
+            if ($ext === 'go') {
+                $output = shell_exec("go vet " . escapeshellarg($filePath) . " 2>&1");
+            } elseif ($ext === 'py') {
+                $output = shell_exec("python -m py_compile " . escapeshellarg($filePath) . " 2>&1");
+            } else {
+                $output = shell_exec($cmd . " lint " . escapeshellarg($filePath) . " 2>&1");
+            }
+            if (!empty($output) && strpos($output, 'error') !== false) {
+                preg_match_all('/(\d+):(\d+): (.*)/', $output, $matches, PREG_SET_ORDER);
+                foreach ($matches as $m) {
+                    $diags[] = ['line' => (int)$m[1], 'col' => (int)$m[2], 'severity' => 'error', 'message' => $m[3]];
+                }
+            }
+        }
+
+        return $diags;
+    }
+}
+
+class LSP {
+    private static array $clients = [];
+
+    public static function load(array $config): void {
+        $servers = $config['lsp'] ?? [];
+        foreach ($servers as $name => $cfg) {
+            if (($cfg['disabled'] ?? false) || empty($cfg['command'])) continue;
+            self::$clients[$name] = new LSPClient($cfg['command'], $cfg['args'] ?? []);
+        }
+    }
+
+    public static function diagnostics(string $filePath): array {
+        foreach (self::$clients as $client) {
+            $result = $client->diagnostics($filePath);
+            if (!empty($result)) return $result;
+        }
+        return [];
+    }
+}
+
 class OllamaClient {
     private string $host;
     private int $timeout = 120;
@@ -205,9 +350,28 @@ Tools::register('diagnostics', function($p) {
     $path = $p['file_path'] ?? '';
     if (empty($path)) return "No file specified";
     if (!file_exists($path)) return "File not found: $path";
-    $ext = pathinfo($path, PATHINFO_EXTENSION);
-    if ($ext === 'php') return shell_exec("php -l " . escapeshellarg($path) . " 2>&1") ?: "No syntax errors";
-    return shell_exec("go vet " . escapeshellarg($path) . " 2>&1") ?: "No diagnostics";
+    $diags = LSP::diagnostics($path);
+    if (empty($diags)) return "No diagnostics";
+    $out = '';
+    foreach ($diags as $d) {
+        $out .= "Line {$d['line']}: [{$d['severity']}] {$d['message']}\n";
+    }
+    return $out;
+});
+
+Tools::register('mcp', function($p) {
+    $server = $p['server'] ?? '';
+    $tool = $p['tool'] ?? '';
+    $name = $server . '/' . $tool;
+    if (empty($server) || empty($tool)) return "missing server or tool";
+    $args = array_diff_key($p, ['server' => '', 'tool' => '']);
+    return MCP::call($name, $args);
+});
+
+Tools::register('mcp_servers', function($p) {
+    $servers = MCP::listTools();
+    if (empty($servers)) return "No MCP servers configured";
+    return "Available MCP tools:\n" . implode("\n", array_map(fn($s) => "  - $s", $servers));
 });
 
 Tools::register('patch', function($p) {
@@ -239,7 +403,7 @@ class Agent {
         $this->model = !empty($models) ? $models[0] : 'llama3.2:latest';
         $this->systemPrompt = ['role' => 'system', 'content' => 'You are an expert AI coding assistant with access to tools.
 
-AVAILABLE TOOLS:
+NATIVE TOOLS (use these directly):
 - view <file_path> [offset=0] [limit=100] - Read file with line numbers
 - write <file_path> <content> - Create or overwrite entire file
 - edit <file_path> <old_string> <new_string> - Replace first occurrence of old_string with new_string
@@ -250,6 +414,11 @@ AVAILABLE TOOLS:
 - fetch <url> - Fetch web content from URL
 - patch <file_path> <diff> - Apply unified diff patch
 - agent <prompt> - Run a sub-agent for complex multi-step tasks
+- diagnostics <file_path> - Get lint/syntax errors for a file (php, go, js, ts, py, rb)
+
+MCP TOOLS:
+- mcp_servers - List all available MCP servers and tools
+- mcp server=<name> tool=<toolname> [args] - Call an MCP tool
 
 TOOL CALL FORMAT:
 When you need to use a tool, output it in this format:
@@ -260,15 +429,19 @@ params: param1=value, param2=value
 </tool_call>
 ```
 
-Or for multiple tools:
+Or for MCP tools:
 ```
 <tool_call>
-name: tool_name
-params: param=value
+name: mcp
+params: server=servername, tool=toolname, param=value
 </tool_call>
+```
+
+Or for LSP diagnostics:
+```
 <tool_call>
-name: another_tool
-params: key=value
+name: diagnostics
+params: file_path=/path/to/file.php
 </tool_call>
 ```
 
@@ -283,7 +456,7 @@ AGENTIC BEHAVIOR:
 WORKFLOW:
 1. Understand the task by exploring files
 2. Make the minimal necessary changes
-3. Verify changes work
+3. Verify changes work (use diagnostics, run tests)
 4. Ask for confirmation on destructive actions (rm, git push --force, etc)
 
 DESTRUCTIVE COMMANDS require confirmation:
@@ -365,6 +538,8 @@ class Session {
     public function __construct(array $config, ?string $sessionId = null) {
         $this->config = $config;
         $this->ensureDataDir();
+        MCP::load($config);
+        LSP::load($config);
         $this->agent = new Agent();
         if ($sessionId) { $this->load($sessionId); }
         else { $this->id = 'session_' . time() . '_' . substr(md5(mt_rand()), 0, 8); $this->title = "Session " . date('Y-m-d H:i'); $this->model = $this->getLatestModel(); }
