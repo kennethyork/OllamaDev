@@ -121,6 +121,56 @@ class MCP {
     }
 }
 
+class Permission {
+    private static array $allowed = [];
+    private static array $denied = [];
+    private static bool $promptMode = false;
+
+    public static function setPromptMode(bool $mode): void {
+        self::$promptMode = $mode;
+    }
+
+    public static function allow(string $tool): void {
+        unset(self::$denied[$tool]);
+        self::$allowed[$tool] = true;
+    }
+
+    public static function deny(string $tool): void {
+        unset(self::$allowed[$tool]);
+        self::$denied[$tool] = true;
+    }
+
+    public static function isAllowed(string $tool): bool {
+        if (isset(self::$denied[$tool])) return false;
+        if (isset(self::$allowed[$tool])) return true;
+        if (!self::$promptMode) return true;
+        return false;
+    }
+
+    public static function listAllowed(): array {
+        return array_keys(self::$allowed);
+    }
+
+    public static function listDenied(): array {
+        return array_keys(self::$denied);
+    }
+
+    public static function prompt(string $tool, string $command): bool {
+        if (self::isAllowed($tool)) return true;
+        echo "\n⚠️  Permission required for: $tool\n";
+        echo "   Command: $command\n";
+        echo "   Allow this? (yes/no/permanent): ";
+        $input = trim(fgets(STDIN));
+        if ($input === 'yes' || $input === 'y') {
+            return true;
+        } elseif ($input === 'permanent' || $input === 'p') {
+            self::allow($tool);
+            return true;
+        }
+        return false;
+    }
+}
+
 class LSPClient {
     private string $command;
     private array $args;
@@ -363,6 +413,30 @@ Tools::register('mcp_servers', function($p) {
     return "Available MCP tools:\n" . implode("\n", array_map(fn($s) => "  - $s", $servers));
 });
 
+Tools::register('permission', function($p) {
+    $action = $p['action'] ?? '';
+    $tool = $p['tool'] ?? '';
+    if ($action === 'allow') {
+        Permission::allow($tool);
+        return "Allowed: $tool";
+    } elseif ($action === 'deny') {
+        Permission::deny($tool);
+        return "Denied: $tool";
+    } elseif ($action === 'list') {
+        $allowed = Permission::listAllowed();
+        return empty($allowed) ? "No permissions set" : "Allowed: " . implode(', ', $allowed);
+    }
+    return "Usage: permission action=(allow|deny|list) tool=<name>";
+});
+
+Tools::register('summarize', function($p) {
+    $msgs = $p['messages'] ?? [];
+    $context = $p['context'] ?? '';
+    if (empty($msgs)) return "No messages to summarize";
+    $text = implode("\n", array_map(fn($m) => $m['role'] . ': ' . substr($m['content'], 0, 200), $msgs));
+    return "Summary placeholder - configure MCP summarizer for full functionality";
+});
+
 Tools::register('patch', function($p) {
     $path = $p['file_path'] ?? '';
     $diff = $p['diff'] ?? '';
@@ -435,6 +509,28 @@ TOOLS AVAILABLE:
 
 10. diagnostics <file_path>
     - Shows syntax/lint errors for: php, js, ts, py, rb, java, c, cpp, rs
+
+11. mcp_servers
+    - Lists all configured MCP servers and their tools
+    - Use: mcp_servers -> shows server/tool list
+
+12. mcp server=<name> tool=<toolname> [args]
+    - Calls an MCP server tool
+    - Example: mcp server=filesystem tool=read path=/tmp/file.txt
+
+MCP TOOLS:
+- List available: call mcp_servers tool
+- Call tool: mcp server=<name> tool=<tool> [param=value...]
+
+TOOL PERMISSIONS:
+- READ operations (view, glob, grep, ls, bash with readonly commands): Always allowed
+- WRITE operations (write, edit, bash with modifying commands): Requires confirmation
+- When prompted for permission, respond: PERMIT or DENY
+
+COMPACT/SUMMARIZE:
+- When conversation exceeds ~20 messages, summarize older messages
+- Call: summarize with context of what was discussed
+- Older summarized messages are replaced with a brief summary
     - Returns line numbers and error messages
 
 11. mcp_servers
@@ -833,7 +929,8 @@ class Session {
         echo "║  Current Model: {$this->model}                              ║\n";
         echo "║  {$modelCount} model(s) available                                ║\n";
         echo "╠══════════════════════════════════════════════════════════════╣\n";
-        echo "║  Tools: view, write, edit, glob, grep, ls, bash, fetch       ║\n";
+        echo "║  Tools: view, write, edit, glob, grep, ls, bash, fetch, mcp, permission ║\n";
+        echo "║  Auto-compact: enabled (at 20+ messages)                             ║\n";
         echo "║  Commands: exit, new, mode, verbose, model, clear, help      ║\n";
         echo "╚══════════════════════════════════════════════════════════════╝\n\n";
     }
@@ -935,9 +1032,37 @@ class Session {
                 $this->addMessage('assistant', $response);
             }
 
+            // Auto-compact if too many messages
+            if (count($this->messages) > 20) {
+                $this->compactMessages();
+            }
+
             $this->save();
             $this->renderStatus();
         }
+    }
+
+    private function compactMessages(): void {
+        if (count($this->messages) < 15) return;
+
+        echo "\n📝 Compacting conversation...\n";
+
+        $keepLast = 5;
+        $toSummarize = array_slice($this->messages, 0, -$keepLast);
+
+        $summary = "Previous conversation summary:\n";
+        foreach ($toSummarize as $msg) {
+            $role = strtoupper($msg['role']);
+            $content = substr($msg['content'], 0, 150);
+            $summary .= "- $role: $content...\n";
+        }
+
+        $this->messages = array_merge(
+            [['id' => 'summary_' . time(), 'role' => 'system', 'content' => $summary, 'created_at' => date('c')]],
+            array_slice($this->messages, -$keepLast)
+        );
+
+        echo "   Compacted " . count($toSummarize) . " messages into summary.\n";
     }
 }
 
