@@ -1066,6 +1066,8 @@ CRITICAL: Execute this EXACT format:
 Do NOT explain. Do NOT show example code. Actually call the tool.",
         'smollm' => "You are a compact AI assistant. When asked to list files, you MUST call the ls tool. Execute: <tool_code>{\"name\": \"ls\", \"arguments\": {\"path\": \".\"}}</tool_code>",
 
+        'gpt-oss' => "You are running as a CLI tool with file system access. When user asks to list files, you MUST use the ls tool. Execute this EXACT format: <tool_code>{\"name\": \"ls\", \"arguments\": {\"path\": \".\"}}</tool_code> Do NOT say you cannot access files. Do NOT explain. Call the tool now.",
+
         'default' => 'You are an expert AI coding assistant running locally via Ollama. Local models need EXPLICIT instructions. Do not assume anything. State everything clearly.',
     ];
 
@@ -1079,6 +1081,7 @@ Do NOT explain. Do NOT show example code. Actually call the tool.",
         'wizard' => ['/wizardcoder/i', '/wizard-coder/i', '/wizard/i'],
         'starcoder' => ['/starcoder/i', '/star-coder/i'],
         'smollm' => ['/smollm/i'],
+        'gpt-oss' => ['/gpt-oss/i'],
     ];
 
     public static function detectForModel(string $model): string {
