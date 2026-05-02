@@ -187,6 +187,7 @@ class LSPClient {
     private string $command;
     private array $args;
     private array $caps;
+    private $process;
 
     public function __construct(string $command, array $args = []) {
         $this->command = $command;
@@ -194,7 +195,33 @@ class LSPClient {
     }
 
     public function initialize(): void {
-        $this->caps = ['textDocumentSync' => 1];
+        $this->caps = [
+            'textDocumentSync' => 1,
+            'hoverProvider' => true,
+            'definitionProvider' => true,
+            'referencesProvider' => true,
+            'documentSymbolProvider' => true,
+            'completionProvider' => ['resolveProvider' => false]
+        ];
+    }
+
+    public function sendRequest(string $method, array $params): ?array {
+        if (!$this->process) {
+            $cmd = $this->command . ' ' . implode(' ', $this->args);
+            $descriptors = [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']];
+            $this->process = proc_open($cmd, $descriptors, $pipes);
+        }
+
+        $id = uniqid();
+        $request = json_encode(['jsonrpc' => '2.0', 'id' => $id, 'method' => $method, 'params' => $params]);
+        fwrite($pipes[0], $request . "\n");
+        fflush($pipes[0]);
+
+        $response = fgets($pipes[1]);
+        if ($response) {
+            return json_decode($response, true);
+        }
+        return null;
     }
 
     public function diagnostics(string $filePath): array {
@@ -209,12 +236,39 @@ class LSPClient {
                     $diags[] = ['line' => (int)$m[1], 'col' => 1, 'severity' => 'error', 'message' => trim($output)];
                 }
             }
-        } elseif (in_array($ext, ['js', 'ts', 'py', 'rb', 'java', 'c', 'cpp', 'rs'])) {
-            if ($ext === 'py') {
-                $output = shell_exec("python -m py_compile " . escapeshellarg($filePath) . " 2>&1");
-            } else {
-                $output = shell_exec($ext . " -c " . escapeshellarg($filePath) . " 2>&1");
+        } elseif ($ext === 'js' || $ext === 'ts') {
+            $output = shell_exec("npx tsc --noEmit " . escapeshellarg($filePath) . " 2>&1");
+            if (!empty($output) && strpos($output, 'error') !== false) {
+                preg_match_all('/(\d+):(\d+)\s+error\s+(.*)/', $output, $matches, PREG_SET_ORDER);
+                foreach ($matches as $m) {
+                    $diags[] = ['line' => (int)$m[1], 'col' => (int)$m[2], 'severity' => 'error', 'message' => $m[3]];
+                }
             }
+        } elseif ($ext === 'py') {
+            $output = shell_exec("python -m py_compile " . escapeshellarg($filePath) . " 2>&1");
+            if (!empty($output)) {
+                if (preg_match('/line (\d+)/', $output, $m)) {
+                    $diags[] = ['line' => (int)$m[1], 'col' => 1, 'severity' => 'error', 'message' => trim($output)];
+                }
+            }
+        } elseif (in_array($ext, ['go'])) {
+            $output = shell_exec("cd " . escapeshellarg(dirname($filePath)) . " && go vet ./... 2>&1");
+            if (!empty($output) && strpos($output, 'error') !== false) {
+                preg_match_all('/(\w+\.go):(\d+):(\d+): (.*)/', $output, $matches, PREG_SET_ORDER);
+                foreach ($matches as $m) {
+                    $diags[] = ['line' => (int)$m[2], 'col' => (int)$m[3], 'severity' => 'error', 'message' => $m[4]];
+                }
+            }
+        } elseif (in_array($ext, ['c', 'cpp'])) {
+            $output = shell_exec("gcc -fsyntax-only " . escapeshellarg($filePath) . " 2>&1");
+            if (!empty($output)) {
+                preg_match_all('/(\d+):(\d+): (.*)/', $output, $matches, PREG_SET_ORDER);
+                foreach ($matches as $m) {
+                    $diags[] = ['line' => (int)$m[1], 'col' => (int)$m[2], 'severity' => 'error', 'message' => $m[3]];
+                }
+            }
+        } elseif ($ext === 'rs') {
+            $output = shell_exec("rustc --crate-type lib " . escapeshellarg($filePath) . " 2>&1");
             if (!empty($output) && strpos($output, 'error') !== false) {
                 preg_match_all('/(\d+):(\d+): (.*)/', $output, $matches, PREG_SET_ORDER);
                 foreach ($matches as $m) {
@@ -224,6 +278,99 @@ class LSPClient {
         }
 
         return $diags;
+    }
+
+    public function hover(string $filePath, int $line, int $col): ?string {
+        $content = file_get_contents($filePath);
+        $lines = explode("\n", $content);
+        if ($line < 1 || $line > count($lines)) return null;
+
+        $currentLine = $lines[$line - 1];
+        preg_match_all('/\b([a-zA-Z_][a-zA-Z0-9_]*)\b/', $currentLine, $matches, PREG_OFFSET_CAPTURE);
+
+        $word = null;
+        foreach ($matches[0] as $match) {
+            if ($col >= $match[1] && $col <= $match[1] + strlen($match[0])) {
+                $word = $match[0];
+                break;
+            }
+        }
+
+        if (!$word) return null;
+
+        $ext = pathinfo($filePath, PATHINFO_EXTENSION);
+        if ($ext === 'php') {
+            $output = shell_exec("grep -n 'function $word\\|class $word\\|const $word' " . escapeshellarg($filePath) . " 2>/dev/null | head -5");
+        } elseif ($ext === 'py') {
+            $output = shell_exec("grep -n 'def $word\\|class $word\\|import $word' " . escapeshellarg($filePath) . " 2>/dev/null | head -5");
+        } else {
+            $output = shell_exec("grep -rn '$word' " . escapeshellarg($filePath) . " 2>/dev/null | head -5");
+        }
+
+        return $output ?: null;
+    }
+
+    public function gotoDefinition(string $filePath, int $line, int $col): ?array {
+        $content = file_get_contents($filePath);
+        $lines = explode("\n", $content);
+        if ($line < 1 || $line > count($lines)) return null;
+
+        $currentLine = $lines[$line - 1];
+        preg_match_all('/\b([a-zA-Z_][a-zA-Z0-9_]*)\b/', $currentLine, $matches, PREG_OFFSET_CAPTURE);
+
+        $word = null;
+        foreach ($matches[0] as $match) {
+            if ($col >= $match[1] && $col <= $match[1] + strlen($match[0])) {
+                $word = $match[0];
+                break;
+            }
+        }
+
+        if (!$word) return null;
+
+        $dir = dirname($filePath);
+        $output = shell_exec("grep -rn 'function $word\\|class $word\\|def $word\\|interface $word' " . escapeshellarg($dir) . " 2>/dev/null | head -1");
+
+        if ($output && preg_match('/^(.*):(\d+):/', $output, $m)) {
+            return ['file' => $m[1], 'line' => (int)$m[2]];
+        }
+
+        return null;
+    }
+
+    public function documentSymbols(string $filePath): array {
+        $symbols = [];
+        $content = file_get_contents($filePath);
+        $ext = pathinfo($filePath, PATHINFO_EXTENSION);
+
+        if ($ext === 'php') {
+            preg_match_all('/function\s+([a-zA-Z_][a-zA-Z0-9_]*)/', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $symbols[] = ['name' => $m[1], 'kind' => 'function', 'line' => substr_count(substr($content, 0, strpos($content, $m[0])), "\n") + 1];
+            }
+            preg_match_all('/class\s+([a-zA-Z_][a-zA-Z0-9_]*)/', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $symbols[] = ['name' => $m[1], 'kind' => 'class', 'line' => substr_count(substr($content, 0, strpos($content, $m[0])), "\n") + 1];
+            }
+        } elseif ($ext === 'py') {
+            preg_match_all('/def\s+([a-zA-Z_][a-zA-Z0-9_]*)/', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $symbols[] = ['name' => $m[1], 'kind' => 'function', 'line' => substr_count(substr($content, 0, strpos($content, $m[0])), "\n") + 1];
+            }
+            preg_match_all('/class\s+([a-zA-Z_][a-zA-Z0-9_]*)/', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $symbols[] = ['name' => $m[1], 'kind' => 'class', 'line' => substr_count(substr($content, 0, strpos($content, $m[0])), "\n") + 1];
+            }
+        }
+
+        return $symbols;
+    }
+
+    public function close(): void {
+        if ($this->process) {
+            proc_close($this->process);
+            $this->process = null;
+        }
     }
 }
 
@@ -241,6 +388,30 @@ class LSP {
     public static function diagnostics(string $filePath): array {
         foreach (self::$clients as $client) {
             $result = $client->diagnostics($filePath);
+            if (!empty($result)) return $result;
+        }
+        return [];
+    }
+
+    public static function hover(string $filePath, int $line, int $col): ?string {
+        foreach (self::$clients as $client) {
+            $result = $client->hover($filePath, $line, $col);
+            if ($result) return $result;
+        }
+        return null;
+    }
+
+    public static function gotoDefinition(string $filePath, int $line, int $col): ?array {
+        foreach (self::$clients as $client) {
+            $result = $client->gotoDefinition($filePath, $line, $col);
+            if ($result) return $result;
+        }
+        return null;
+    }
+
+    public static function documentSymbols(string $filePath): array {
+        foreach (self::$clients as $client) {
+            $result = $client->documentSymbols($filePath);
             if (!empty($result)) return $result;
         }
         return [];
@@ -549,6 +720,89 @@ Tools::register('diagnostics', function($p) {
     return $out;
 });
 
+Tools::register('hover', function($p) {
+    $path = $p['file_path'] ?? '';
+    $line = isset($p['line']) ? (int)$p['line'] : 1;
+    $col = isset($p['col']) ? (int)$p['col'] : 1;
+    if (empty($path)) return "No file specified";
+    if (!file_exists($path)) return "File not found: $path";
+    return LSP::hover($path, $line, $col) ?? "No hover info at position";
+});
+
+Tools::register('goto', function($p) {
+    $path = $p['file_path'] ?? '';
+    $line = isset($p['line']) ? (int)$p['line'] : 1;
+    $col = isset($p['col']) ? (int)$p['col'] : 1;
+    if (empty($path)) return "No file specified";
+    if (!file_exists($path)) return "File not found: $path";
+    $result = LSP::gotoDefinition($path, $line, $col);
+    if ($result) {
+        return "Found at: {$result['file']}:{$result['line']}";
+    }
+    return "No definition found";
+});
+
+Tools::register('symbols', function($p) {
+    $path = $p['file_path'] ?? '';
+    if (empty($path)) return "No file specified";
+    if (!file_exists($path)) return "File not found: $path";
+    $symbols = LSP::documentSymbols($path);
+    if (empty($symbols)) return "No symbols found";
+    $out = '';
+    foreach ($symbols as $s) {
+        $out .= "[{$s['kind']}] {$s['name']} (line {$s['line']})\n";
+    }
+    return $out;
+});
+
+Tools::register('find_refs', function($p) {
+    $path = $p['file_path'] ?? '';
+    $pattern = $p['pattern'] ?? '';
+    if (empty($path)) return "No file specified";
+    if (!file_exists($path)) return "File not found: $path";
+    if (empty($pattern)) return "No pattern specified";
+    return shell_exec("grep -rn --color=never " . escapeshellarg($pattern) . " " . escapeshellarg(dirname($path)) . " 2>/dev/null | head -20") ?: "No references found";
+});
+
+Tools::register('format', function($p) {
+    $path = $p['file_path'] ?? '';
+    if (empty($path)) return "No file specified";
+    if (!file_exists($path)) return "File not found: $path";
+    $ext = pathinfo($path, PATHINFO_EXTENSION);
+    $formatted = false;
+
+    if ($ext === 'php') {
+        $output = shell_exec("php -l " . escapeshellarg($path) . " 2>&1");
+        if (strpos($output, 'No syntax errors') !== false) {
+            return "PHP syntax OK - use phpcbf for auto-formatting";
+        }
+        return $output;
+    } elseif ($ext === 'js' || $ext === 'ts') {
+        $output = shell_exec("npx prettier --check " . escapeshellarg($path) . " 2>&1");
+        return $output ?: "Formatted";
+    } elseif ($ext === 'py') {
+        $output = shell_exec("python -m black --check " . escapeshellarg($path) . " 2>&1");
+        return $output ?: "Formatted";
+    }
+    return "No formatter available for $ext";
+});
+
+Tools::register('lsp', function($p) {
+    $action = $p['action'] ?? '';
+    $path = $p['file_path'] ?? '';
+    $line = isset($p['line']) ? (int)$p['line'] : 1;
+    $col = isset($p['col']) ? (int)$p['col'] : 1;
+
+    return match($action) {
+        'diag' => Tools::run('diagnostics', $p),
+        'hover' => Tools::run('hover', $p),
+        'goto' => Tools::run('goto', $p),
+        'symbols' => Tools::run('symbols', $p),
+        'refs' => Tools::run('find_refs', $p),
+        default => "Usage: lsp action=(diag|hover|goto|symbols|refs) file_path=<path> [line=<n>] [col=<n>]"
+    };
+});
+
 Tools::register('mcp', function($p) {
     $server = $p['server'] ?? '';
     $tool = $p['tool'] ?? '';
@@ -603,7 +857,157 @@ Tools::register('patch', function($p) {
 Tools::register('agent', function($p) {
     $prompt = $p['prompt'] ?? '';
     if (empty($prompt)) return "missing prompt";
-    return "Sub-agent requested: $prompt\n(Sub-agents run a nested Ollama session with the same tools)";
+    $context = $p['context'] ?? '';
+    $session = new Session(Config::load());
+    $session->setAgentContext($context);
+    ob_start();
+    $session->startAgentLoop($prompt);
+    $output = ob_get_clean();
+    return $output ?: "Agent completed";
+});
+
+Tools::register('git_status', function($p) {
+    $path = $p['path'] ?? '.';
+    return shell_exec("cd " . escapeshellarg($path) . " && git status --short 2>&1") ?: "Not a git repo";
+});
+
+Tools::register('git_diff', function($p) {
+    $path = $p['path'] ?? '.';
+    $file = $p['file'] ?? '';
+    $cached = $p['cached'] ?? false;
+    $cmd = "cd " . escapeshellarg($path) . " && git diff";
+    if ($cached) $cmd .= " --cached";
+    if (!empty($file)) $cmd .= " -- " . escapeshellarg($file);
+    return shell_exec($cmd . " 2>&1") ?: "No changes";
+});
+
+Tools::register('git_log', function($p) {
+    $path = $p['path'] ?? '.';
+    $n = $p['n'] ?? 10;
+    return shell_exec("cd " . escapeshellarg($path) . " && git log --oneline -n $n 2>&1") ?: "Not a git repo";
+});
+
+Tools::register('git_branch', function($p) {
+    $path = $p['path'] ?? '.';
+    $all = $p['all'] ?? false;
+    $cmd = "cd " . escapeshellarg($path) . " && git branch";
+    if ($all) $cmd .= " -a";
+    return shell_exec($cmd . " 2>&1") ?: "Not a git repo";
+});
+
+Tools::register('git_checkout', function($p) {
+    $path = $p['path'] ?? '.';
+    $branch = $p['branch'] ?? '';
+    $new = $p['new'] ?? false;
+    if (empty($branch)) return "missing branch";
+    $cmd = "cd " . escapeshellarg($path) . " && git checkout";
+    if ($new) $cmd .= " -b";
+    $cmd .= " " . escapeshellarg($branch);
+    return shell_exec($cmd . " 2>&1") ?: "Checkout failed";
+});
+
+Tools::register('git_commit', function($p) {
+    $path = $p['path'] ?? '.';
+    $msg = $p['message'] ?? $p['m'] ?? '';
+    $all = $p['all'] ?? false;
+    $amend = $p['amend'] ?? false;
+    if (empty($msg)) return "missing commit message";
+    $cmd = "cd " . escapeshellarg($path) . " && git commit";
+    if ($all) $cmd .= " -a";
+    if ($amend) $cmd .= " --amend";
+    $cmd .= " -m " . escapeshellarg($msg);
+    return shell_exec($cmd . " 2>&1") ?: "Commit failed";
+});
+
+Tools::register('git_add', function($p) {
+    $path = $p['path'] ?? '.';
+    $files = $p['files'] ?? '.';
+    $all = $p['all'] ?? false;
+    if ($all) {
+        return shell_exec("cd " . escapeshellarg($path) . " && git add -A 2>&1") ?: "Added all";
+    }
+    return shell_exec("cd " . escapeshellarg($path) . " && git add " . escapeshellarg($files) . " 2>&1") ?: "Added $files";
+});
+
+Tools::register('git_merge', function($p) {
+    $path = $p['path'] ?? '.';
+    $branch = $p['branch'] ?? '';
+    if (empty($branch)) return "missing branch";
+    return shell_exec("cd " . escapeshellarg($path) . " && git merge " . escapeshellarg($branch) . " 2>&1") ?: "Merge failed";
+});
+
+Tools::register('git_rebase', function($p) {
+    $path = $p['path'] ?? '.';
+    $branch = $p['branch'] ?? '';
+    $onto = $p['onto'] ?? '';
+    if (empty($branch)) return "missing branch";
+    $cmd = "cd " . escapeshellarg($path) . " && git rebase";
+    if (!empty($onto)) $cmd .= " --onto " . escapeshellarg($onto);
+    $cmd .= " " . escapeshellarg($branch);
+    return shell_exec($cmd . " 2>&1") ?: "Rebase failed";
+});
+
+Tools::register('git_stash', function($p) {
+    $path = $p['path'] ?? '.';
+    $pop = $p['pop'] ?? false;
+    $list = $p['list'] ?? false;
+    $drop = $p['drop'] ?? false;
+    $cmd = "cd " . escapeshellarg($path) . " && git stash";
+    if ($list) return shell_exec($cmd . " list 2>&1") ?: "No stashes";
+    if ($pop) return shell_exec($cmd . " pop 2>&1") ?: "Stash pop failed";
+    if ($drop) return shell_exec($cmd . " drop 2>&1") ?: "Stash dropped";
+    return shell_exec($cmd . " 2>&1") ?: "Stashed";
+});
+
+Tools::register('git_push', function($p) {
+    $path = $p['path'] ?? '.';
+    $force = $p['force'] ?? false;
+    $upstream = $p['upstream'] ?? false;
+    $cmd = "cd " . escapeshellarg($path) . " && git push";
+    if ($force) $cmd .= " --force";
+    if ($upstream) $cmd .= " -u";
+    return shell_exec($cmd . " 2>&1") ?: "Push failed";
+});
+
+Tools::register('git_pull', function($p) {
+    $path = $p['path'] ?? '.';
+    $rebase = $p['rebase'] ?? false;
+    $cmd = "cd " . escapeshellarg($path) . " && git pull";
+    if ($rebase) $cmd .= " --rebase";
+    return shell_exec($cmd . " 2>&1") ?: "Pull failed";
+});
+
+Tools::register('git_clone', function($p) {
+    $url = $p['url'] ?? '';
+    $path = $p['path'] ?? '.';
+    if (empty($url)) return "missing url";
+    return shell_exec("git clone " . escapeshellarg($url) . " " . escapeshellarg($path) . " 2>&1") ?: "Clone failed";
+});
+
+Tools::register('git_remote', function($p) {
+    $path = $p['path'] ?? '.';
+    $cmd = "cd " . escapeshellarg($path) . " && git remote -v 2>&1";
+    return shell_exec($cmd) ?: "Not a git repo";
+});
+
+Tools::register('git_fetch', function($p) {
+    $path = $p['path'] ?? '.';
+    $all = $p['all'] ?? false;
+    $prune = $p['prune'] ?? false;
+    $cmd = "cd " . escapeshellarg($path) . " && git fetch";
+    if ($all) $cmd .= " --all";
+    if ($prune) $cmd .= " --prune";
+    return shell_exec($cmd . " 2>&1") ?: "Fetch failed";
+});
+
+Tools::register('git_show', function($p) {
+    $path = $p['path'] ?? '.';
+    $ref = $p['ref'] ?? 'HEAD';
+    $stat = $p['stat'] ?? false;
+    $cmd = "cd " . escapeshellarg($path) . " && git show";
+    if ($stat) $cmd .= " --stat";
+    $cmd .= " " . escapeshellarg($ref);
+    return shell_exec($cmd . " 2>&1") ?: "Show failed";
 });
 
 class Agent {
