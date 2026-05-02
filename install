@@ -2,7 +2,7 @@
 
 set -e
 
-REPO="kennethyork/Ollam-Cli"
+REPO="kennethyork/OllamaDev"
 INSTALL_DIR="${HOME}/.local/bin"
 BINARY_NAME="ollamadev"
 

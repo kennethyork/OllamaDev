@@ -30,4 +30,4 @@ builds:
 release:
   github:
     owner: kennethyork
-    name: Ollam-Cli
+    name: OllamaDev
