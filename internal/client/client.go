@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"ollamadev/config"
+	"ollamadev/internal/config"
 )
 
 type OllamaClient struct {

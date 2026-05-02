@@ -3,9 +3,6 @@ package tui
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/exec"
-	"strconv"
 	"strings"
 	"time"
 
@@ -14,12 +11,11 @@ import (
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"ollamadev/internal/agent"
+	"ollamadev/internal/llm/agent"
 	"ollamadev/internal/config"
 	"ollamadev/internal/db"
 	"ollamadev/internal/models"
 	"ollamadev/internal/permission"
-	"ollamadev/internal/tui/render"
 )
 
 type page int
@@ -29,14 +25,29 @@ const (
 	pageLogs
 )
 
+var (
+	primary   = lipgloss.Color("#007ACC")
+	success   = lipgloss.Color("#28A745")
+	warning   = lipgloss.Color("#FFC107")
+	errorCol  = lipgloss.Color("#DC3545")
+	bgDark    = lipgloss.Color("#1E1E1E")
+	bgSurface = lipgloss.Color("#252526")
+	bgSelect  = lipgloss.Color("#094771")
+	textDim   = lipgloss.Color("#808080")
+	textBright = lipgloss.Color("#FFFFFF")
+	roleUser  = lipgloss.Color("#4FC1FF")
+	roleAsst  = lipgloss.Color("#4EC9B0")
+	roleTool  = lipgloss.Color("#DCDCAA")
+)
+
 type model struct {
 	cfg        *config.Config
 	db         *db.DB
 	agent      *agent.Agent
 	permServ   *permission.Service
 
-	messages   []MessageItem
-	sessions   []SessionItem
+	messages   []messageItem
+	sessions   []sessionItem
 	sessionIdx int
 
 	input    textarea.Model
@@ -70,6 +81,23 @@ type model struct {
 	pendingToolResult string
 }
 
+type messageItem struct {
+	ID        string
+	Role      string
+	Content   string
+	ToolName  string
+	ToolResult string
+	Timestamp int64
+	Streaming bool
+}
+
+type sessionItem struct {
+	ID    string
+	Title string
+	Model string
+	Time  string
+}
+
 func New(cfg *config.Config) (*model, error) {
 	database, err := db.New(cfg.DbPath())
 	if err != nil {
@@ -80,24 +108,24 @@ func New(cfg *config.Config) (*model, error) {
 	agt := agent.New(cfg, database, permServ)
 
 	sessions, _ := database.ListSessions()
-	sessionItems := make([]SessionItem, len(sessions))
+	sessionItems := make([]sessionItem, len(sessions))
 	for i, s := range sessions {
-		sessionItems[i] = SessionItem{
+		sessionItems[i] = sessionItem{
 			ID:    s.ID,
 			Title: s.Title,
 			Model: s.Model,
-			Time:  formatTime(s.UpdatedAt),
+			Time:  fmt.Sprintf("%d", s.UpdatedAt),
 		}
 	}
 
 	input := textarea.New()
-	input.Placeholder = "Type a message... (Ctrl+E to open editor)"
+	input.Placeholder = "Type a message..."
 	input.Focus()
 	input.SetWidth(80)
 	input.SetHeight(3)
 
 	vp := viewport.New(80, 20)
-	vp.SetContent("Welcome to OllamaDev!\n\nPress Ctrl+K for help, Ctrl+O to select a model.\n\nStart typing to chat...")
+	vp.SetContent("Welcome to OllamaDev! Press Ctrl+K for help.")
 
 	m := &model{
 		cfg:              cfg,
@@ -114,10 +142,10 @@ func New(cfg *config.Config) (*model, error) {
 		m.sessionIdx = 0
 	}
 
-	models, _ := agt.ListModels()
-	m.models = make([]string, len(models)+1)
+	modellist, _ := agt.ListModels()
+	m.models = make([]string, len(modellist)+1)
 	m.models[0] = cfg.Ollama.DefaultModel
-	for i, mod := range models {
+	for i, mod := range modellist {
 		m.models[i+1] = mod.Name
 	}
 
@@ -130,10 +158,6 @@ func currentSession() string {
 	return fmt.Sprintf("session_%d", time.Now().UnixMilli())
 }
 
-func formatTime(t time.Time) string {
-	return t.Format("Jan 2 15:04")
-}
-
 func (m *model) loadMessages() {
 	if m.sessionIdx >= len(m.sessions) {
 		return
@@ -141,7 +165,7 @@ func (m *model) loadMessages() {
 	sessionID := m.sessions[m.sessionIdx].ID
 	msgs, _ := m.db.GetMessages(sessionID)
 	for _, msg := range msgs {
-		m.messages = append(m.messages, MessageItem{
+		m.messages = append(m.messages, messageItem{
 			ID:      msg.ID,
 			Role:    msg.Role,
 			Content: msg.Content,
@@ -241,9 +265,6 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.streaming = false
 		return m, nil
 
-	case tea.KeyCtrlE:
-		return m, m.openExternalEditor()
-
 	case tea.KeyEscape:
 		m.showingHelp = false
 		m.showingModel = false
@@ -253,9 +274,6 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyEnter:
-		if m.showingPermission {
-			return m, m.handlePermission("a")
-		}
 		if m.showingModel {
 			return m, m.selectModel()
 		}
@@ -293,21 +311,6 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *model) handlePermission(response string) tea.Cmd {
-	switch response {
-	case "a":
-		m.permServ.Approve("current")
-		m.showingPermission = false
-	case "d":
-		m.permServ.Deny("current")
-		m.showingPermission = false
-	case "A":
-		m.permServ.AllowTool(m.permTool, m.permCommand)
-		m.showingPermission = false
-	}
-	return nil
-}
-
 func (m *model) selectModel() tea.Cmd {
 	if m.modelIdx >= 0 && m.modelIdx < len(m.models) {
 		m.agent.SetModel(m.models[m.modelIdx])
@@ -330,11 +333,11 @@ func (m *model) createSession() {
 	id := currentSession()
 	title := fmt.Sprintf("Session %d", len(m.sessions)+1)
 	m.db.CreateSession(id, title, m.agent.GetModel())
-	m.sessions = append(m.sessions, SessionItem{
+	m.sessions = append(m.sessions, sessionItem{
 		ID:    id,
 		Title: title,
 		Model: m.agent.GetModel(),
-		Time:  "just now",
+		Time:  "now",
 	})
 	m.sessionIdx = len(m.sessions) - 1
 	m.messages = nil
@@ -345,7 +348,7 @@ func (m *model) sendMessage() tea.Cmd {
 	content := m.input.Value()
 	m.input.Reset()
 
-	msg := MessageItem{
+	msg := messageItem{
 		ID:        fmt.Sprintf("msg_%d", time.Now().UnixMilli()),
 		Role:      "user",
 		Content:   content,
@@ -381,7 +384,7 @@ func (m *model) sendMessage() tea.Cmd {
 			return fmt.Errorf("agent error: %v", err)
 		}
 
-		asstMsg := MessageItem{
+		asstMsg := messageItem{
 			ID:        fmt.Sprintf("msg_%d", time.Now().UnixMilli()),
 			Role:      "assistant",
 			Content:   m.response,
@@ -397,45 +400,24 @@ func (m *model) sendMessage() tea.Cmd {
 	}
 }
 
-func (m *model) openExternalEditor() tea.Cmd {
-	return func() tea.Msg {
-		tmpfile, err := os.CreateTemp("", "ollamadev-*.txt")
-		if err != nil {
-			return err
-		}
-		tmpfile.WriteString(m.input.Value())
-		tmpfile.Close()
-
-		editor := os.Getenv("EDITOR")
-		if editor == "" {
-			editor = "vim"
-		}
-
-		cmd := exec.Command("bash", "-c", fmt.Sprintf("%s %s", editor, tmpfile.Name()))
-		cmd.Run()
-
-		data, _ := os.ReadFile(tmpfile.Name())
-		content := string(data)
-
-		os.Remove(tmpfile.Name())
-
-		return content
-	}
-}
-
 func (m *model) updateViewport() {
 	var b strings.Builder
 
 	for _, msg := range m.messages {
-		b.WriteString(render.RenderMessage(msg))
+		roleColor := roleAsst
+		if msg.Role == "user" {
+			roleColor = roleUser
+		} else if msg.Role == "tool" {
+			roleColor = roleTool
+		}
+		b.WriteString(lipgloss.NewStyle().Foreground(roleColor).Bold(true).Render(msg.Role) + "\n")
+		b.WriteString(msg.Content)
 		b.WriteString("\n\n")
 	}
 
 	if m.streaming && m.response != "" {
-		b.WriteString(render.MessageItem{
-			Role:    "assistant",
-			Content: m.response + "▌",
-		}.RenderMessage())
+		b.WriteString(lipgloss.NewStyle().Foreground(roleAsst).Render("assistant") + "\n")
+		b.WriteString(m.response + "▌")
 	}
 
 	m.viewport.SetContent(b.String())
@@ -445,49 +427,82 @@ func (m *model) updateViewport() {
 func (m *model) View() string {
 	var s strings.Builder
 
-	switch m.page {
-	case pageChat:
-		s.WriteString(m.viewport.View())
-		s.WriteString("\n")
-		s.WriteString(m.input.View())
-		s.WriteString("\n")
+	s.WriteString(m.viewport.View())
+	s.WriteString("\n")
+	s.WriteString(m.input.View())
+	s.WriteString("\n")
 
-		if m.showingHelp {
-			s.WriteString("\n")
-			s.WriteString(render.RenderHelpDialog())
-		}
-
-		if m.showingModel {
-			s.WriteString("\n")
-			s.WriteString(render.RenderModelSelect(m.models, m.modelIdx))
-		}
-
-		if m.showingSession {
-			s.WriteString("\n")
-			s.WriteString(render.RenderSessionList(m.sessions, m.sessionDialogIdx))
-		}
-
-		if m.showingPermission {
-			s.WriteString("\n")
-			s.WriteString(render.RenderPermissionDialog(m.permTool, m.permCommand))
-		}
-
-		tokenCount := agent.CountTokens(toMsg(m.messages))
-		s.WriteString(render.RenderStatusBar(m.agent.GetModel(), tokenCount, len(m.messages)))
-
-	case pageLogs:
-		s.WriteString(render.RenderLogs(strings.Join(m.logLines, "\n")))
-		s.WriteString("\n\n")
-		s.WriteString(render.RenderStatusBar(m.agent.GetModel(), 0, 0))
+	if m.showingHelp {
+		s.WriteString("\n" + renderHelp())
 	}
+
+	if m.showingModel && len(m.models) > 0 {
+		s.WriteString("\n" + m.renderModelSelect())
+	}
+
+	if m.showingSession && len(m.sessions) > 0 {
+		s.WriteString("\n" + m.renderSessionList())
+	}
+
+	tokenCount := agent.CountTokens(toMsg(m.messages))
+	s.WriteString(statusBar(m.agent.GetModel(), tokenCount, len(m.messages)))
 
 	return s.String()
 }
 
-func toMsg(items []MessageItem) []models.Message {
+func toMsg(items []messageItem) []models.Message {
 	msgs := make([]models.Message, len(items))
 	for i, item := range items {
 		msgs[i] = models.Message{Role: item.Role, Content: item.Content}
 	}
 	return msgs
+}
+
+func renderHelp() string {
+	help := lipgloss.NewStyle().Background(bgSurface).Width(50)
+	keys := []string{
+		"Ctrl+C: Quit",
+		"Ctrl+K: Help",
+		"Ctrl+O: Select model",
+		"Ctrl+A: Switch session",
+		"Ctrl+L: Logs",
+		"Ctrl+N: New session",
+		"Ctrl+X: Cancel",
+		"Esc: Close",
+	}
+	return help.Render(strings.Join(keys, "\n"))
+}
+
+func (m *model) renderModelSelect() string {
+	var b strings.Builder
+	b.WriteString("Models:\n")
+	for i, mod := range m.models {
+		prefix := "  "
+		if i == m.modelIdx {
+			prefix = "> "
+		}
+		b.WriteString(prefix + mod + "\n")
+	}
+	return lipgloss.NewStyle().Background(bgSurface).Render(b.String())
+}
+
+func (m *model) renderSessionList() string {
+	var b strings.Builder
+	b.WriteString("Sessions:\n")
+	for i, s := range m.sessions {
+		prefix := "  "
+		if i == m.sessionDialogIdx {
+			prefix = "> "
+		}
+		b.WriteString(prefix + s.Title + "\n")
+	}
+	return lipgloss.NewStyle().Background(bgSurface).Render(b.String())
+}
+
+func statusBar(model string, tokens, msgs int) string {
+	return lipgloss.NewStyle().
+		Background(bgSurface).
+		Foreground(textDim).
+		Width(80).
+		Render(fmt.Sprintf("  Model: %s | Tokens: %d | Msgs: %d | Ctrl+K: Help", model, tokens, msgs))
 }
