@@ -324,6 +324,40 @@ Tools::register('view', function($p) {
     return $out;
 });
 
+// Aliases for common tools
+Tools::register('read', function($p) {
+    $p['file_path'] = $p['file_path'] ?? $p['path'] ?? '';
+    return Tools::run('view', $p);
+});
+
+Tools::register('cat', function($p) {
+    $p['file_path'] = $p['file_path'] ?? $p['path'] ?? '';
+    return Tools::run('view', $p);
+});
+
+Tools::register('head', function($p) {
+    $path = $p['file_path'] ?? $p['path'] ?? '';
+    if (empty($path)) return "missing file_path";
+    $lines = file($path);
+    if ($lines === false) return "Error reading file: $path";
+    $n = $p['n'] ?? 10;
+    $out = '';
+    for ($i = 0; $i < min($n, count($lines)); $i++) $out .= $lines[$i];
+    return $out;
+});
+
+Tools::register('tail', function($p) {
+    $path = $p['file_path'] ?? $p['path'] ?? '';
+    if (empty($path)) return "missing file_path";
+    $lines = file($path);
+    if ($lines === false) return "Error reading file: $path";
+    $n = $p['n'] ?? 10;
+    $start = max(0, count($lines) - $n);
+    $out = '';
+    for ($i = $start; $i < count($lines); $i++) $out .= $lines[$i];
+    return $out;
+});
+
 Tools::register('write', function($p) {
     $path = $p['file_path'] ?? ''; $content = $p['content'] ?? '';
     if (empty($path)) return "missing file_path";
@@ -367,6 +401,111 @@ Tools::register('ls', function($p) {
     $path = $p['path'] ?? '.';
     if (!is_dir($path)) return "Not a directory: $path";
     return shell_exec("ls -la " . escapeshellarg($path) . " 2>&1") ?: "Empty directory";
+});
+
+Tools::register('pwd', function($p) {
+    return getcwd();
+});
+
+Tools::register('cd', function($p) {
+    $path = $p['path'] ?? $p['dir'] ?? '';
+    if (empty($path)) return "missing path";
+    if (!is_dir($path)) return "Not a directory: $path";
+    if (!chdir($path)) return "Failed to change directory: $path";
+    return "Changed to: " . getcwd();
+});
+
+Tools::register('find', function($p) {
+    $path = $p['path'] ?? '.';
+    $name = $p['name'] ?? '*';
+    $type = $p['type'] ?? '';
+    $cmd = "find " . escapeshellarg($path);
+    if ($type === 'd') $cmd .= " -type d";
+    elseif ($type === 'f') $cmd .= " -type f";
+    $cmd .= " -name " . escapeshellarg($name) . " 2>/dev/null";
+    return shell_exec($cmd) ?: "No matches found";
+});
+
+Tools::register('tree', function($p) {
+    $path = $p['path'] ?? '.';
+    $depth = $p['depth'] ?? 2;
+    return shell_exec("tree -L $depth -a " . escapeshellarg($path) . " 2>/dev/null") ?: shell_exec("find " . escapeshellarg($path) . " -maxdepth $depth -not -path '*/.*' | sort | sed 's|[^/]*/|  |g'");
+});
+
+Tools::register('stat', function($p) {
+    $path = $p['file_path'] ?? $p['path'] ?? '';
+    if (empty($path)) return "missing path";
+    if (!file_exists($path)) return "Not found: $path";
+    return shell_exec("stat " . escapeshellarg($path) . " 2>&1") ?: "stat failed";
+});
+
+Tools::register('diff', function($p) {
+    $file1 = $p['file1'] ?? $p['file_path'] ?? '';
+    $file2 = $p['file2'] ?? '';
+    if (empty($file1) || empty($file2)) return "missing file1 or file2";
+    return shell_exec("diff " . escapeshellarg($file1) . " " . escapeshellarg($file2) . " 2>&1") ?: "No differences";
+});
+
+Tools::register('wc', function($p) {
+    $path = $p['file_path'] ?? $p['path'] ?? '';
+    if (empty($path)) return "missing file_path";
+    return shell_exec("wc -l " . escapeshellarg($path) . " 2>&1") ?: "wc failed";
+});
+
+Tools::register('sort', function($p) {
+    $path = $p['file_path'] ?? $p['path'] ?? '';
+    if (empty($path)) return "missing file_path";
+    return shell_exec("sort " . escapeshellarg($path) . " 2>&1") ?: "sort failed";
+});
+
+Tools::register('uniq', function($p) {
+    $path = $p['file_path'] ?? $p['path'] ?? '';
+    if (empty($path)) return "missing file_path";
+    return shell_exec("uniq " . escapeshellarg($path) . " 2>&1") ?: "uniq failed";
+});
+
+Tools::register('mkdir', function($p) {
+    $path = $p['path'] ?? $p['dir'] ?? '';
+    $parents = $p['parents'] ?? false;
+    if (empty($path)) return "missing path";
+    $cmd = $parents ? "mkdir -p" : "mkdir";
+    return shell_exec("$cmd " . escapeshellarg($path) . " 2>&1") ?: "Created $path";
+});
+
+Tools::register('touch', function($p) {
+    $path = $p['path'] ?? $p['file_path'] ?? '';
+    if (empty($path)) return "missing path";
+    if (file_exists($path)) {
+        touch($path);
+        return "Updated timestamp: $path";
+    }
+    if (touch($path)) return "Created: $path";
+    return "Failed to create: $path";
+});
+
+Tools::register('cp', function($p) {
+    $src = $p['src'] ?? $p['source'] ?? '';
+    $dst = $p['dst'] ?? $p['dest'] ?? $p['destination'] ?? '';
+    if (empty($src) || empty($dst)) return "missing src or dst";
+    return shell_exec("cp -r " . escapeshellarg($src) . " " . escapeshellarg($dst) . " 2>&1") ?: "Copied to $dst";
+});
+
+Tools::register('rm', function($p) {
+    $path = $p['path'] ?? $p['file_path'] ?? '';
+    $recursive = $p['recursive'] ?? $p['r'] ?? false;
+    if (empty($path)) return "missing path";
+    if (str_contains($path, 'node_modules') || str_contains($path, '.git')) return "Cannot remove system directories";
+    if ($recursive) {
+        return shell_exec("rm -rf " . escapeshellarg($path) . " 2>&1") ?: "Removed: $path";
+    }
+    return shell_exec("rm " . escapeshellarg($path) . " 2>&1") ?: "Removed: $path";
+});
+
+Tools::register('mv', function($p) {
+    $src = $p['src'] ?? $p['source'] ?? '';
+    $dst = $p['dst'] ?? $p['dest'] ?? $p['destination'] ?? '';
+    if (empty($src) || empty($dst)) return "missing src or dst";
+    return shell_exec("mv " . escapeshellarg($src) . " " . escapeshellarg($dst) . " 2>&1") ?: "Moved to $dst";
 });
 
 Tools::register('bash', function($p) {
