@@ -159,14 +159,11 @@ class LSPClient {
                     $diags[] = ['line' => (int)$m[1], 'col' => 1, 'severity' => 'error', 'message' => trim($output)];
                 }
             }
-        } elseif (in_array($ext, ['go', 'js', 'ts', 'py', 'rb'])) {
-            $cmd = $ext === 'go' ? 'go vet' : ($ext === 'js' || $ext === 'ts' ? 'npx' : $ext);
-            if ($ext === 'go') {
-                $output = shell_exec("go vet " . escapeshellarg($filePath) . " 2>&1");
-            } elseif ($ext === 'py') {
+        } elseif (in_array($ext, ['js', 'ts', 'py', 'rb', 'java', 'c', 'cpp', 'rs'])) {
+            if ($ext === 'py') {
                 $output = shell_exec("python -m py_compile " . escapeshellarg($filePath) . " 2>&1");
             } else {
-                $output = shell_exec($cmd . " lint " . escapeshellarg($filePath) . " 2>&1");
+                $output = shell_exec($ext . " -c " . escapeshellarg($filePath) . " 2>&1");
             }
             if (!empty($output) && strpos($output, 'error') !== false) {
                 preg_match_all('/(\d+):(\d+): (.*)/', $output, $matches, PREG_SET_ORDER);
