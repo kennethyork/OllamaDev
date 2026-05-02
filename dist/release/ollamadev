@@ -11,7 +11,7 @@ class Config {
     public static function load(): array {
         if (self::$config) return self::$config;
         $defaults = [
-            'ollama' => ['host' => 'http://localhost:11434', 'defaultModel' => 'codellama'],
+            'ollama' => ['host' => 'http://localhost:11434', 'defaultModel' => 'llama3.2:latest'],
             'agents' => ['coder' => ['temperature' => 0.7, 'maxTokens' => 4096]],
             'data' => ['directory' => '.ollamadev']
         ];
@@ -61,6 +61,15 @@ class OllamaClient {
         return false;
     }
 
+    public function listModelsDetailed(): array {
+        $ch = curl_init($this->host . '/api/tags');
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10]);
+        $response = curl_exec($ch);
+        curl_close($ch);
+        if ($response) { $data = json_decode($response, true); if (isset($data['models'])) return $data['models']; }
+        return [];
+    }
+
     public function listModels(): array {
         $ch = curl_init($this->host . '/api/tags');
         curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10]);
@@ -71,7 +80,7 @@ class OllamaClient {
     }
 
     public function chat(array $messages, callable $handler = null): string {
-        $model = Config::get('ollama.defaultModel', 'codellama');
+        $model = Config::get('ollama.defaultModel', 'llama3.2:latest');
         $params = ['model' => $model, 'messages' => $messages, 'stream' => true];
         $ch = curl_init($this->host . '/api/chat');
         curl_setopt_array($ch, [
@@ -214,10 +223,11 @@ class Agent {
 
     public function __construct() {
         $this->client = new OllamaClient();
-        $this->model = Config::get('ollama.defaultModel', 'codellama');
+        $models = $this->client->listModels();
+        $this->model = !empty($models) ? $models[0] : 'llama3.2:latest';
         $this->systemPrompt = ['role' => 'system', 'content' => 'You are OllamaDev, an AI coding assistant running locally via Ollama.
 
-You have access to tools: view, write, edit, glob, grep, ls, bash (readonly), fetch, diagnostics
+You have access to tools: view, write, edit, glob, grep, ls, bash (readonly), fetch, diagnostics, patch, agent
 
 Guidelines:
 - Be helpful and precise
@@ -230,6 +240,7 @@ Guidelines:
     public function setModel(string $model): void { $this->model = $model; }
     public function getModel(): string { return $this->model; }
     public function listModels(): array { return $this->client->listModels(); }
+    public function listModelsDetailed(): array { return $this->client->listModelsDetailed(); }
     public function checkConnection(): bool { return $this->client->checkConnection(); }
 
     public function run(array $messages, callable $handler = null): string {
@@ -294,10 +305,10 @@ class Session {
 
     public function __construct(array $config, ?string $sessionId = null) {
         $this->config = $config;
-        if ($sessionId) { $this->load($sessionId); }
-        else { $this->id = 'session_' . time() . '_' . substr(md5(mt_rand()), 0, 8); $this->title = "Session " . date('Y-m-d H:i'); $this->model = Config::get('ollama.defaultModel', 'codellama'); }
         $this->ensureDataDir();
         $this->agent = new Agent();
+        if ($sessionId) { $this->load($sessionId); }
+        else { $this->id = 'session_' . time() . '_' . substr(md5(mt_rand()), 0, 8); $this->title = "Session " . date('Y-m-d H:i'); $this->model = $this->getLatestModel(); }
     }
 
     private function ensureDataDir(): void { $dir = Config::sessionsDir(); if (!is_dir($dir)) mkdir($dir, 0755, true); }
@@ -309,7 +320,7 @@ class Session {
         $data = json_decode(file_get_contents($path), true);
         $this->id = $data['id'] ?? $sessionId;
         $this->title = $data['title'] ?? '';
-        $this->model = $data['model'] ?? Config::get('ollama.defaultModel', 'codellama');
+        $this->model = $data['model'] ?? 'llama3.2:latest';
         $this->messages = $data['messages'] ?? [];
     }
 
@@ -339,10 +350,29 @@ class Session {
         return $sessions;
     }
 
+    private function getLatestModel(): string {
+        $models = $this->agent->listModelsDetailed();
+        if (empty($models)) return 'llama3.2:latest';
+        usort($models, fn($a, $b) => strcmp($b['modified_at'] ?? '', $a['modified_at'] ?? ''));
+        return $models[0]['name'] ?? 'llama3.2:latest';
+    }
+
+    private function formatBytes(int $bytes): string {
+        if ($bytes >= 1073741824) return round($bytes / 1073741824, 1) . ' GB';
+        if ($bytes >= 1048576) return round($bytes / 1048576, 1) . ' MB';
+        if ($bytes >= 1024) return round($bytes / 1024, 1) . ' KB';
+        return $bytes . ' B';
+    }
+
     private function renderBanner(): void {
+        $models = $this->agent->listModelsDetailed();
+        $modelCount = count($models);
         echo "\n╔══════════════════════════════════════════════════════════════╗\n";
         echo "║                     OllamaDev                                ║\n";
         echo "║  Local AI coding agent powered by Ollama                     ║\n";
+        echo "╠══════════════════════════════════════════════════════════════╣\n";
+        echo "║  Current Model: {$this->model}                              ║\n";
+        echo "║  {$modelCount} model(s) available                                ║\n";
         echo "╠══════════════════════════════════════════════════════════════╣\n";
         echo "║  Tools: view, write, edit, glob, grep, ls, bash, fetch       ║\n";
         echo "║  Commands: exit, new, mode, verbose, model, clear, help      ║\n";
@@ -365,7 +395,19 @@ class Session {
             case 'verbose': $GLOBALS['verbose'] = trim($args) === 'on'; echo "Verbose: " . ($GLOBALS['verbose'] ? 'on' : 'off') . "\n"; return false;
             case 'model':
                 if (!empty($args)) { $this->agent->setModel($args); $this->model = $args; echo "Model: $args\n"; }
-                else { echo "Current: {$this->model}\nAvailable: " . implode(', ', $this->agent->listModels()) . "\n"; }
+                else {
+                    $models = $this->agent->listModelsDetailed();
+                    echo "\nAvailable Models:\n";
+                    echo str_repeat('-', 45) . "\n";
+                    foreach ($models as $m) {
+                        $name = $m['name'] ?? 'unknown';
+                        $size = isset($m['size']) ? $this->formatBytes($m['size']) : 'unknown';
+                        $marker = $name === $this->model ? ' *' : '';
+                        echo sprintf("  %-20s %s%s\n", $name, $size, $marker);
+                    }
+                    echo str_repeat('-', 45) . "\n";
+                    echo "Current: {$this->model}\n";
+                }
                 return false;
             case 'clear': echo "\033[2J\033[H"; return false;
             case 'help': $this->renderBanner(); return false;
