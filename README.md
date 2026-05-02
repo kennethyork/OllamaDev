@@ -8,8 +8,6 @@ A terminal-based AI coding agent that uses local Ollama models. Privacy-first, f
 curl -fsSL https://raw.githubusercontent.com/kennethyork/OllamaDev/main/install | bash
 ```
 
-Or download from [releases](https://github.com/kennethyork/OllamaDev/releases).
-
 ## Requirements
 
 - [Ollama](https://ollama.ai/) installed and running
