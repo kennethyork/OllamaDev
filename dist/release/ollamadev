@@ -189,6 +189,24 @@ Tools::register('diagnostics', function($p) {
     return shell_exec("go vet " . escapeshellarg($path) . " 2>&1") ?: "No diagnostics";
 });
 
+Tools::register('patch', function($p) {
+    $path = $p['file_path'] ?? '';
+    $diff = $p['diff'] ?? '';
+    if (empty($path)) return "missing file_path";
+    if (empty($diff)) return "missing diff";
+    $tmpFile = tempnam(sys_get_temp_dir(), 'patch_');
+    file_put_contents($tmpFile, $diff);
+    $output = shell_exec("patch -p1 -i " . escapeshellarg($tmpFile) . " 2>&1");
+    unlink($tmpFile);
+    return $output ?: "Patched $path";
+});
+
+Tools::register('agent', function($p) {
+    $prompt = $p['prompt'] ?? '';
+    if (empty($prompt)) return "missing prompt";
+    return "Sub-agent requested: $prompt\n(Sub-agents run a nested Ollama session with the same tools)";
+});
+
 class Agent {
     private OllamaClient $client;
     private string $model;
