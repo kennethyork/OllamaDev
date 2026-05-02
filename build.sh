@@ -907,7 +907,7 @@ class Session {
 
     public function start(): void {
         $this->tui->clear();
-        $this->renderTUI();
+        $this->render();
 
         while (true) {
             $this->render();
