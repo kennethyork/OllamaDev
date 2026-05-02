@@ -914,7 +914,16 @@ class Session {
             if (empty($input)) continue;
 
             $this->addMessage('user', $input);
-            $thinkingMsgs = ['Thinking...', 'Working on it...', 'Let me check that...', 'Analyzing...', 'Processing...', ' figuring it out...', 'On it...', 'Checking...', 'Searching...'];
+            $thinkingMsgs = [
+                'Thinking...', 'Working on it...', 'Let me check that...', 'Analyzing...',
+                'Processing...', 'figuring it out...', 'On it...', 'Checking...',
+                'Searching...', 'reading...', 'writing...', 'coding...',
+                'hm...', 'let me think...', 'give me a sec...', 'hold on...',
+                'looking into it...', 'brb...', 'considering...', 'working...',
+                'exploring...', 'examining...', 'investigating...', 'digesting...',
+                'computing...', 'calculating...', 'reasoning...', 'thinking through...',
+                'cooking up a response...', 'piecing it together...'
+            ];
             $thinkMsg = $thinkingMsgs[array_rand($thinkingMsgs)];
             echo "\n🤖 $thinkMsg\n\n";
 
