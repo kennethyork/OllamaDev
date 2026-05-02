@@ -1,114 +1,119 @@
 # OllamaDev
 
-A terminal-based AI coding agent that uses local Ollama models. Privacy-first, fully offline.
+A terminal-based AI coding agent powered by local Ollama models. Privacy-first, fully offline, single PHP file.
 
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kennethyork/OllamaDev/main/install | bash
+curl -fsSL https://github.com/kennethyork/OllamaDev/releases/latest/download/ollamadev -o /usr/local/bin/ollamadev
+chmod +x /usr/local/bin/ollamadev
 ```
 
-**Manual install:**
+**Or build from source:**
 ```bash
-# Download latest release for your platform
-curl -fsSL https://github.com/kennethyork/OllamaDev/releases/latest/download/ollamadev-$(uname -s)-$(uname -m) -o ollamadev
-chmod +x ollamadev
-mv ollamadev ~/.local/bin/
+git clone https://github.com/kennethyork/OllamaDev.git
+cd OllamaDev
+./build.sh
 ```
 
 ## Requirements
 
-- [Ollama](https://ollama.ai/) installed and running
-- A local model (e.g., `ollama pull codellama`)
+- PHP 8.0+ (`php -v`)
+- [Ollama](https://ollama.ai/) running (`ollama serve`)
+- Local models downloaded (`ollama pull llama3.2`)
 
 ## Usage
 
 ```bash
-ollamadev                    # Start interactive TUI
-ollamadev -c /path/to/project  # Start with specific directory
+ollamadev                    # Start interactive chat
+ollamadev chat               # Same as above
+ollamadev new                # Create new session
+ollamadev list               # List sessions
+ollamadev load <id>          # Resume session
+ollamadev help               # Show help
 ```
+
+## In-chat Commands
+
+| Command | Action |
+|---------|--------|
+| `model` | Show available models |
+| `model <name>` | Switch to model |
+| `exit` / `quit` | Exit |
+| `new` | New session |
+| `clear` | Clear screen |
+| `help` | Show banner |
 
 ## Features
 
-- **Interactive TUI** - Built with Bubble Tea, same as OpenCode
-- **Local-only** - Your code never leaves your machine
-- **Tool permission system** - Approve/deny dangerous operations
-- **Session persistence** - SQLite-backed conversations
-- **Auto-compact** - Automatically summarizes long conversations
+- **Agentic loop** - Iterative tool use until task complete
+- **Local-only** - Code never leaves your machine
+- **Auto-select model** - Uses latest installed model by modified date
+- **Session persistence** - JSON-backed conversations
 - **MCP support** - Connect to Model Context Protocol servers
-- **LSP integration** - Get diagnostics while coding
+- **LSP diagnostics** - Get lint errors for multiple languages
+- **Streaming** - Real-time response streaming
 
 ## Tools
 
-| Tool | Description | Permission |
-|------|-------------|------------|
-| `view` | View file with line numbers | No |
-| `write` | Create/overwrite files | Yes |
-| `edit` | Replace text in files | Yes |
-| `glob` | Find files by pattern | No |
-| `grep` | Search with regex | No |
-| `ls` | List directory | No |
-| `bash` | Execute commands | Yes |
-| `fetch` | Fetch URL content | Yes |
-| `diagnostics` | LSP diagnostics | No |
-| `agent` | Run sub-agent | No |
-
-## Keyboard Shortcuts
-
-| Key | Action |
-|-----|--------|
-| `Ctrl+C` | Quit |
-| `Ctrl+K` | Toggle help |
-| `Ctrl+O` | Select model |
-| `Ctrl+A` | Switch session |
-| `Ctrl+L` | View logs |
-| `Ctrl+N` | New session |
-| `Ctrl+X` | Cancel operation |
-| `Ctrl+E` | Open external editor |
-| `Esc` | Close dialog |
-| `↑/↓` | Navigate lists |
-| `Enter` | Select/send |
+| Tool | Description |
+|------|-------------|
+| `view` | View file with line numbers |
+| `write` | Create/overwrite files |
+| `edit` | Replace text in files (old/new) |
+| `glob` | Find files by glob pattern |
+| `grep` | Search with regex |
+| `ls` | List directory contents |
+| `bash` | Execute read-only commands |
+| `fetch` | Fetch URL content |
+| `patch` | Apply unified diff |
+| `diagnostics` | Get lint/syntax errors |
+| `mcp_servers` | List MCP servers |
+| `mcp` | Call MCP tool |
 
 ## Configuration
 
-Config is stored at `~/.ollamadev/config.json` or `./.ollamadev.json` (local takes precedence).
+Config at `~/.ollamadev/config.json` or `.ollamadev.json`:
 
 ```json
 {
   "ollama": {
-    "host": "http://localhost:11434",
-    "defaultModel": "codellama"
+    "host": "http://localhost:11434"
   },
-  "agents": {
-    "coder": {
-      "model": "codellama",
-      "temperature": 0.7,
-      "maxTokens": 4096
+  "data": {
+    "directory": ".ollamadev"
+  },
+  "mcpServers": {
+    "myserver": {
+      "type": "sse",
+      "url": "http://localhost:3000"
     }
   },
-  "shell": {
-    "path": "/bin/bash",
-    "args": ["-l"]
-  },
-  "autoCompact": true
+  "lsp": {
+    "php": { "command": "phpactor" }
+  }
 }
 ```
+
+## System Prompt
+
+Optimized for local Ollama models with explicit instructions:
+- Numbered tool list with clear parameter formats
+- Step-by-step agentic workflow
+- No assumed knowledge - state everything explicitly
+- Must use tools, no "I would need" responses
 
 ## Architecture
 
 ```
-ollamadev/
-├── cmd/              # CLI commands (Cobra)
-├── internal/
-│   ├── agent/        # LLM agent & tool execution
-│   ├── client/       # Ollama API client
-│   ├── config/       # Viper-based configuration
-│   ├── db/           # SQLite persistence
-│   ├── llm/tools/    # Tool implementations
-│   ├── lsp/          # Language Server Protocol
-│   ├── mcp/          # Model Context Protocol
-│   ├── permission/   # Permission system
-│   └── tui/          # Bubble Tea TUI
+ollamadev.php    # Entry point (single-file CLI)
+Agent.php        # LLM agent & tool parsing
+Config.php       # Configuration loading
+OllamaClient.php # Ollama API client
+Session.php      # Session management
+Tools.php        # Tool implementations
+build.sh         # Builds single-file binary
+dist/release/     # Built binary
 ```
 
 ## License
