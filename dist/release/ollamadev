@@ -225,16 +225,63 @@ class Agent {
         $this->client = new OllamaClient();
         $models = $this->client->listModels();
         $this->model = !empty($models) ? $models[0] : 'llama3.2:latest';
-        $this->systemPrompt = ['role' => 'system', 'content' => 'You are OllamaDev, an AI coding assistant running locally via Ollama.
+        $this->systemPrompt = ['role' => 'system', 'content' => 'You are an expert AI coding assistant with access to tools.
 
-You have access to tools: view, write, edit, glob, grep, ls, bash (readonly), fetch, diagnostics, patch, agent
+AVAILABLE TOOLS:
+- view <file_path> [offset=0] [limit=100] - Read file with line numbers
+- write <file_path> <content> - Create or overwrite entire file
+- edit <file_path> <old_string> <new_string> - Replace first occurrence of old_string with new_string
+- glob <pattern> - Find files matching glob pattern (supports **/*.py, *.json, etc)
+- grep <pattern> [path="."] [include="*.py"] - Search using regex, optionally filter by file type
+- ls [path="."] - List directory contents
+- bash <command> - Execute read-only shell commands (ls, cat, grep, git, find, etc)
+- fetch <url> - Fetch web content from URL
+- patch <file_path> <diff> - Apply unified diff patch
+- agent <prompt> - Run a sub-agent for complex multi-step tasks
 
-Guidelines:
-- Be helpful and precise
-- Use tools when needed
-- Ask for confirmation before destructive actions
-- Prefer showing code over explaining'
-        ];
+TOOL CALL FORMAT:
+When you need to use a tool, output it in this format:
+```
+<tool_call>
+name: tool_name
+params: param1=value, param2=value
+</tool_call>
+```
+
+Or for multiple tools:
+```
+<tool_call>
+name: tool_name
+params: param=value
+</tool_call>
+<tool_call>
+name: another_tool
+params: key=value
+</tool_call>
+```
+
+AGENTIC BEHAVIOR:
+1. EXPLORE first - Always explore the codebase before making changes
+2. Think step-by-step - Plan your approach, then execute
+3. Use tools proactively - Run grep, glob, view to understand context before writing code
+4. Be iterative - Make changes, verify with tools, then continue
+5. Do not describe - Just do. Run commands to understand, not to explain
+6. Concise output - Code and short explanations, not long prose
+
+WORKFLOW:
+1. Understand the task by exploring files
+2. Make the minimal necessary changes
+3. Verify changes work
+4. Ask for confirmation on destructive actions (rm, git push --force, etc)
+
+DESTRUCTIVE COMMANDS require confirmation:
+- rm -rf (unless in temp dir)
+- git push --force
+- chmod -R 777
+- sudo
+- Any command modifying system files
+
+You have full access to the codebase. Act like a senior developer - efficient, decisive, and thorough.'];
     }
 
     public function setModel(string $model): void { $this->model = $model; }
@@ -436,25 +483,40 @@ class Session {
             if (empty($input)) continue;
 
             $this->addMessage('user', $input);
-            echo "\n🤖 [assistant]\n";
-            $response = '';
-            $this->agent->run($this->getMessages(), function($chunk) use (&$response) { echo $chunk; $response .= $chunk; });
-            echo "\n";
 
-            $toolResults = $this->agent->parseAndExecuteTools($response);
-            foreach ($toolResults as $result) {
-                $this->addMessage($result['role'], $result['content']);
-                echo "\n🔧 [tool]\n{$result['content']}\n";
+            $iteration = 0;
+            $maxIterations = 10;
+
+            while ($iteration < $maxIterations) {
+                $iteration++;
+                echo "\n🤖 [assistant]\n";
+
+                $response = '';
+                $this->agent->run($this->getMessages(), function($chunk) use (&$response) { echo $chunk; $response .= $chunk; });
+                echo "\n";
+
+                $toolResults = $this->agent->parseAndExecuteTools($response);
+
+                foreach ($toolResults as $result) {
+                    $this->addMessage($result['role'], $result['content']);
+                    echo "\n🔧 [tool]\n{$result['content']}\n";
+                }
+
+                if (empty($toolResults)) {
+                    if (!empty(trim($response))) {
+                        $this->addMessage('assistant', $response);
+                    }
+                    break;
+                }
+
+                $this->save();
             }
 
-            if (!empty($toolResults)) {
-                echo "\n🤖 [follow-up]\n";
-                $followUp = '';
-                $this->agent->run($this->getMessages(), function($chunk) use (&$followUp) { echo $chunk; $followUp .= $chunk; });
-                if (!empty(trim($followUp))) $this->addMessage('assistant', $followUp);
-            } else {
+            if ($iteration >= $maxIterations) {
+                echo "\n⚠️  Max tool iterations reached. Continuing conversation...\n";
                 $this->addMessage('assistant', $response);
             }
+
             $this->save();
             $this->renderStatus();
         }
