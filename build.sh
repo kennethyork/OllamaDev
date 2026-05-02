@@ -719,6 +719,28 @@ Tools::register('bash', function($p) {
     return shell_exec($cmd . ' 2>&1') ?: "(no output)";
 });
 
+Tools::register('bg', function($p) {
+    $cmd = $p['command'] ?? $p['cmd'] ?? '';
+    if (empty($cmd)) return "missing command";
+    $background = $p['background'] ?? false;
+    if ($background || str_ends_with(trim($cmd), '&')) {
+        $cmd = trim($cmd, ' &');
+        $cmd .= ' > /tmp/ollamadev_bg_' . substr(md5(mt_rand()), 0, 6) . '.log 2>&1 &';
+        shell_exec($cmd);
+        return "Started in background (PID: " . getmypid() . ")";
+    }
+    return shell_exec($cmd . ' 2>&1') ?: "(no output)";
+});
+
+Tools::register('wait_bg', function($p) {
+    $maxWait = $p['seconds'] ?? 60;
+    $start = time();
+    while (time() - $start < $maxWait) {
+        usleep(100000);
+    }
+    return "Waited $maxWait seconds";
+});
+
 Tools::register('fetch', function($p) {
     $url = $p['url'] ?? '';
     if (empty($url)) return "missing url";
@@ -1171,6 +1193,13 @@ class Agent {
     - Calls an MCP server tool
     - Example: mcp server=filesystem tool=read path=/tmp/file.txt
 
+13. bg command=<cmd> [background=true]
+    - Run command in background (adds &)
+    - Output goes to /tmp/ollamadev_bg_*.log
+
+14. wait_bg seconds=<n>
+    - Wait for background jobs (n seconds)
+
 MCP TOOLS:
 - List available: call mcp_servers tool
 - Call tool: mcp server=<name> tool=<tool> [param=value...]
@@ -1314,7 +1343,7 @@ private function parseToolCalls(string $content): array {
             if (!empty($calls)) return $calls;
         }
 
-        $toolNames = ['ls', 'view', 'read', 'write', 'edit', 'grep', 'glob', 'find', 'cat', 'execute_command', 'list_directory', 'list_files', 'bash', 'shell', 'mkdir', 'mv', 'cp', 'rm', 'touch', 'diff', 'wc', 'git_status', 'git_diff', 'git_log', 'git_commit', 'git_add', 'git_checkout', 'git_branch', 'git_merge', 'git_rebase', 'git_stash', 'git_push', 'git_pull', 'git_clone', 'patch', 'diagnostics', 'goto_definition', 'find_references'];
+        $toolNames = ['ls', 'view', 'read', 'write', 'edit', 'grep', 'glob', 'find', 'cat', 'execute_command', 'list_directory', 'list_files', 'bash', 'shell', 'mkdir', 'mv', 'cp', 'rm', 'touch', 'diff', 'wc', 'git_status', 'git_diff', 'git_log', 'git_commit', 'git_add', 'git_checkout', 'git_branch', 'git_merge', 'git_rebase', 'git_stash', 'git_push', 'git_pull', 'git_clone', 'patch', 'diagnostics', 'goto_definition', 'find_references', 'bg', 'wait_bg'];
         $pattern = '/\b(' . implode('|', $toolNames) . ')\b/';
         preg_match_all($pattern, $content, $matches, PREG_SET_ORDER);
         foreach ($matches as $m) {
