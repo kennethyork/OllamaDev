@@ -1,0 +1,66 @@
+#!/bin/bash
+
+set -e
+
+REPO="kennethyork/Ollam-Cli"
+INSTALL_DIR="${HOME}/.local/bin"
+BINARY_NAME="ollamadev"
+
+main() {
+    detect_os
+    download
+    install
+    cleanup
+    success
+}
+
+detect_os() {
+    case "$(uname -s)" in
+        Linux*)     OS="linux" ;;
+        Darwin*)    OS="darwin" ;;
+        *)          echo "Unsupported OS: $(uname -s)" && exit 1 ;;
+    esac
+
+    case "$(uname -m)" in
+        x86_64)     ARCH="amd64" ;;
+        aarch64|arm64) ARCH="arm64" ;;
+        *)          echo "Unsupported arch: $(uname -m)" && exit 1 ;;
+    esac
+}
+
+download() {
+    VERSION="${VERSION:-latest}"
+    
+    if [ "$VERSION" = "latest" ]; then
+        TAG=$(curl -sSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
+    else
+        TAG="v${VERSION}"
+    fi
+
+    DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${TAG}/${BINARY_NAME}-${OS}-${ARCH}"
+    
+    echo "Downloading ${BINARY_NAME} ${TAG} for ${OS}/${ARCH}..."
+    curl -fsSL "$DOWNLOAD_URL" -o "${BINARY_NAME}.tmp"
+}
+
+install() {
+    mkdir -p "$INSTALL_DIR"
+    mv "${BINARY_NAME}.tmp" "${INSTALL_DIR}/${BINARY_NAME}"
+    chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
+}
+
+cleanup() {
+    rm -f "${BINARY_NAME}.tmp"
+}
+
+success() {
+    echo ""
+    echo "Installed to ${INSTALL_DIR}/${BINARY_NAME}"
+    echo ""
+    echo "Add to your PATH if needed:"
+    echo "  export PATH=\"\${HOME}/.local/bin:\${PATH}\""
+    echo ""
+    echo "Then run: ollamadev"
+}
+
+main "$@"
