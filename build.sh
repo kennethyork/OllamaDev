@@ -555,8 +555,21 @@ Tools::register('changes', function($p) {
         $changes[] = [$status, $f];
     }
     if (empty($changes)) return "No changes since $since";
-    $out = "Changes since $since:\n";
-    foreach ($changes as [$status, $f]) $out .= "[$status] $f\n";
+    $out = "\033[1;34mChanges since $since:\033[0m\n";
+    foreach ($changes as [$status, $f]) {
+        $s1 = $status[0] ?? ' ';
+        $s2 = $status[1] ?? ' ';
+        $color = match(true) {
+            $s1 === 'M' => "\033[31m",  // red - modified
+            $s1 === 'A' => "\033[32m",  // green - added
+            $s1 === 'D' => "\033[33m",  // yellow - deleted
+            $s1 === 'R' => "\033[36m",  // cyan - renamed
+            $s1 === '?' => "\033[90m",  // gray - untracked
+            default => "\033[0m"
+        };
+        $typeIcon = is_dir($f) ? "\033[1;36m[dir]\033[0m" : "\033[1;37m[file]\033[0m";
+        $out .= "$color$status\033[0m $typeIcon $f\n";
+    }
     return $out;
 });
 
