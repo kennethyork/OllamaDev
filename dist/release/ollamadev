@@ -568,28 +568,7 @@ Tools::register('watch', function($p) {
     $extensions = str_replace(',', '|', $exts);
     $extensions = str_replace('.', '\\.', $extensions);
 
-    // Try inotifywait first (Linux, must be installed)
-    $hasInotify = PHP_OS === 'Linux' && trim(shell_exec('which inotifywait 2>/dev/null')) !== '';
-
-    if ($hasInotify) {
-        $cmd = "inotifywait -m -r -e modify,create,delete " . escapeshellarg($path) . " --format '%e %w%f' --timeout $timeout 2>/dev/null";
-        $output = [];
-        exec($cmd, $output, $code);
-        if ($code === 0 && !empty($output)) {
-            $filtered = [];
-            foreach ($output as $line) {
-                if (preg_match('/\.(' . $extensions . ')$/i', $line)) {
-                    $filtered[] = $line;
-                }
-            }
-            if (!empty($filtered)) {
-                return "Changed:\n" . implode("\n", array_slice($filtered, 0, 50));
-            }
-        }
-        return "No relevant file changes detected within ${timeout}s";
-    }
-
-    // Fallback: polling
+    // Polling-based file watching
     $lastMtime = [];
     $files = [];
     exec("find " . escapeshellarg($path) . " -type f 2>/dev/null", $files);
