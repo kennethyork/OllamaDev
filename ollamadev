@@ -2354,7 +2354,7 @@ if ($argc >= 2 && $argv[1] === 'stats') {
 }
 
 // ===== FLAG PARSING (must be before config load) =====
-$flags = ['model' => null, 'continue' => false, 'session' => null, 'fork' => false, 'prompt' => null, 'agent' => null, 'pure' => false, 'port' => 0, 'hostname' => '127.0.0.1', 'mdns' => false, 'help' => false, 'version' => false];
+$flags = ['model' => null, 'continue' => false, 'session' => null, 'fork' => false, 'prompt' => null, 'agent' => null, 'pure' => false, 'port' => 0, 'hostname' => '127.0.0.1', 'mdns' => false, 'help' => false, 'version' => false, 'cwd' => null];
 $positional = [];
 for ($i = 1; $i < $argc; $i++) {
     $a = $argv[$i];
@@ -2368,6 +2368,7 @@ for ($i = 1; $i < $argc; $i++) {
     elseif ($a === '--port') { $flags['port'] = (int)($argv[++$i] ?? 0); }
     elseif ($a === '--hostname') { $flags['hostname'] = $argv[++$i] ?? '127.0.0.1'; }
     elseif ($a === '--mdns') { $flags['mdns'] = true; }
+    elseif ($a === '--cwd') { $flags['cwd'] = $argv[++$i] ?? null; }
     elseif ($a === '-h' || $a === '--help') { $flags['help'] = true; }
     elseif ($a === '-v' || $a === '--version') { $flags['version'] = true; }
     elseif (!str_starts_with($a, '-')) { $positional[] = $a; }
