@@ -570,7 +570,7 @@ class Tools {
 }
 
 Tools::register('view', function($p) {
-    $path = $p['file_path'] ?? $p['path'] ?? '';
+    $path = $p['file_path'] ?? $p['file'] ?? $p['path'] ?? '';
     if (empty($path)) return "missing file_path";
     if (!file_exists($path)) return "File not found: $path";
     $lines = file($path);
@@ -582,6 +582,11 @@ Tools::register('view', function($p) {
     return $out;
 });
 
+Tools::register('read', function($p) {
+    $p['file_path'] = $p['file_path'] ?? $p['file'] ?? $p['path'] ?? '';
+    return Tools::run('view', $p);
+});
+
 // Aliases for common tools
 Tools::register('read', function($p) {
     $p['file_path'] = $p['file_path'] ?? $p['path'] ?? '';
@@ -589,13 +594,14 @@ Tools::register('read', function($p) {
 });
 
 Tools::register('cat', function($p) {
-    $p['file_path'] = $p['file_path'] ?? $p['path'] ?? '';
+    $p['file_path'] = $p['file_path'] ?? $p['file'] ?? $p['path'] ?? '';
     return Tools::run('view', $p);
 });
 
 Tools::register('head', function($p) {
-    $path = $p['file_path'] ?? $p['path'] ?? '';
+    $path = $p['file_path'] ?? $p['file'] ?? $p['path'] ?? '';
     if (empty($path)) return "missing file_path";
+    if (!file_exists($path)) return "File not found: $path";
     $lines = file($path);
     if ($lines === false) return "Error reading file: $path";
     $n = $p['n'] ?? 10;
@@ -605,8 +611,9 @@ Tools::register('head', function($p) {
 });
 
 Tools::register('tail', function($p) {
-    $path = $p['file_path'] ?? $p['path'] ?? '';
+    $path = $p['file_path'] ?? $p['file'] ?? $p['path'] ?? '';
     if (empty($path)) return "missing file_path";
+    if (!file_exists($path)) return "File not found: $path";
     $lines = file($path);
     if ($lines === false) return "Error reading file: $path";
     $n = $p['n'] ?? 10;
@@ -764,7 +771,7 @@ Tools::register('tree', function($p) {
 });
 
 Tools::register('stat', function($p) {
-    $path = $p['file_path'] ?? $p['path'] ?? '';
+    $path = $p['file_path'] ?? $p['file'] ?? $p['path'] ?? '';
     if (empty($path)) return "missing path";
     if (!file_exists($path)) return "Not found: $path";
     $stat = stat($path);
@@ -773,14 +780,14 @@ Tools::register('stat', function($p) {
 });
 
 Tools::register('diff', function($p) {
-    $file1 = $p['file1'] ?? $p['file_path'] ?? '';
-    $file2 = $p['file2'] ?? '';
+    $file1 = $p['file1'] ?? $p['file_path'] ?? $p['file'] ?? $p['source'] ?? '';
+    $file2 = $p['file2'] ?? $p['dest'] ?? '';
     if (empty($file1) || empty($file2)) return "missing file1 or file2";
     return shell_exec("diff " . escapeshellarg($file1) . " " . escapeshellarg($file2) . " 2>&1") ?: "No differences";
 });
 
 Tools::register('wc', function($p) {
-    $path = $p['file_path'] ?? $p['path'] ?? '';
+    $path = $p['file_path'] ?? $p['file'] ?? $p['path'] ?? '';
     if (empty($path)) return "missing file_path";
     if (!file_exists($path)) return "File not found: $path";
     $lines = count(file($path));
