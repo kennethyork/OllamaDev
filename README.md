@@ -4,16 +4,26 @@ A terminal-based AI coding agent powered by local Ollama models. Privacy-first, 
 
 ## Install
 
+**Linux / Mac:**
 ```bash
 curl -fsSL https://github.com/kennethyork/OllamaDev/releases/latest/download/ollamadev -o /usr/local/bin/ollamadev
 chmod +x /usr/local/bin/ollamadev
+```
+
+**Windows (PowerShell):**
+```powershell
+irm https://github.com/kennethyork/OllamaDev/releases/latest/download/ollamadev -o $env:LOCALAPPDATA\ollamadev\ollamadev.exe
+# Add to PATH or run directly from $env:LOCALAPPDATA\ollamadev\
 ```
 
 **Or build from source:**
 ```bash
 git clone https://github.com/kennethyork/OllamaDev.git
 cd OllamaDev
+# Linux/Mac:
 ./build.sh
+# Windows:
+php build.sh
 ```
 
 ## Requirements
