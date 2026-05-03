@@ -828,7 +828,7 @@ Tools::register('fetch', function($p) {
 });
 
 Tools::register('diagnostics', function($p) {
-    $path = $p['file_path'] ?? '';
+    $path = $p['file_path'] ?? $p['path'] ?? '';
     if (empty($path)) return "No file specified";
     if (!file_exists($path)) return "File not found: $path";
     $diags = LSP::diagnostics($path);
@@ -850,7 +850,7 @@ Tools::register('hover', function($p) {
 });
 
 Tools::register('goto', function($p) {
-    $path = $p['file_path'] ?? '';
+    $path = $p['file_path'] ?? $p['path'] ?? '';
     $line = isset($p['line']) ? (int)$p['line'] : 1;
     $col = isset($p['col']) ? (int)$p['col'] : 1;
     if (empty($path)) return "No file specified";
@@ -863,7 +863,7 @@ Tools::register('goto', function($p) {
 });
 
 Tools::register('symbols', function($p) {
-    $path = $p['file_path'] ?? '';
+    $path = $p['file_path'] ?? $p['path'] ?? '';
     if (empty($path)) return "No file specified";
     if (!file_exists($path)) return "File not found: $path";
     $symbols = LSP::documentSymbols($path);
@@ -876,12 +876,26 @@ Tools::register('symbols', function($p) {
 });
 
 Tools::register('find_refs', function($p) {
-    $path = $p['file_path'] ?? '';
-    $pattern = $p['pattern'] ?? '';
+    $path = $p['file_path'] ?? $p['path'] ?? '';
+    $pattern = $p['pattern'] ?? $p['symbol'] ?? '';
     if (empty($path)) return "No file specified";
     if (!file_exists($path)) return "File not found: $path";
     if (empty($pattern)) return "No pattern specified";
     return shell_exec("grep -rn --color=never " . escapeshellarg($pattern) . " " . escapeshellarg(dirname($path)) . " 2>/dev/null | head -20") ?: "No references found";
+});
+
+Tools::register('refs', function($p) {
+    $path = $p['file_path'] ?? $p['path'] ?? '';
+    $symbol = $p['symbol'] ?? $p['pattern'] ?? '';
+    return Tools::run('find_refs', ['file_path' => $path, 'pattern' => $symbol]);
+});
+
+Tools::register('goto_definition', function($p) {
+    return Tools::run('goto', $p);
+});
+
+Tools::register('definition', function($p) {
+    return Tools::run('goto', $p);
 });
 
 Tools::register('format', function($p) {
@@ -1136,22 +1150,11 @@ class SystemPrompts {
 
         'mistral' => 'You are Mistral, a helpful AI assistant running locally via Ollama. Be concise and accurate.',
 
-        'codellama' => "You are CodeLLama, a CLI coding assistant. Extract parameters from user request and call tools. NEVER explain, NEVER ask permission.
+        'codellama' => "You are a coding assistant. Call tools to complete tasks. Output ONLY the tool call, nothing else.
 
-Tool format: <tool_code>{\"name\": \"TOOL\", \"arguments\": {\"PARAM\": \"VALUE\"}}</tool_code>
+Tools: ls, view, write, edit, glob, grep, bash, diagnostics, goto, symbols, refs
 
-Tools:
-- ls path=DIRECTORY
-- view file_path=PATH [offset=0] [limit=100]
-- write file_path=PATH content=TEXT
-- edit file_path=PATH old_string=TEXT new_string=TEXT
-- glob pattern=GLOB
-- grep pattern=REGEX path=PATH
-- bash command=CMD
-- diagnostics path=PATH
-- goto path=PATH symbol=SYMBOL
-- symbols path=PATH
-- refs path=PATH symbol=SYMBOL",
+Example: User: view build.sh → <tool_code>{\"name\": \"view\", \"arguments\": {\"file_path\": \"build.sh\"}}</tool_code>",
 
         'qwen' => "You are Qwen. You MUST call tools to perform actions. NEVER describe what you would do - actually call the tools.
 
@@ -1189,7 +1192,28 @@ For file operations:
 
 DO NOT explain. DO NOT ask questions. Just call the tool.',
 
-        'default' => 'You are an expert AI coding assistant running locally via Ollama. Local models need EXPLICIT instructions. Do not assume anything. State everything clearly. Tools execute directly - do NOT ask for permission.',
+        'default' => 'You are an AI coding assistant. When user asks you to do something, call the appropriate tool.
+
+DO NOT output any text except the tool call. When you call a tool, do not explain what you are doing. Do not output anything after the tool call.
+
+Tools:
+- ls path=DIRECTORY
+- view file_path=PATH
+- write file_path=PATH content=TEXT
+- edit file_path=PATH old_string=TEXT new_string=TEXT
+- glob pattern=GLOB
+- grep pattern=REGEX path=PATH
+- bash command=CMD
+- diagnostics path=PATH
+- goto path=PATH symbol=SYMBOL
+- symbols path=PATH
+- refs path=PATH symbol=SYMBOL
+- watch path=PATH timeout=SECONDS
+- mcp server=NAME tool=NAME
+
+Example:
+User: list /tmp
+You: <tool_code>{"name": "ls", "arguments": {"path": "/tmp"}}</tool_code>',
     ];
 
     private static array $modelPatterns = [
