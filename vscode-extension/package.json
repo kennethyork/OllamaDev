@@ -96,6 +96,16 @@
         "command": "ollamadev.complete",
         "title": "OllamaDev: Get Completion",
         "category": "OllamaDev"
+      },
+      {
+        "command": "ollamadev.format",
+        "title": "OllamaDev: Format Document",
+        "category": "OllamaDev"
+      },
+      {
+        "command": "ollamadev.quickfix",
+        "title": "OllamaDev: Quick Fix",
+        "category": "OllamaDev"
       }
     ],
     "keybindings": [
@@ -123,6 +133,16 @@
         "command": "ollamadev.inlineComplete",
         "key": "ctrl+space",
         "when": "editorTextFocus && !editorHasSelection"
+      },
+      {
+        "command": "ollamadev.format",
+        "key": "ctrl+shift+f",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "ollamadev.quickfix",
+        "key": "ctrl+.",
+        "when": "editorTextFocus"
       }
     ],
     "menus": {

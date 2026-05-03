@@ -828,10 +828,16 @@ Tools::register('diff', function($p) {
     if (!file_exists($file1) || !file_exists($file2)) return "File not found";
     $isGitDir = is_dir(dirname($file1) . '/.git') || is_dir($file1);
     if ($isGitDir || preg_match('/\.git[\/\\\]?$/', dirname($file1))) {
-        return shell_exec("cd " . escapeshellarg(dirname($file1)) . " && git diff " . escapeshellarg(basename($file1)) . " 2>&1") ?: "No differences";
+        $output = shell_exec("cd " . escapeshellarg(dirname($file1)) . " && git diff " . escapeshellarg(basename($file1)) . " 2>&1") ?: "No differences";
+    } else {
+        $output = shell_exec("diff -u " . escapeshellarg($file1) . " " . escapeshellarg($file2) . " 2>&1") ?: "No differences";
     }
-    $output = shell_exec("diff -u " . escapeshellarg($file1) . " " . escapeshellarg($file2) . " 2>&1");
-    return empty($output) ? "No differences" : $output;
+    if (empty(trim($output))) return "No differences";
+    $tmp = tempnam('/tmp', 'ollamadev_diff_') . '.txt';
+    file_put_contents($tmp, $output);
+    passthru("less -R " . escapeshellarg($tmp) . " 2>/dev/null");
+    @unlink($tmp);
+    return '';
 });
 
 Tools::register('wc', function($p) {
@@ -2205,28 +2211,52 @@ class Session {
             $this->renderPrompt();
             if (function_exists('readline')) {
                 readline_completion_function(function($string, $position) {
-                    $words = ['help', 'exit', 'quit', 'clear', 'model', 'session', 'tools', 'git', 'status', 'compact', 'context'];
-                    $home = getenv('HOME') ?: '/tmp';
-                    $termsDir = $home . '/.ollamadev/terminals';
+                    $baseCommands = ['help', 'exit', 'quit', 'clear', 'model', 'session', 'tools', 'git', 'status', 'compact', 'context', 'new', 'cd', 'ls'];
                     $line = readline_info()['line_buffer'] ?? '';
-                    $parts = explode(' ', $line);
-                    if (count($parts) > 1 && $parts[0] === 'cd' && strlen($line) > 3) {
+                    $parts = preg_split('/\s+/', $line, -1, PREG_SPLIT_NO_EMPTY);
+                    $matches = [];
+
+                    if (count($parts) === 1) {
+                        foreach ($baseCommands as $cmd) {
+                            if (strpos($cmd, $string) === 0) $matches[] = $cmd;
+                        }
+                        return $matches;
+                    }
+
+                    $first = $parts[0];
+                    if ($first === 'cd' && count($parts) === 2) {
                         $partial = $parts[1];
-                        if (strlen($partial) > 0 && is_dir($partial)) {
-                            $suggest = [];
-                            foreach (scandir($partial) as $f) {
-                                if ($f !== '.' && $f !== '..') {
-                                    $suggest[] = $partial . '/' . $f;
+                        $parent = dirname($partial);
+                        if (is_dir($parent)) {
+                            $prefix = $parent === '/' ? '' : $parent . '/';
+                            foreach (scandir($parent) as $f) {
+                                if ($f !== '.' && strpos($f, basename($partial)) === 0) {
+                                    $full = $prefix . $f;
+                                    if (is_dir($full)) $matches[] = $full . '/';
+                                    else $matches[] = $full;
                                 }
                             }
-                            return $suggest;
+                        }
+                    } elseif ($first === 'git' && count($parts) === 2) {
+                        $gitCmds = ['status', 'diff', 'log', 'branch', 'commit', 'push', 'pull', 'stash', 'checkout', 'add', 'fetch', 'merge', 'rebase'];
+                        foreach ($gitCmds as $gc) { if (strpos($gc, $string) === 0) $matches[] = $gc; }
+                    } elseif (in_array($first, ['view', 'cat', 'edit', 'write', 'grep', 'find', 'ls', 'diff', 'rm', 'cp', 'mv']) && count($parts) === 2) {
+                        $partial = $parts[1];
+                        if (strpos($partial, '/') !== false) {
+                            $parent = dirname($partial);
+                            if (is_dir($parent)) {
+                                $prefix = $parent === '/' ? '' : $parent . '/';
+                                foreach (scandir($parent) as $f) {
+                                    if ($f !== '.' && strpos($f, basename($partial)) === 0) {
+                                        $full = $prefix . $f;
+                                        if (is_dir($full)) $matches[] = $full . '/';
+                                        else $matches[] = $full;
+                                    }
+                                }
+                            }
                         }
                     }
-                    $matches = [];
-                    foreach ($words as $w) {
-                        if (strpos($w, $string) === 0) $matches[] = $w;
-                    }
-                    return $matches;
+                    return array_slice($matches, 0, 50);
                 });
                 $input = readline('');
                 if ($input === false) break;
@@ -2970,6 +3000,9 @@ if ($cmd === 'chat') {
                     'referencesProvider' => true,
                     'renameProvider' => ['prepareProvider' => true],
                     'documentSymbolProvider' => true,
+                    'codeActionProvider' => ['codeActionKinds' => ['quickfix', 'refactor', 'source']],
+                    'documentFormattingProvider' => true,
+                    'documentRangeFormattingProvider' => true,
                     'completionProvider' => ['resolveProvider' => true, 'triggerCharacters' => ['.', '>', ':']]
                 ],
                 'serverInfo' => ['name' => 'ollamadev-lsp', 'version' => '1.0']
@@ -3038,6 +3071,73 @@ if ($cmd === 'chat') {
             $uri = $params['textDocument']['uri'] ?? '';
             $newName = $params['newName'] ?? 'newName';
             $response['result'] = ['changes' => [$uri => [['range' => ['start' => ['line' => 0, 'character' => 0], 'end' => ['line' => 0, 'character' => 100]], 'newText' => $newName]]]];
+        } elseif ($method === 'textDocument/codeAction') {
+            $uri = $params['textDocument']['uri'] ?? '';
+            $range = $params['range'] ?? ['start' => ['line' => 0, 'character' => 0], 'end' => ['line' => 0, 'character' => 0]];
+            $context = $params['context'] ?? [];
+            $code = $uri && file_exists($uri) ? file_get_contents($uri) : '';
+            $actions = [];
+            if (!empty($code)) {
+                $prompt = "Analyze this code and suggest code actions (quick fixes, refactors):\n" . substr($code, 0, 2000) . "\n\nReturn a JSON array of {title, kind, command} where kinds are 'quickfix', 'refactor', or 'source'. Example: [{\"title\": \"Add null check\", \"kind\": \"quickfix\", \"command\": \"ollamadev.fix\"}]";
+                $result = $ollama->chat([['role' => 'user', 'content' => $prompt]]);
+                if ($result && preg_match_all('/\{[^}]+\}/', $result, $matches)) {
+                    foreach ($matches[0] as $m) {
+                        $action = json_decode($m, true);
+                        if ($action && isset($action['title'])) {
+                            $actions[] = [
+                                'title' => $action['title'],
+                                'kind' => $action['kind'] ?? 'quickfix',
+                                'command' => ['title' => $action['title'], 'command' => 'ollamadev.action', 'arguments' => [$action]]
+                            ];
+                        }
+                    }
+                }
+            }
+            if (empty($actions)) {
+                $actions[] = ['title' => 'Ask OllamaDev for suggestions', 'kind' => 'source', 'command' => ['title' => 'AI Assist', 'command' => 'ollamadev.ai', 'arguments' => []]];
+            }
+            $response['result'] = $actions;
+        } elseif ($method === 'textDocument/formatting') {
+            $uri = $params['textDocument']['uri'] ?? '';
+            if ($uri && file_exists($uri)) {
+                $content = file_get_contents($uri);
+                $ext = pathinfo($uri, PATHINFO_EXTENSION);
+                $cmd = match($ext) {
+                    'php' => 'php -l -f',
+                    'js' => 'npx prettier --stdin-filepath',
+                    'ts' => 'npx prettier --stdin-filepath',
+                    'py' => 'python3 -m black -',
+                    'go' => 'gofmt',
+                    'rs' => 'rustfmt',
+                    'json' => 'jq .',
+                    default => null
+                };
+                if ($cmd) {
+                    $tmpIn = tempnam('/tmp', 'fmt_in_');
+                    $tmpOut = tempnam('/tmp', 'fmt_out_');
+                    file_put_contents($tmpIn, $content);
+                    $formatted = shell_exec("$cmd < " . escapeshellarg($tmpIn) . " > " . escapeshellarg($tmpOut) . " 2>&1");
+                    if (file_exists($tmpOut) && filesize($tmpOut) > 0) {
+                        $formatted = file_get_contents($tmpOut);
+                    }
+                    unlink($tmpIn);
+                    unlink($tmpOut);
+                    if ($formatted && $formatted !== $content) {
+                        $lines = explode("\n", $content);
+                        $fmtLines = explode("\n", $formatted);
+                        $edits = [];
+                        $startLine = 0;
+                        $endLine = count($lines) - 1;
+                        $response['result'] = [['range' => ['start' => ['line' => $startLine, 'character' => 0], 'end' => ['line' => $endLine, 'character' => strlen($lines[$endLine] ?? '')]], 'newText' => $formatted]];
+                    } else {
+                        $response['result'] = [];
+                    }
+                } else {
+                    $response['result'] = [];
+                }
+            } else {
+                $response['result'] = [];
+            }
         } elseif ($method === 'textDocument/publishDiagnostics') {
             $response['result'] = null;
         } elseif ($method === 'completionItem/resolve') {

@@ -343,6 +343,48 @@ function toggleInlineCompletion(provider: InlineCompletionProvider) {
     vscode.window.showInformationMessage('OllamaDev inline completion: ' + (provider.enabled ? 'ON' : 'OFF'));
 }
 
+async function formatDocument() {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) { vscode.window.showErrorMessage('No active editor'); return; }
+    try {
+        const doc = editor.document;
+        const result = await sendLSPRequest('textDocument/formatting', { textDocument: { uri: doc.uri.toString() } });
+        if (result && Array.isArray(result) && result.length > 0) {
+            const edit = new vscode.WorkspaceEdit();
+            for (const change of result) {
+                const range = new vscode.Range(
+                    change.range.start.line, change.range.start.character,
+                    change.range.end.line, change.range.end.character
+                );
+                edit.replace(doc.uri, range, change.newText);
+            }
+            await vscode.workspace.applyEdit(edit);
+            vscode.window.showInformationMessage('Document formatted');
+        } else {
+            vscode.window.showInformationMessage('No formatting changes needed');
+        }
+    } catch (err) { vscode.window.showErrorMessage('Format failed: ' + err); }
+}
+
+async function quickFix() {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) { vscode.window.showErrorMessage('No active editor'); return; }
+    const doc = editor.document;
+    const selection = editor.selection;
+    try {
+        const result = await sendLSPRequest('textDocument/codeAction', {
+            textDocument: { uri: doc.uri.toString() },
+            range: { start: { line: selection.start.line, character: selection.start.character }, end: { line: selection.end.line, character: selection.end.character } },
+            context: { diagnostics: [] }
+        });
+        if (result && result.length > 0) {
+            vscode.commands.executeCommand('editor.action.applyCodeAction', result[0]);
+        } else {
+            vscode.window.showInformationMessage('No code actions available');
+        }
+    } catch (err) { vscode.window.showErrorMessage('Quick fix failed: ' + err); }
+}
+
 export function activate(context: vscode.ExtensionContext) {
     createStatusBar();
     
@@ -362,7 +404,9 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('ollamadev.ask', askAI),
         vscode.commands.registerCommand('ollamadev.inlineComplete', () => toggleInlineCompletion(provider)),
         vscode.commands.registerCommand('ollamadev.chat', () => createChatPanel(context)),
-        vscode.commands.registerCommand('ollamadev.complete', getCompletion)
+        vscode.commands.registerCommand('ollamadev.complete', getCompletion),
+        vscode.commands.registerCommand('ollamadev.format', formatDocument),
+        vscode.commands.registerCommand('ollamadev.quickfix', quickFix)
     );
 
     startLSPProcess().catch(err => console.error('Activation error:', err));

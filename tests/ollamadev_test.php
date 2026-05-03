@@ -36,6 +36,8 @@ class Config {
     }
 
     public static function sessionsDir(): string { return self::dataDir() . '/sessions'; }
+
+    public static function reset(): void { self::$config = null; }
 }
 
 class OllamaClient {
@@ -296,9 +298,24 @@ class TerminalManager {
             'terminals' => $terminals
         ];
     }
+
+    public function getBaseDir(): string { return $this->baseDir; }
 }
 
-// Tests
+class Tools {
+    public static function diff(string $file1, string $file2): string {
+        if (empty($file1) || empty($file2)) return "missing file1 or file2";
+        if (!file_exists($file1) || !file_exists($file2)) return "File not found";
+        $isGitDir = is_dir(dirname($file1) . '/.git') || is_dir($file1);
+        if ($isGitDir || preg_match('/\.git[\/\\\]?$/', dirname($file1))) {
+            return shell_exec("cd " . escapeshellarg(dirname($file1)) . " && git diff " . escapeshellarg(basename($file1)) . " 2>&1") ?: "No differences";
+        }
+        $output = shell_exec("diff -u " . escapeshellarg($file1) . " " . escapeshellarg($file2) . " 2>&1");
+        return empty($output) ? "No differences" : $output;
+    }
+}
+
+// ============== TESTS ==============
 echo "Running OllamaDev Tests\n";
 echo "========================\n\n";
 
@@ -316,13 +333,17 @@ function test($name, $condition) {
     }
 }
 
-// Config tests
+// Config Tests
 echo "Config Tests:\n";
+Config::reset();
 test('Config::get returns default for missing key', Config::get('nonexistent', 'default') === 'default');
 test('Config::get returns nested value', Config::get('ollama.host') === 'http://localhost:11434');
-test('Config::dataDir returns string', is_string(Config::dataDir()));
+test('Config::get returns nested defaultModel', Config::get('ollama.defaultModel') === 'llama3.2:latest');
+test('Config::dataDir returns string', is_string(Config::dataDir()) && strlen(Config::dataDir()) > 0);
+test('Config::sessionsDir returns dataDir/sessions', strpos(Config::sessionsDir(), 'sessions') !== false);
+Config::reset();
 
-// OllamaClient tests
+// OllamaClient Tests
 echo "\nOllamaClient Tests:\n";
 $client = new OllamaClient();
 test('OllamaClient instantiated', $client instanceof OllamaClient);
@@ -333,7 +354,7 @@ test('OllamaClient has chat method', method_exists($client, 'chat'));
 test('OllamaClient has listModels method', method_exists($client, 'listModels'));
 test('OllamaClient has checkConnection method', method_exists($client, 'checkConnection'));
 
-// TerminalManager tests
+// TerminalManager Tests
 echo "\nTerminalManager Tests:\n";
 $tm = new TerminalManager();
 test('TerminalManager instantiated', $tm instanceof TerminalManager);
@@ -345,20 +366,50 @@ test('TerminalManager has resume method', method_exists($tm, 'resume'));
 test('TerminalManager has delete method', method_exists($tm, 'delete'));
 test('TerminalManager has status method', method_exists($tm, 'status'));
 test('TerminalManager has list method', method_exists($tm, 'list'));
+test('TerminalManager baseDir is set', is_dir($tm->getBaseDir()));
 
-// Terminal lifecycle test
+// Terminal Lifecycle Tests
+echo "\nTerminal Lifecycle Tests:\n";
 $testTermName = 'test_term_' . time();
 $result = $tm->create($testTermName, 'llama3.2:latest', '/tmp');
 test('TerminalManager::create returns array', is_array($result));
 test('TerminalManager::create sets name', $result['name'] === $testTermName);
-test('TerminalManager::exists works', $tm->exists($testTermName));
-$dir = (getenv('HOME') ?: '/tmp') . '/.ollamadev/terminals/' . $testTermName;
-$tm->stop($testTermName);
+test('TerminalManager::create sets model', $result['model'] === 'llama3.2:latest');
+test('TerminalManager::create sets cwd', $result['cwd'] === '/tmp');
+test('TerminalManager::create sets status to stopped', $result['status'] === 'stopped');
+test('TerminalManager::exists returns true for created', $tm->exists($testTermName));
+$loaded = $tm->loadTerminal($testTermName);
+test('TerminalManager::loadTerminal returns array', is_array($loaded));
+test('TerminalManager::loadTerminal preserves name', $loaded['name'] === $testTermName);
+$status = $tm->status();
+test('TerminalManager::status returns total count', $status['total'] >= 1);
+test('TerminalManager::status returns stopped count', $status['stopped'] >= 1);
 $tm->delete($testTermName);
-clearstatcache(true, $dir);
-test('TerminalManager::delete works', !file_exists($dir));
+clearstatcache(true, $tm->getBaseDir() . '/' . $testTermName);
+test('TerminalManager::delete removes directory', !file_exists($tm->getBaseDir() . '/' . $testTermName));
+test('TerminalManager::exists returns false after delete', !$tm->exists($testTermName));
+
+// Tools Tests
+echo "\nTools Tests:\n";
+$testDir = '/tmp/ollamadev_test_' . time();
+mkdir($testDir, 0755, true);
+file_put_contents("$testDir/file1.txt", "line1\nline2\nline3\n");
+file_put_contents("$testDir/file2.txt", "line1\nmodified\nline3\n");
+file_put_contents("$testDir/file3.txt", "line1\nline2\nline3\n");
+test('Tools::diff detects differences', strpos(Tools::diff("$testDir/file1.txt", "$testDir/file2.txt"), '<') !== false || strpos(Tools::diff("$testDir/file1.txt", "$testDir/file2.txt"), '---') !== false);
+test('Tools::diff shows no differences for identical files', strpos(Tools::diff("$testDir/file1.txt", "$testDir/file3.txt"), 'No differences') !== false || trim(Tools::diff("$testDir/file1.txt", "$testDir/file3.txt")) === '');
+test('Tools::diff returns error for missing file', strpos(Tools::diff("$testDir/nonexistent.txt", "$testDir/file1.txt"), 'not found') !== false);
+exec("rm -rf $testDir");
+
+// String/Misc Tests
+echo "\nString/Misc Tests:\n";
+test('basename works correctly', basename('/path/to/file.txt') === 'file.txt');
+test('escapeshellarg works correctly', escapeshellarg("file with spaces") === "'file with spaces'");
+test('json_encode/decode roundtrip', (array)json_decode(json_encode(['a' => 1, 'b' => 'test'])) === ['a' => 1, 'b' => 'test']);
 
 // Summary
 echo "\n========================\n";
 echo "Results: $passed passed, $failed failed\n";
-exit($failed > 0 ? 1 : 0);
+if ($failed > 0) exit(1);
+echo "ALL TESTS PASSED\n";
+exit(0);
