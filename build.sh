@@ -1418,6 +1418,22 @@ class Agent {
 14. wait_bg seconds=<n>
     - Wait for background jobs (n seconds)
 
+15. find [path="."] name=<pattern>
+    - Finds files matching name pattern (e.g., "*.php", "config.yml")
+    - Example: find path=. name=*.sh
+
+16. tree [path="."] [depth=2]
+    - Shows directory tree with files
+    - Example: tree path=. depth=2
+
+17. stat <file_path>
+    - Shows file stats: size, modified date, permissions
+    - Example: stat build.sh
+
+18. wc <file_path>
+    - Counts lines, words, characters in file
+    - Example: wc build.sh
+
 MCP TOOLS:
 - List available: call mcp_servers tool
 - Call tool: mcp server=<name> tool=<tool> [param=value...]
@@ -1436,7 +1452,7 @@ name: ls
 params: path=.
 </tool_call>
 
-AVAILABLE TOOLS: ls, view, write, edit, glob, grep, bash, fetch, patch, diagnostics, goto, symbols, refs, mcp, bg, watch, permission, summarize
+AVAILABLE TOOLS: ls, view, write, edit, glob, grep, bash, fetch, patch, diagnostics, goto, symbols, refs, mcp, bg, watch, permission, summarize, find, tree, stat, wc
 
 EXAMPLES:
 - List files: <tool_call>

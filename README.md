@@ -12,18 +12,14 @@ chmod +x /usr/local/bin/ollamadev
 
 **Windows:**
 ```powershell
-# 1. Download binary to a folder
-mkdir $env:LOCALAPPDATA\ollamadev -Force
+# Download both files to same folder
 irm https://github.com/kennethyork/OllamaDev/releases/latest/download/ollamadev -OutFile $env:LOCALAPPDATA\ollamadev\ollamadev
+irm https://github.com/kennethyork/OllamaDev/releases/latest/download/ollamadev.bat -OutFile $env:LOCALAPPDATA\ollamadev\ollamadev.bat
 
-# 2. Create a .bat wrapper (save as ollamadev.bat in same folder)
-@echo off > $env:LOCALAPPDATA\ollamadev\ollamadev.bat
-echo php "%%~dp0ollamadev" %%* >> $env:LOCALAPPDATA\ollamadev\ollamadev.bat
-
-# 3. Add to PATH (permanent)
+# Add to PATH (permanent)
 [Environment]::SetEnvironmentVariable("PATH", $env:PATH + ";$env:LOCALAPPDATA\ollamadev", "User")
 
-# 4. Open new terminal and use like normal:
+# Open new terminal and use:
 ollamadev --help
 ```
 
