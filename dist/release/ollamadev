@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '3.2.0');
+define('OLLAMADEV_VERSION', '3.3.0');
 
 class Config {
     private static $config;
@@ -531,6 +531,23 @@ Tools::register('tail', function($p) {
     return $out;
 });
 
+Tools::register('changes', function($p) {
+    $path = $p['path'] ?? '.';
+    $since = $p['since'] ?? '1 hour ago';
+    $sinceTime = strtotime($since);
+    $changes = [];
+    exec("find " . escapeshellarg($path) . " -type f -newermt '" . date('Y-m-d H:i:s', $sinceTime) . "' 2>/dev/null", $files);
+    foreach ($files as $f) {
+        if (strpos($f, '.git') !== false || strpos($f, 'node_modules') !== false) continue;
+        $status = trim(shell_exec("cd " . escapeshellarg(dirname($f)) . " && git status --porcelain " . escapeshellarg(basename($f)) . " 2>/dev/null") ?: '??');
+        $changes[] = [$status, $f];
+    }
+    if (empty($changes)) return "No changes since $since";
+    $out = "Changes since $since:\n";
+    foreach ($changes as [$status, $f]) $out .= "[$status] $f\n";
+    return $out;
+});
+
 Tools::register('write', function($p) {
     $path = $p['file_path'] ?? ''; $content = $p['content'] ?? '';
     if (empty($path)) return "missing file_path";
@@ -695,6 +712,16 @@ Tools::register('mv', function($p) {
     $dst = $p['dst'] ?? $p['dest'] ?? $p['destination'] ?? '';
     if (empty($src) || empty($dst)) return "missing src or dst";
     return shell_exec("mv " . escapeshellarg($src) . " " . escapeshellarg($dst) . " 2>&1") ?: "Moved to $dst";
+});
+
+Tools::register('editor', function($p) {
+    $path = $p['file_path'] ?? '';
+    if (empty($path)) return "Usage: editor file_path=<path>";
+    if (!file_exists($path)) return "File not found: $path";
+    $editor = getenv('EDITOR') ?: (getenv('VISUAL') ?: 'nano');
+    $cmd = "$editor " . escapeshellarg($path) . " 2>&1";
+    exec($cmd, $out, $code);
+    return $code === 0 ? "Edited $path" : "Editor error: " . implode("\n", $out);
 });
 
 Tools::register('bash', function($p) {
