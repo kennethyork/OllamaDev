@@ -15,7 +15,7 @@ cat > "$BUILD_DIR/ollamadev" << 'ENDOFFILE'
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '3.6.0');
+define('OLLAMADEV_VERSION', '3.7.0');
 $GLOBALS['editedFiles'] = [];
 
 function isWindows(): bool { return str_stripos(PHP_OS, 'WIN') === 0; }
@@ -902,7 +902,24 @@ Tools::register('wait_bg', function($p) {
 Tools::register('fetch', function($p) {
     $url = $p['url'] ?? '';
     if (empty($url)) return "missing url";
-    return shell_exec("curl -fsSL --max-time " . ($p['timeout'] ?? 30) . " " . escapeshellarg($url) . " 2>&1") ?: "Failed to fetch $url";
+    $timeout = (int)($p['timeout'] ?? 30);
+    $ch = curl_init();
+    curl_setopt_array($ch, [
+        CURLOPT_URL => $url,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => $timeout,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_MAXREDIRS => 5,
+        CURLOPT_SSL_VERIFYPEER => false,
+    ]);
+    $result = curl_exec($ch);
+    if ($result === false) {
+        $error = curl_error($ch);
+        curl_close($ch);
+        return "Failed to fetch $url: $error";
+    }
+    curl_close($ch);
+    return $result ?: "Empty response from $url";
 });
 
 Tools::register('diagnostics', function($p) {
@@ -2561,9 +2578,16 @@ ENDOFFILE
 chmod +x "$BUILD_DIR/ollamadev"
 echo "Built: $BUILD_DIR/ollamadev"
 
+# Create batch wrapper for Windows
+cat > "$BUILD_DIR/ollamadev.bat" << 'BATEOF'
+@echo off
+php "%~dp0ollamadev" %*
+BATEOF
+
 # Create version info
-echo "v3.2.0" > "$BUILD_DIR/VERSION"
+echo "v3.7.0" > "$BUILD_DIR/VERSION"
 
 # Show file info
 ls -la "$BUILD_DIR/ollamadev"
+ls -la "$BUILD_DIR/ollamadev.bat"
 echo "Lines: $(wc -l < "$BUILD_DIR/ollamadev")"
