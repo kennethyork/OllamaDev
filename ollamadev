@@ -821,9 +821,12 @@ Tools::register('touch', function($p) {
 });
 
 Tools::register('cp', function($p) {
-    $src = $p['src'] ?? $p['source'] ?? '';
-    $dst = $p['dst'] ?? $p['dest'] ?? $p['destination'] ?? '';
+    $src = $p['src'] ?? $p['source'] ?? $p['target'] ?? '';
+    $dst = $p['dst'] ?? $p['dest'] ?? $p['destination'] ?? $p['target'] ?? '';
     if (empty($src) || empty($dst)) return "missing src or dst";
+    $home = getenv('HOME') ?: '/home/' . getenv('USER');
+    $src = $src === '~' ? $home : (str_starts_with($src, '~/') ? $home . substr($src, 1) : $src);
+    $dst = $dst === '~' ? $home : (str_starts_with($dst, '~/') ? $home . substr($dst, 1) : $dst);
     return shell_exec("cp -r " . escapeshellarg($src) . " " . escapeshellarg($dst) . " 2>&1") ?: "Copied to $dst";
 });
 
