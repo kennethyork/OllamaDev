@@ -108,6 +108,10 @@ class Config {
         return str_starts_with($dir, '/') ? $dir : getcwd() . '/' . $dir;
     }
 
+    public static function binaryPath(): string {
+        return $_SERVER['argv'][0] ?? 'ollamadev';
+    }
+
     public static function sessionsDir(): string { return self::dataDir() . '/sessions'; }
 }
 
@@ -1469,7 +1473,7 @@ class Agent {
         $this->systemPrompt = $this->buildSystemPrompt();
     }
 
-    private function buildSystemPrompt(): array {
+    public function buildSystemPrompt(): array {
         $manualPrompt = Config::get('agents.systemPrompt', '');
         $prompt = !empty($manualPrompt) ? $manualPrompt : SystemPrompts::detectForModel($this->model);
 
@@ -1983,7 +1987,7 @@ class TUI {
 
 class TerminalManager
 {
-    private string $baseDir;
+    public string $baseDir;
 
     public function __construct()
     {
@@ -2034,7 +2038,10 @@ class TerminalManager
     {
         $terminal = $this->loadTerminal($name);
         if (!$terminal) return ['error' => "Terminal '$name' not found"];
-        return $terminal;
+        $terminal['status'] = 'running';
+        $terminal['last_used'] = date('Y-m-d H:i:s');
+        $this->saveTerminal($name, $terminal);
+        return ['name' => $name, 'status' => 'running'];
     }
 
     public function stop(string $name): bool
@@ -2045,6 +2052,26 @@ class TerminalManager
         $terminal['status'] = 'stopped';
         $this->saveTerminal($name, $terminal);
         return true;
+    }
+
+    public function pause(string $name): array
+    {
+        $terminal = $this->loadTerminal($name);
+        if (!$terminal) return ['error' => "Terminal '$name' not found"];
+        if ($terminal['status'] !== 'running') return ['error' => "Terminal '$name' is not running"];
+        $terminal['status'] = 'paused';
+        $this->saveTerminal($name, $terminal);
+        return ['success' => true, 'name' => $name, 'status' => 'paused'];
+    }
+
+    public function resume(string $name): array
+    {
+        $terminal = $this->loadTerminal($name);
+        if (!$terminal) return ['error' => "Terminal '$name' not found"];
+        if ($terminal['status'] !== 'paused') return ['error' => "Terminal '$name' is not paused"];
+        $terminal['status'] = 'running';
+        $this->saveTerminal($name, $terminal);
+        return ['success' => true, 'name' => $name, 'status' => 'running'];
     }
 
     public function delete(string $name): bool
@@ -3092,10 +3119,8 @@ if ($cmd === 'chat') {
         echo "Commands:\n";
         echo "  terminal list              List all terminals\n";
         echo "  terminal create <name> [--model <model>] [--cwd <path>]\n";
-        echo "  terminal start <name>     Start a terminal (daemon mode)\n";
-        echo "  terminal stop <name>      Stop terminal (save state)\n";
-        echo "  terminal pause <name>     Pause a running terminal\n";
-        echo "  terminal resume <name>    Resume a paused terminal\n";
+        echo "  terminal start <name>     Mark terminal as running\n";
+        echo "  terminal stop <name>      Mark terminal as stopped\n";
         echo "  terminal delete <name>    Delete a terminal\n";
         echo "  terminal attach <name>     Attach to terminal interactively\n";
         echo "  terminal detach           Detach from terminal (background)\n";
@@ -3121,6 +3146,7 @@ if ($cmd === 'chat') {
         $result = $tm->create($name, $model, $cwd);
         if (isset($result['error'])) { echo "Error: {$result['error']}\n"; exit(1); }
         echo "Created terminal '$name' with model {$model}\n";
+        echo "\nUse 'ollamadev terminal attach $name' to start chatting\n";
     } elseif ($sub === 'spawn') {
         $count = max(1, min(10, (int)($arg2 ?: 1)));
         $model = $flags['model'] ?? 'llama3.2:latest';
@@ -3130,8 +3156,7 @@ if ($cmd === 'chat') {
         for ($i = 1; $i <= $count; $i++) {
             $name = $prefix . '-' . $i;
             $tm->create($name, $model, $cwd);
-            $tm->start($name);
-            echo "  Created $name (cwd: $cwd)\n";
+            echo "  Created $name\n";
         }
         echo "\nUse 'ollamadev terminal attach <name>' to interact\n";
     } elseif ($sub === 'start') {
@@ -3139,7 +3164,7 @@ if ($cmd === 'chat') {
         if (!$name) { echo "Usage: terminal start <name>\n"; exit(1); }
         $result = $tm->start($name);
         if (isset($result['error'])) { echo "Error: {$result['error']}\n"; exit(1); }
-        echo "Started terminal '$name' (PID: {$result['pid']})\n";
+        echo "Started terminal '$name'\n";
     } elseif ($sub === 'stop') {
         $name = $arg2;
         if (!$name) { echo "Usage: terminal stop <name>\n"; exit(1); }
@@ -3189,10 +3214,7 @@ if ($cmd === 'chat') {
         echo "\nType your message and press Enter.\n";
         echo "Press Ctrl+C to detach (terminal stays running in background).\n";
         echo "Type 'exit' or 'quit' to stop the terminal completely.\n\n";
-        pcntl_signal(SIGINT, function() use ($name, $tm) {
-            echo "\nDetached from terminal '$name' (still running)\n";
-            exit(0);
-        });
+        pcntl_signal(SIGINT, function() { echo "\nDetached from terminal (still running in background)\n"; exit(0); });
         while (true) {
             if (file_exists($tm->baseDir . "/$name/broadcast.txt")) {
                 $bc = trim(file_get_contents($tm->baseDir . "/$name/broadcast.txt"));
@@ -3206,12 +3228,17 @@ if ($cmd === 'chat') {
                 break;
             }
             if (empty($input)) continue;
-            $agent = new Agent();
-            $agent->setModel($terminal['model']);
-            chdir($terminal['cwd']);
-            $result = $agent->run([$agent->buildSystemPrompt(), ['role' => 'user', 'content' => $input]]);
-            echo "\n$result\n";
-            file_put_contents($tm->baseDir . "/$name/session.log", "\n[user] $input\n[ai] $result\n", FILE_APPEND);
+            file_put_contents($tm->baseDir . "/$name/input.txt", $input);
+            $responseFile = $tm->baseDir . "/$name/response.txt";
+            $timeout = 60;
+            $start = time();
+            while (!file_exists($responseFile) && (time() - $start) < $timeout) { usleep(100000); }
+            if (file_exists($responseFile)) {
+                echo "\n" . file_get_contents($responseFile) . "\n";
+                unlink($responseFile);
+            } else {
+                echo "\n[Timeout waiting for response - terminal may need restart]\n";
+            }
         }
         echo "Detached from terminal '$name'\n";
     } elseif ($sub === 'detach') {
