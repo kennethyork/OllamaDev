@@ -15,7 +15,7 @@ cat > "$BUILD_DIR/ollamadev" << 'ENDOFFILE'
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '0.1.0');
+define('OLLAMADEV_VERSION', '3.2.0');
 
 class Config {
     private static $config;
@@ -2276,7 +2276,7 @@ chmod +x "$BUILD_DIR/ollamadev"
 echo "Built: $BUILD_DIR/ollamadev"
 
 # Create version info
-echo "v0.1.0" > "$BUILD_dir/VERSION"
+echo "v3.2.0" > "$BUILD_DIR/VERSION"
 
 # Show file info
 ls -la "$BUILD_DIR/ollamadev"
