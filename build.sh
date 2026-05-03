@@ -15,7 +15,7 @@ cat > "$BUILD_DIR/ollamadev" << 'ENDOFFILE'
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '3.3.0');
+define('OLLAMADEV_VERSION', '3.5.0');
 $GLOBALS['editedFiles'] = [];
 
 class Config {
@@ -1136,7 +1136,22 @@ class SystemPrompts {
 
         'mistral' => 'You are Mistral, a helpful AI assistant running locally via Ollama. Be concise and accurate.',
 
-        'codellama' => 'You are CodeLLama, an AI coding assistant. You specialize in writing, reading, and debugging code. Provide specific code examples with file paths and line numbers.',
+        'codellama' => "You are CodeLLama, a CLI coding assistant. Extract parameters from user request and call tools. NEVER explain, NEVER ask permission.
+
+Tool format: <tool_code>{\"name\": \"TOOL\", \"arguments\": {\"PARAM\": \"VALUE\"}}</tool_code>
+
+Tools:
+- ls path=DIRECTORY
+- view file_path=PATH [offset=0] [limit=100]
+- write file_path=PATH content=TEXT
+- edit file_path=PATH old_string=TEXT new_string=TEXT
+- glob pattern=GLOB
+- grep pattern=REGEX path=PATH
+- bash command=CMD
+- diagnostics path=PATH
+- goto path=PATH symbol=SYMBOL
+- symbols path=PATH
+- refs path=PATH symbol=SYMBOL",
 
         'qwen' => "You are Qwen. You MUST call tools to perform actions. NEVER describe what you would do - actually call the tools.
 
@@ -1152,14 +1167,27 @@ Response: <tool_code>\n{\"name\": \"glob\", \"arguments\": {\"pattern\": \"*.php
 
 Available tools: ls, view, write, edit, glob, grep, bash, fetch, patch, diagnostics",
 
-'phi' => 'You are Phi, a compact AI assistant running locally via Ollama. Be efficient and thorough. When asked to list files, ACTUALLY CALL THE TOOL - do not explain how to do it. Tools execute directly - do NOT ask for permission.',
+'phi' => "You are Phi, a CLI coding assistant. Extract parameters from user request and call tools. NEVER explain, NEVER ask permission.
+
+Tool format: <tool_code>{\"name\": \"TOOL\", \"arguments\": {\"PARAM\": \"VALUE\"}}</tool_code>
+
+Tools: ls, view, write, edit, glob, grep pattern=REGEX path=PATH, bash command=CMD, diagnostics path=PATH, goto path=PATH symbol=NAME, symbols path=PATH, refs path=PATH symbol=NAME",
 
         'wizard' => "You are WizardCoder. When user asks you to list files, read files, or run commands - you MUST actually call the tool now, not explain how to do it. Tools execute directly - do NOT ask for permission.",
 
         'starcoder' => "You are StarCoder. When user asks you to list files, read files, or run commands - you MUST actually call the tool now, not explain how to do it. Tools execute directly - do NOT ask for permission.",
         'smollm' => "You are a compact AI assistant. When asked to list files, you MUST call the ls tool. Execute: <tool_code>{\"name\": \"ls\", \"arguments\": {\"path\": \".\"}}</tool_code> Tools execute directly - do NOT ask for permission.",
 
-        'gpt-oss' => "You are running as a CLI tool with file system access. When user asks to list files, you MUST use the ls tool. Execute this EXACT format: <tool_code>{\"name\": \"ls\", \"arguments\": {\"path\": \".\"}}</tool_code> Do NOT say you cannot access files. Do NOT explain. Call the tool now. Tools execute directly - do NOT ask for permission.",
+        'gpt-oss' => 'You are a CLI tool with file access. When user asks to view, list, read, write, edit, search, or run commands - ALWAYS call the appropriate tool.
+
+For file operations:
+- "view FILE" → <tool_code>{"name": "view", "arguments": {"file_path": "FILE"}}</tool_code>
+- "ls DIR" → <tool_code>{"name": "ls", "arguments": {"path": "DIR"}}</tool_code>
+- "write FILE CONTENT" → <tool_code>{"name": "write", "arguments": {"file_path": "FILE", "content": "CONTENT"}}</tool_code>
+- "grep PATTERN FILE" → <tool_code>{"name": "grep", "arguments": {"pattern": "PATTERN", "path": "FILE"}}</tool_code>
+- "glob PATTERN" → <tool_code>{"name": "glob", "arguments": {"pattern": "PATTERN"}}</tool_code>
+
+DO NOT explain. DO NOT ask questions. Just call the tool.',
 
         'default' => 'You are an expert AI coding assistant running locally via Ollama. Local models need EXPLICIT instructions. Do not assume anything. State everything clearly. Tools execute directly - do NOT ask for permission.',
     ];
@@ -1289,16 +1317,52 @@ name: ls
 params: path=.
 </tool_call>
 
-EXAMPLE - To list files in current directory:
-<tool_call>
-name: ls
-params: path=.
-</tool_call>
+AVAILABLE TOOLS: ls, view, write, edit, glob, grep, bash, fetch, patch, diagnostics, goto, symbols, refs, mcp, bg, watch, permission, summarize
 
-EXAMPLE - To search for files:
-<tool_call>
-name: glob
-params: pattern=*.php
+EXAMPLES:
+- List files: <tool_call>
+name: ls
+params: path=/tmp
+</tool_call>
+- View file: <tool_call>
+name: view
+params: file_path=build.sh
+</tool_call>
+- Write file: <tool_call>
+name: write
+params: file_path=/tmp/test.txt content=hello
+</tool_call>
+- Grep: <tool_call>
+name: grep
+params: pattern=Permission path=build.sh
+</tool_call>
+- Bash: <tool_call>
+name: bash
+params: command=pwd
+</tool_call>
+- Diagnostics: <tool_call>
+name: diagnostics
+params: path=build.sh
+</tool_call>
+- Goto definition: <tool_call>
+name: goto
+params: path=build.sh symbol=Permission
+</tool_call>
+- Find references: <tool_call>
+name: refs
+params: path=build.sh symbol=Permission
+</tool_call>
+- List symbols: <tool_call>
+name: symbols
+params: path=build.sh
+</tool_call>
+- Watch: <tool_call>
+name: watch
+params: path=. timeout=5
+</tool_call>
+- MCP: <tool_call>
+name: mcp
+params: server=filesystem tool=list
 </tool_call>';
 
         return ['role' => 'system', 'content' => $prompt . "\n\n" . $tools];
@@ -1310,10 +1374,10 @@ params: pattern=*.php
     public function listModelsDetailed(): array { return $this->client->listModelsDetailed(); }
     public function checkConnection(): bool { return $this->client->checkConnection(); }
 
-    public function run(array $messages, callable $handler = null): string {
+public function run(array $messages, callable $handler = null): string {
         $allMessages = array_merge([$this->systemPrompt], $messages);
         $response = '';
-        $this->client->chatWithModel($this->model, $allMessages, function($chunk) use (&$response, $handler) {
+        $this->client->chat($allMessages, function($chunk) use (&$response, $handler) {
             $response .= $chunk;
             if ($handler) $handler($chunk);
         });
@@ -1321,8 +1385,9 @@ params: pattern=*.php
     }
 
     public function parseAndExecuteTools(string $content): array {
+        $calls = $this->parseToolCalls($content);
         $results = [];
-        foreach ($this->parseToolCalls($content) as $call) {
+        foreach ($calls as $call) {
             $tool = Tools::find($call['name']);
             $params = $call['params'] ?? [];
             $result = $tool ? Tools::run($call['name'], $params) : "Error: tool '{$call['name']}' not found";
@@ -1398,19 +1463,51 @@ private function parseToolCalls(string $content): array {
             if (!empty($calls)) return $calls;
         }
 
+if (preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*\n(.+?)\n\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $m) {
+                $params = [];
+                $paramStr = trim($m[2]);
+                preg_match_all('/([a-zA-Z_][a-zA-Z0-9_]*)=("[^"]*"|\'[^\']*\'|[^,\n]+)/', $paramStr, $kvMatches);
+                foreach ($kvMatches[1] as $i => $key) {
+                    $val = trim($kvMatches[2][$i], "\"' ");
+                    $params[$key] = $val;
+                }
+                $toolName = trim($m[1]);
+                if (!empty($params) || !empty($toolName)) {
+                    $calls[] = ['name' => $toolName, 'params' => $params];
+                }
+            }
+            if (!empty($calls)) return $calls;
+        }
+
         if (preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*(.+?)\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
             foreach ($matches as $m) {
                 $params = [];
                 $paramStr = trim($m[2]);
                 $paramStr = trim($paramStr, ',');
-                preg_match_all('/([a-zA-Z_]+)=("[^"]*"|\'[^\']*\'|[^,\s]+)/', $paramStr, $kvMatches);
+                preg_match_all('/([a-zA-Z_][a-zA-Z0-9_]*)=("[^"]*"|\'[^\']*\'|[^,\s]+)/', $paramStr, $kvMatches);
                 foreach ($kvMatches[1] as $i => $key) {
                     $val = trim($kvMatches[2][$i], "\"' ");
                     $params[$key] = $val;
                 }
-                if (!empty($params) || !empty(trim($m[1]))) {
-                    $calls[] = ['name' => $m[1], 'params' => $params];
+                $toolName = trim($m[1]);
+                if (!empty($params) || !empty($toolName)) {
+                    $calls[] = ['name' => $toolName, 'params' => $params];
                 }
+            }
+            if (!empty($calls)) return $calls;
+        }
+
+        if (preg_match_all('/<tool_call>\s*(\w+)\s*\n\s*params:\s*(.+?)\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $m) {
+                $params = [];
+                $paramStr = trim($m[2]);
+                preg_match_all('/([a-zA-Z_][a-zA-Z0-9_]*)=("[^"]*"|\'[^\']*\'|[^,\n]+)/', $paramStr, $kvMatches);
+                foreach ($kvMatches[1] as $i => $key) {
+                    $val = trim($kvMatches[2][$i], "\"' ");
+                    $params[$key] = $val;
+                }
+                $calls[] = ['name' => trim($m[1]), 'params' => $params];
             }
             if (!empty($calls)) return $calls;
         }
