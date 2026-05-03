@@ -5,6 +5,7 @@ require_once __DIR__ . '/OllamaClient.php';
 require_once __DIR__ . '/Agent.php';
 require_once __DIR__ . '/Session.php';
 require_once __DIR__ . '/Tools.php';
+require_once __DIR__ . '/Terminal.php';
 
 $config = Config::load();
 

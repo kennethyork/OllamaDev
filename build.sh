@@ -1892,6 +1892,111 @@ class TUI {
     }
 }
 
+class TerminalManager
+{
+    private string $baseDir;
+
+    public function __construct()
+    {
+        $home = getenv('HOME') ?: (getenv('USERPROFILE') ?: '/tmp');
+        $this->baseDir = $home . '/.ollamadev/terminals';
+        if (!is_dir($this->baseDir)) {
+            mkdir($this->baseDir, 0755, true);
+        }
+    }
+
+    public function list(): array
+    {
+        $terminals = [];
+        if (is_dir($this->baseDir)) {
+            foreach (scandir($this->baseDir) as $name) {
+                if ($name === '.' || $name === '..') continue;
+                $dir = $this->baseDir . '/' . $name;
+                if (is_dir($dir)) {
+                    $terminals[] = $this->loadTerminal($name);
+                }
+            }
+        }
+        return $terminals;
+    }
+
+    public function create(string $name, string $model, ?string $cwd = null): array
+    {
+        if ($this->exists($name)) {
+            return ['error' => "Terminal '$name' already exists"];
+        }
+        $dir = $this->baseDir . '/' . $name;
+        mkdir($dir, 0755, true);
+        mkdir($dir . '/history', 0755, true);
+        $terminal = [
+            'name' => $name,
+            'model' => $model,
+            'created' => date('Y-m-d H:i:s'),
+            'last_used' => date('Y-m-d H:i:s'),
+            'cwd' => $cwd ?? getcwd(),
+            'pid' => null,
+            'status' => 'stopped'
+        ];
+        $this->saveTerminal($name, $terminal);
+        return $terminal;
+    }
+
+    public function start(string $name): array
+    {
+        $terminal = $this->loadTerminal($name);
+        if (!$terminal) return ['error' => "Terminal '$name' not found"];
+        return $terminal;
+    }
+
+    public function stop(string $name): bool
+    {
+        $terminal = $this->loadTerminal($name);
+        if (!$terminal) return false;
+        if ($terminal['pid']) { shell_exec("kill " . (int)$terminal['pid'] . " 2>/dev/null"); }
+        $terminal['status'] = 'stopped';
+        $this->saveTerminal($name, $terminal);
+        return true;
+    }
+
+    public function delete(string $name): bool
+    {
+        $dir = $this->baseDir . '/' . $name;
+        if (!is_dir($dir)) return false;
+        $this->stop($name);
+        shell_exec("rm -rf " . escapeshellarg($dir));
+        return true;
+    }
+
+    public function exists(string $name): bool { return is_dir($this->baseDir . '/' . $name); }
+
+    public function loadTerminal(string $name): ?array
+    {
+        $file = $this->baseDir . '/' . $name . '/session.json';
+        return file_exists($file) ? json_decode(file_get_contents($file), true) : null;
+    }
+
+    public function saveTerminal(string $name, array $terminal): void
+    {
+        file_put_contents($this->baseDir . '/' . $name . '/session.json', json_encode($terminal, JSON_PRETTY_PRINT));
+    }
+
+    public function getLog(string $name, int $lines = 100): string
+    {
+        $logFile = $this->baseDir . '/' . $name . '/session.log';
+        return file_exists($logFile) ? shell_exec("tail -n " . (int)$lines . " " . escapeshellarg($logFile)) : '';
+    }
+
+    public function status(): array
+    {
+        $terminals = $this->list();
+        $running = $stopped = 0;
+        foreach ($terminals as $t) {
+            if ($t['status'] === 'running') $running++; else $stopped++;
+        }
+        return ['total' => count($terminals), 'running' => $running, 'stopped' => $stopped, 'terminals' => $terminals];
+    }
+}
+
 class Session {
     private array $config;
     private string $id;
@@ -2586,6 +2691,101 @@ if ($cmd === 'chat') {
     $session = new Session($config);
     $session->addMessage('user', $arg1);
     echo $session->runSingle($arg1) . "\n";
+} elseif ($cmd === 'terminal' || $cmd === 'term') {
+    $sub = $arg1 ?: 'help';
+    $tm = new TerminalManager();
+    if ($sub === 'help' || $sub === '--help') {
+        echo "OllamaDev Terminal Manager\n";
+        echo "Usage: ollamadev terminal <command> [options]\n\n";
+        echo "Commands:\n";
+        echo "  terminal list              List all terminals\n";
+        echo "  terminal create <name> [--model <model>] [--cwd <path>]\n";
+        echo "  terminal start <name>      Start a terminal\n";
+        echo "  terminal stop <name>       Stop a terminal\n";
+        echo "  terminal delete <name>     Delete a terminal\n";
+        echo "  terminal attach <name>     Attach to terminal interactively\n";
+        echo "  terminal log <name> [n]    View last n lines of log\n";
+        echo "  terminal spawn <n> [--model <model>]  Spawn n terminals\n\n";
+        echo "Examples:\n";
+        echo "  ollamadev terminal create dev --model llama3.2:latest\n";
+        echo "  ollamadev terminal spawn 4 --model deepseek-r1:32b\n";
+        echo "  ollamadev terminal list\n";
+    } elseif ($sub === 'list' || $sub === 'ls') {
+        $status = $tm->status();
+        echo "Terminals: {$status['total']} | Running: {$status['running']} | Stopped: {$status['stopped']}\n\n";
+        foreach ($status['terminals'] as $t) {
+            $icon = $t['status'] === 'running' ? '🟢' : '⚫';
+            echo "$icon {$t['name']} | {$t['model']} | {$t['status']} | cwd: {$t['cwd']}\n";
+        }
+    } elseif ($sub === 'create' || $sub === 'new') {
+        $name = $arg2 ?: 'terminal-' . time();
+        $model = $flags['model'] ?? 'llama3.2:latest';
+        $cwd = $flags['cwd'] ?? getcwd();
+        $result = $tm->create($name, $model, $cwd);
+        if (isset($result['error'])) { echo "Error: {$result['error']}\n"; exit(1); }
+        echo "Created terminal '$name' with model {$model}\n";
+    } elseif ($sub === 'spawn') {
+        $count = max(1, min(10, (int)($arg2 ?: 1)));
+        $model = $flags['model'] ?? 'llama3.2:latest';
+        $prefix = $flags['prefix'] ?? 'term';
+        echo "Spawning $count terminals with model $model...\n";
+        for ($i = 1; $i <= $count; $i++) {
+            $name = $prefix . '-' . $i;
+            $tm->create($name, $model, getcwd());
+            echo "  Created $name\n";
+        }
+        echo "\nUse 'ollamadev terminal attach <name>' to interact\n";
+    } elseif ($sub === 'start') {
+        $name = $arg2;
+        if (!$name) { echo "Usage: terminal start <name>\n"; exit(1); }
+        $result = $tm->start($name);
+        if (isset($result['error'])) { echo "Error: {$result['error']}\n"; exit(1); }
+        echo "Started terminal '$name' (PID: {$result['pid']})\n";
+    } elseif ($sub === 'stop') {
+        $name = $arg2;
+        if (!$name) { echo "Usage: terminal stop <name>\n"; exit(1); }
+        $tm->stop($name);
+        echo "Stopped terminal '$name'\n";
+    } elseif ($sub === 'delete' || $sub === 'rm') {
+        $name = $arg2;
+        if (!$name) { echo "Usage: terminal delete <name>\n"; exit(1); }
+        $tm->delete($name);
+        echo "Deleted terminal '$name'\n";
+    } elseif ($sub === 'attach') {
+        $name = $arg2;
+        if (!$name) { echo "Usage: terminal attach <name>\n"; exit(1); }
+        if (!$tm->exists($name)) { echo "Terminal '$name' not found\n"; exit(1); }
+        echo "Attaching to terminal '$name'... (Ctrl+C to detach)\n";
+        $terminal = $tm->loadTerminal($name);
+        echo "Model: {$terminal['model']}\n";
+        echo "Working directory: {$terminal['cwd']}\n";
+        echo "Log:\n" . str_repeat('-', 40) . "\n";
+        echo $tm->getLog($name, 20);
+        echo str_repeat('-', 40) . "\n";
+        echo "\nType your message and press Enter:\n";
+        while (true) {
+            echo "\n[{$name}]> ";
+            $input = trim(fgets(STDIN));
+            if ($input === 'exit' || $input === 'quit') break;
+            if (empty($input)) continue;
+            $agent = new Agent();
+            $agent->setModel($terminal['model']);
+            chdir($terminal['cwd']);
+            $result = $agent->run([$agent->buildSystemPrompt(), ['role' => 'user', 'content' => $input]]);
+            echo "\n$result\n";
+            file_put_contents($tm->baseDir . "/$name/session.log", "\n[user] $input\n[ai] $result\n", FILE_APPEND);
+        }
+        echo "Detached from terminal '$name'\n";
+    } elseif ($sub === 'log') {
+        $name = $arg2;
+        if (!$name) { echo "Usage: terminal log <name> [lines]\n"; exit(1); }
+        $lines = $arg3 ?: 50;
+        echo $tm->getLog($name, $lines);
+    } else {
+        echo "Unknown terminal command: $sub\n";
+        echo "Run 'ollamadev terminal help' for usage\n";
+        exit(1);
+    }
 } elseif (empty($cmd)) {
     (new Session($config))->start();
 } else {
