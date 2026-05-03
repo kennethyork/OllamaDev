@@ -592,19 +592,63 @@ class Tools {
     public static function find(string $name): ?callable { return self::$tools[$name] ?? null; }
     public static function run(string $name, array $params): string {
         $fn = self::find($name);
-        if (!$fn) return "Error: tool '$name' not found";
-        if (!Permission::isAllowed($name)) return "PERMISSION_DENIED:$name";
-        try { return $fn($params); } catch (Exception $e) { return "Error: " . $e->getMessage(); }
+        if (!$fn) return CmdError::toolNotFound($name);
+        if (!Permission::isAllowed($name)) return CmdError::permissionDenied($name);
+        try { return $fn($params); } catch (Exception $e) { return CmdError::toolFailed($name, $e->getMessage()); }
     }
     public static function all(): array { return array_keys(self::$tools); }
 }
 
+class CmdError {
+    public static function toolNotFound(string $tool): string {
+        $suggestions = self::suggestSimilar($tool, Tools::all());
+        $suggest = $suggestions ? " Did you mean: $suggestions?" : "";
+        return "ollamadev: '$tool' is not a valid tool.$suggest\nRun 'ollamadev help tools' for available tools.";
+    }
+
+    public static function permissionDenied(string $tool): string {
+        return "ollamadev: permission denied for tool '$tool'\nUse 'ollamadev permission allow $tool' to grant access.";
+    }
+
+    public static function toolFailed(string $tool, string $reason): string {
+        return "ollamadev: tool '$tool' failed\n  Reason: $reason\nRun 'ollamadev help tools' for usage examples.";
+    }
+
+    public static function fileNotFound(string $path, string $tool = ''): string {
+        $extra = $tool ? " for '$tool'" : '';
+        return "ollamadev: file not found'$extra': $path\nHint: Use absolute paths or paths relative to current directory.";
+    }
+
+    public static function missingParam(string $param, string $tool = ''): string {
+        $extra = $tool ? " in '$tool'" : '';
+        return "ollamadev: missing required parameter '$param'$extra\nUsage: ollamadev help $tool";
+    }
+
+    public static function invalidArg(string $arg, string $reason, string $tool = ''): string {
+        $extra = $tool ? " for '$tool'" : '';
+        return "ollamadev: invalid argument '$arg'$extra\n  $reason";
+    }
+
+    private static function suggestSimilar(string $input, array $candidates): string {
+        $closest = '';
+        $minDist = PHP_INT_MAX;
+        foreach ($candidates as $c) {
+            $dist = levenshtein($input, $c);
+            if ($dist < $minDist && $dist <= 3) {
+                $minDist = $dist;
+                $closest = $c;
+            }
+        }
+        return $closest ? "'$closest'" : '';
+    }
+}
+
 Tools::register('view', function($p) {
     $path = $p['file_path'] ?? $p['file'] ?? $p['path'] ?? '';
-    if (empty($path)) return "missing file_path";
-    if (!file_exists($path)) return "File not found: $path";
+    if (empty($path)) return CmdError::missingParam('file_path', 'view');
+    if (!file_exists($path)) return CmdError::fileNotFound($path, 'view');
     $lines = file($path);
-    if ($lines === false) return "Error reading file: $path";
+    if ($lines === false) return CmdError::invalidArg($path, 'Unable to read file. Check permissions.', 'view');
     $offset = isset($p['offset']) ? (int)$p['offset'] : 0;
     $limit = isset($p['limit']) ? (int)$p['limit'] : count($lines);
     $out = '';
@@ -907,12 +951,15 @@ Tools::register('cp', function($p) {
 Tools::register('rm', function($p) {
     $path = $p['path'] ?? $p['file_path'] ?? '';
     $recursive = $p['recursive'] ?? $p['r'] ?? false;
-    if (empty($path)) return "missing path";
-    if (str_contains($path, 'node_modules') || str_contains($path, '.git')) return "Cannot remove system directories";
-    if ($recursive) {
-        return shell_exec("rm -rf " . escapeshellarg($path) . " 2>&1") ?: "Removed: $path";
+    $dryRun = $p['dry_run'] ?? $p['dry-run'] ?? false;
+    if (empty($path)) return CmdError::missingParam('path', 'rm');
+    if (str_contains($path, 'node_modules') || str_contains($path, '.git')) return CmdError::invalidArg('path', 'Cannot remove system directories (node_modules, .git)', 'rm');
+    $cmd = ($recursive ? 'rm -rf' : 'rm') . ' ' . escapeshellarg($path);
+    if ($dryRun) {
+        return "[DRY RUN] Would execute: $cmd\n[DRY RUN] Target: $path\n[DRY RUN] Recursive: " . ($recursive ? 'yes' : 'no');
     }
-    return shell_exec("rm " . escapeshellarg($path) . " 2>&1") ?: "Removed: $path";
+    $result = shell_exec("$cmd 2>&1") ?: "Removed: $path";
+    return $result;
 });
 
 Tools::register('mv', function($p) {
@@ -2560,11 +2607,86 @@ if (empty($flags['model']) && getenv('MODEL')) $flags['model'] = getenv('MODEL')
 // Completion Command
 if ($argc >= 2 && $argv[1] === 'completion') {
     $shell = $argv[2] ?? 'bash';
-    echo "# ollamadev shell completion ($shell)\n";
+    echo "# OllamaDev shell completion ($shell) - Generated by ollamadev\n";
+    echo "# Install: ollamadev completion bash >> ~/.bashrc\n\n";
     if ($shell === 'bash') {
-        echo "complete -C 'ollamadev' ollamadev\n";
+        echo <<<'BASH'
+_ollamadev() {
+    local cur prev cword
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+    case "${prev}" in
+        help)
+            COMPREPLY=($(compgen -W 'topics usage options commands tools git terminal session examples tips' -- "${cur}"))
+            return 0
+            ;;
+        terminal)
+            COMPREPLY=($(compgen -W 'create spawn list attach start stop pause resume broadcast delete log help' -- "${cur}"))
+            return 0
+            ;;
+        git)
+            COMPREPLY=($(compgen -W 'status diff log branch commit push pull stash checkout add fetch merge rebase' -- "${cur}"))
+            return 0
+            ;;
+        lsp)
+            COMPREPLY=($(compgen -W '--port --hostname --help' -- "${cur}"))
+            return 0
+            ;;
+        -m|--model)
+            COMPREPLY=($(compgen -W 'llama3.2:latest deepseek-r1:32b gemma4:26b qwen3.6:27b' -- "${cur}"))
+            return 0
+            ;;
+        *)
+            COMPREPLY=($(compgen -W 'chat new list load terminal git lsp models help --help --version --model --prompt --continue --dry-run -h -v' -- "${cur}"))
+            ;;
+    esac
+    return 0
+}
+complete -F _ollamadev ollamadev
+BASH;
     } elseif ($shell === 'zsh') {
-        echo "compdef _ollamadev ollamadev\n";
+        echo <<<'ZSH'
+#compdef ollamadev
+
+_ollamadev() {
+    local -a commands
+    commands=(
+        'chat:Start chat session'
+        'new:Create new session'
+        'list:List sessions'
+        'load:Load session'
+        'terminal:Terminal multiplexer'
+        'git:Git commands'
+        'lsp:LSP server for IDEs'
+        'models:List available models'
+        'help:Show help'
+    )
+    _describe 'command' commands
+}
+
+_ollamadev "$@"
+ZSH;
+    } elseif ($shell === 'fish') {
+        echo <<<'FISH'
+# OllamaDev Fish Shell Completion
+
+complete -c ollamadev -n '__fish_use_subcommand' -a 'chat new list load terminal git lsp models help' -d 'Command'
+complete -c ollamadev -n '__fish_seen_subcommand_from terminal' -a 'create spawn list attach start stop pause resume broadcast delete log' -d 'Terminal command'
+complete -c ollamadev -n '__fish_seen_subcommand_from git' -a 'status diff log branch commit push pull stash checkout add' -d 'Git command'
+complete -c ollamadev -s h -l help -d 'Show help'
+complete -c ollamadev -s v -l version -d 'Show version'
+complete -c ollamadev -s m -l model -d 'Use specific model' -r
+FISH;
+    } else {
+        echo "Usage: ollamadev completion [bash|zsh|fish]\n";
+        echo "Generate shell completion script\n";
+        echo "\nExamples:\n";
+        echo "  ollamadev completion bash >> ~/.bashrc\n";
+        echo "  ollamadev completion zsh >> ~/.zshrc\n";
+        echo "  ollamadev completion fish > ~/.config/fish/completions/ollamadev.fish\n";
+        exit(1);
     }
     exit(0);
 }
@@ -2694,43 +2816,209 @@ $arg2 = $positional[2] ?? '';
 
 // Built-in single-word commands
 if ($cmd === 'help' || $flags['help']) {
-    echo "OllamaDev CLI v" . OLLAMADEV_VERSION . " - Local AI coding agent using Ollama\n\n";
-    echo "Usage: ollamadev [command] [options]\n\n";
-    echo "Commands:\n";
-    echo "  ollamadev            Start interactive chat\n";
-    echo "  ollamadev chat       Start chat session\n";
-    echo "  ollamadev new        Create new session\n";
-    echo "  ollamadev list       List sessions\n";
-    echo "  ollamadev load <id>  Load session\n";
-    echo "  ollamadev git        Git commands (status, diff, commit, etc.)\n";
-    echo "  ollamadev github pr  Fetch and checkout GitHub PR\n";
-    echo "  ollamadev mcp        Manage MCP servers\n";
-    echo "  ollamadev serve      Start web interface\n";
-    echo "  ollamadev plugin     Manage plugins\n";
-    echo "  ollamadev export     Export session to JSON\n";
-    echo "  ollamadev import     Import session from JSON\n";
-    echo "  ollamadev stats      Show usage statistics\n";
-    echo "  ollamadev models     List available models\n";
-    echo "  ollamadev providers  Show provider config\n";
-    echo "  ollamadev compact    Compact session history\n";
-    echo "  ollamadev upgrade    Check for updates\n";
-    echo "  ollamadev completion Generate shell completion\n";
-    echo "  ollamadev debug      Debug info\n";
-    echo "  ollamadev db         Database tools\n";
-    echo "  ollamadev uninstall  Uninstall OllamaDev\n";
-    echo "  ollamadev help       Show this help\n";
-    echo "\nOptions:\n";
-    echo "  -m, --model <name>      Use specific model\n";
-    echo "  -c, --continue          Continue last session\n";
-    echo "  -s, --session <id>      Use specific session\n";
-    echo "  --fork                  Fork session when continuing\n";
-    echo "  --prompt <text>         Prompt to use\n";
-    echo "  --agent <name>          Agent to use\n";
-    echo "  --port <num>            Port for server\n";
-    echo "  --hostname <host>       Hostname for server\n";
-    echo "  --mdns                  Enable mDNS discovery\n";
-    echo "  -h, --help              Show help\n";
-    echo "  -v, --version           Show version\n";
+    $topic = $arg1 ?: 'topics';
+    $topics = [
+        'topics' => [
+            'description' => 'Available help topics',
+            'commands' => ['usage', 'options', 'commands', 'tools', 'git', 'terminal', 'session', 'examples', 'tips']
+        ],
+        'usage' => [
+            'description' => 'Basic usage',
+            'text' => <<<'USAGE'
+Usage: ollamadev [command] [options]
+
+Quick Start:
+  ollamadev                    # Interactive chat
+  ollamadev chat "your prompt" # Single prompt
+  ollamadev terminal attach dev # Attach to terminal
+
+Flags:
+  --model <name>    Use specific model
+  --prompt <text>   Run single prompt
+  --continue        Continue last session
+USAGE
+        ],
+        'options' => [
+            'description' => 'Global options',
+            'text' => <<<'OPTIONS'
+Options:
+  -m, --model <name>      Use specific model
+  -c, --continue          Continue last session
+  -s, --session <id>      Use specific session
+  --fork                   Fork session when continuing
+  --prompt <text>          Prompt to use
+  --agent <name>           Agent to use
+  --port <num>             Port for server
+  --hostname <host>        Hostname for server
+  --dry-run                Show what would be done
+  -h, --help               Show help
+  -v, --version           Show version
+OPTIONS
+        ],
+        'commands' => [
+            'description' => 'All commands',
+            'text' => <<<'COMMANDS'
+Commands:
+  ollamadev            Start interactive chat
+  ollamadev chat       Start chat session
+  ollamadev new        Create new session
+  ollamadev list       List sessions
+  ollamadev load <id>  Load session
+  ollamadev git        Git commands (status, diff, commit, etc.)
+  ollamadev terminal   Terminal multiplexer
+  ollamadev lsp        LSP server for IDEs
+  ollamadev help [topic] Show help
+
+See 'ollamadev help <topic>' for detailed help.
+COMMANDS
+        ],
+        'tools' => [
+            'description' => 'Available AI tools (66 total)',
+            'text' => <<<'TOOLS'
+Tools - Use in chat or directly:
+  File: view, cat, head, tail, read, write, edit, patch, touch, mkdir, rm, cp, mv
+  Search: grep, find, tree, glob, wc, stat, diff, sort, uniq
+  Git: git_status, git_diff, git_log, git_branch, git_checkout, git_commit
+  Code: goto, goto_definition, find_refs, symbols, hover, diagnostics, format, lsp
+  System: bash, execute_command, editor, watch, fetch, bg, wait_bg, agent
+
+Examples:
+  view file_path=src/main.php
+  write file_path=src/test.php content="<php code>"
+  grep pattern="function foo" path=src/
+  bash command="ls -la"
+
+Use without parameters to see tool-specific help.
+TOOLS
+        ],
+        'git' => [
+            'description' => 'Git commands',
+            'text' => <<<'GIT'
+Git Commands:
+  ollamadev git status      Show working tree status
+  ollamadev git diff         Show changes
+  ollamadev git log          Show commit history
+  ollamadev git branch       List branches
+  ollamadev git commit <msg> Commit changes
+  ollamadev git push         Push to remote
+  ollamadev git pull         Pull from remote
+  ollamadev git stash        Stash changes
+
+Examples:
+  ollamadev git status
+  ollamadev git commit "Fix bug"
+GIT
+        ],
+        'terminal' => [
+            'description' => 'Terminal multiplexer',
+            'text' => <<<'TERM'
+Terminal Commands:
+  ollamadev terminal create <name> [--model <model>] [--cwd <path>]
+  ollamadev terminal spawn <n> [--model <model>] [--prefix <name>]
+  ollamadev terminal list
+  ollamadev terminal attach <name>   (Ctrl+C to detach, stays running)
+  ollamadev terminal start <name>
+  ollamadev terminal stop <name>
+  ollamadev terminal pause <name>
+  ollamadev terminal resume <name>
+  ollamadev terminal broadcast <msg>
+  ollamadev terminal delete <name>
+  ollamadev terminal log <name> [lines]
+
+Examples:
+  ollamadev terminal create dev --model llama3.2:latest
+  ollamadev terminal spawn 4 --model gemma4:26b --prefix worker
+  ollamadev terminal attach dev
+TERM
+        ],
+        'session' => [
+            'description' => 'Session management',
+            'text' => <<<'SESSION'
+Session Commands:
+  ollamadev new            Create new session
+  ollamadev list           List all sessions
+  ollamadev load <id>       Load session by ID
+  ollamadev compact         Compact session history
+
+Sessions are stored in ~/.ollamadev/sessions/
+SESSION
+        ],
+        'examples' => [
+            'description' => 'Usage examples',
+            'text' => <<<'EXAMPLES'
+Examples:
+
+  Interactive chat:
+    ollamadev
+
+  Single prompt:
+    ollamadev "explain this function"
+    echo "fix the bug" | ollamadev
+
+  Use specific model:
+    ollamadev --model deepseek-r1:32b "hello"
+
+  Terminal multiplexer:
+    ollamadev terminal create dev --model llama3.2:latest
+    ollamadev terminal attach dev
+
+  LSP for IDE:
+    ollamadev lsp --port 4389
+
+  Git operations:
+    ollamadev git status
+    ollamadev git commit "fix: resolve issue"
+EXAMPLES
+        ],
+        'tips' => [
+            'description' => 'Tips and tricks',
+            'text' => <<<'TIPS'
+Tips:
+
+  Tab Completion - Press Tab for completions in interactive mode
+  Ctrl+C - Detach from terminal (keeps it running)
+  Ctrl+D - Exit chat (with confirmation)
+
+  Model Switching:
+    model                    # List models
+    model llama3.2:latest   # Switch model
+
+  Tools can be called directly:
+    view file_path=README.md
+    grep pattern="TODO" path=src/
+
+  Config file: ~/.ollamadev/config.json
+
+  Dry run for destructive commands:
+    rm --dry-run file.txt   # Shows what would happen
+TIPS
+        ]
+    ];
+    if (isset($topics[$topic])) {
+        $t = $topics[$topic];
+        echo "OllamaDev Help: $topic\n";
+        echo str_repeat('=', 50) . "\n\n";
+        if (isset($t['text'])) {
+            echo $t['text'] . "\n";
+        } else {
+            echo $t['description'] . "\n\n";
+            if (isset($t['commands'])) {
+                foreach ($t['commands'] as $c) {
+                    if (isset($topics[$c])) {
+                        echo "  $c - " . $topics[$c]['description'] . "\n";
+                    }
+                }
+                echo "\nRun 'ollamadev help <topic>' for details.\n";
+            }
+        }
+    } else {
+        echo "OllamaDev Help: $topic\n";
+        echo str_repeat('=', 50) . "\n\n";
+        echo "Unknown help topic: $topic\n";
+        echo "Available topics: " . implode(', ', array_keys($topics)) . "\n";
+        echo "Run 'ollamadev help' for general help.\n";
+        exit(1);
+    }
     exit(0);
 }
 
@@ -3165,6 +3453,7 @@ if ($cmd === 'chat') {
     (new Session($config))->start();
 } else {
     echo "Unknown command: $cmd\n";
-    echo "Run 'ollamadev help' for usage.\n";
+    echo "Run 'ollamadev help <topic>' for available topics.\n";
+    echo "Run 'ollamadev help' for general usage.\n";
     exit(1);
 }
