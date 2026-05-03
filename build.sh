@@ -15,7 +15,7 @@ cat > "$BUILD_DIR/ollamadev" << 'ENDOFFILE'
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '3.5.0');
+define('OLLAMADEV_VERSION', '3.6.0');
 $GLOBALS['editedFiles'] = [];
 
 class Config {
