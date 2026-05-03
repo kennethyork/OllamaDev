@@ -1,97 +1,90 @@
 # OllamaDev
 
-**Local AI coding agent** - runs entirely on your machine with Ollama. No cloud, no data leaving your computer. Single 145KB PHP binary.
+**Local AI coding agent** - 145KB single PHP binary, runs entirely on your machine with Ollama. No cloud, no data leaves your computer.
 
-## Quick Start
+## Install (30 seconds)
 
 ```bash
-# Install (Linux/Mac)
+# Linux/Mac
 curl -fsSL https://github.com/kennethyork/OllamaDev/releases/latest/download/ollamadev -o /usr/local/bin/ollamadev && chmod +x /usr/local/bin/ollamadev
 
-# Start chatting
+# Windows PowerShell
+irm https://github.com/kennethyork/OllamaDev/releases/latest/download/ollamadev -OutFile $env:LOCALAPPDATA\ollamadev\ollamadev
+
+# Start
 ollamadev
 ```
 
-## Why OllamaDev?
+**Requirements:** PHP 8.0+ and Ollama running (`ollama serve`)
+
+## What makes it different?
 
 | | OllamaDev | Cursor | Copilot |
 |--|--|--|--|
 | Local-only (privacy) | ✅ | ❌ | ❌ |
 | Terminal-native | ✅ | ❌ | ❌ |
+| Single 145KB binary | ✅ | ❌ | ❌ |
 | LSP for any IDE | ✅ | ❌ | ❌ |
-| VS Code + CLI | ✅ | ✅ | ✅ |
-| Single PHP binary | ✅ | ❌ (Electron) | ❌ |
-| Git integration | ✅ | Partial | Partial |
-| Web fetch | ✅ | ❌ | ❌ |
+| Git + AI integrated | ✅ | Partial | Partial |
+| Web fetch tool | ✅ | ❌ | ❌ |
 | Free & open source | ✅ | ❌ | ❌ |
 
-## Install
-
-### Linux / Mac
-```bash
-curl -fsSL https://github.com/kennethyork/OllamaDev/releases/latest/download/ollamadev -o /usr/local/bin/ollamadev
-chmod +x /usr/local/bin/ollamadev
-```
-
-### Windows
-```powershell
-irm https://github.com/kennethyork/OllamaDev/releases/latest/download/ollamadev -OutFile $env:LOCALAPPDATA\ollamadev\ollamadev
-irm https://github.com/kennethyork/OllamaDev/releases/latest/download/ollamadev.bat -OutFile $env:LOCALAPPDATA\ollamadev\ollamadev.bat
-```
-
-### Build from Source
-```bash
-git clone https://github.com/kennethyork/OllamaDev.git
-cd OllamaDev
-./build.sh
-```
-
-## Requirements
-
-- **PHP 8.0+** (`php -v`)
-- **Ollama** running (`ollama serve`)
-- **Model** downloaded (`ollama pull llama3.2`)
-
-## CLI Usage
+## Examples
 
 ```bash
-ollamadev                     # Interactive chat
-ollamadev "explain this"     # Single prompt
-echo "fix bug" | ollamadev    # Pipe input
+# Chat with AI
+ollamadev
+ollamadev "explain this function"
+echo "fix the bug" | ollamadev
 
-ollamadev git status          # Git commands
-ollamadev git commit "fixes"  # AI-assisted commits
+# Git workflows
+ollamadev git status
+ollamadev git commit "fix: resolve issue"
+ollamadev git diff
 
-ollamadev lsp                 # Start LSP server for IDEs
-ollamadev terminal create dev # Create terminal session
-ollamadev terminal attach dev  # Chat with AI
+# Named terminals (sessions)
+ollamadev terminal create dev --model llama3.2:latest
+ollamadev terminal attach dev    # Your AI session
+ollamadev terminal list         # See all sessions
+ollamadev terminal log dev 50   # View history
+
+# LSP for IDE
+ollamadev lsp                    # Start server (127.0.0.1:4389)
 ```
 
-## Terminal Multiplexer
+## Features
 
-Named AI terminals with different models - switch between them:
+### 66 Tools
+- **File:** view, cat, head, tail, write, edit, patch, touch, mkdir, rm, cp, mv, ls, cd, pwd, find, tree, glob, wc, stat, diff, sort, uniq
+- **Git:** status, diff, log, branch, checkout, commit, add, push, pull, stash, clone
+- **Code:** goto, find_refs, symbols, hover, diagnostics, format, lsp
+- **System:** bash, execute_command, fetch, watch, bg, agent, mcp
+
+### Terminal Sessions
+Create named sessions with different models. Switch between them:
 
 ```bash
 ollamadev terminal create dev --model llama3.2:latest
 ollamadev terminal create review --model deepseek-r1:32b
-ollamadev terminal attach dev      # Chat with dev terminal
-ollamadev terminal list            # See all terminals
-ollamadev terminal delete dev      # Clean up
+ollamadev terminal attach dev    # Switch to dev session
+ollamadev terminal list          # See all sessions
+ollamadev terminal delete review # Clean up
 ```
 
-## VS Code Extension
+### LSP Server
+Connect any editor - VS Code, Neovim, Emacs, Sublime, IntelliJ:
 
-**Install:**
-```bash
-code --install-extension vscode-extension/ollamadev-lsp-1.1.0.vsix
-```
-
-**Start LSP server:**
 ```bash
 ollamadev lsp --port 4389
 ```
 
-**Keyboard shortcuts:**
+Features: hover, goto definition, find references, completions, code actions, formatting
+
+### VS Code Extension
+
+```bash
+code --install-extension vscode-extension/ollamadev-lsp-1.1.0.vsix
+```
 
 | Shortcut | Action |
 |----------|--------|
@@ -99,55 +92,9 @@ ollamadev lsp --port 4389
 | `Ctrl+Shift+R` | Review code |
 | `Ctrl+Shift+A` | Ask AI |
 | `Ctrl+Shift+L` | Open chat panel |
-| `Ctrl+Space` | Toggle inline completion |
+| `Ctrl+Space` | Toggle completion |
 | `Ctrl+Shift+F` | Format document |
 | `Ctrl+.` | Quick fix |
-
-**Settings (`.vscode/settings.json`):**
-```json
-{
-  "ollamadev.port": 4389,
-  "ollamadev.model": "llama3.2:latest",
-  "ollamadev.statusBarEnabled": true
-}
-```
-
-## LSP Features
-
-Works with VS Code, Neovim, Emacs, Sublime, IntelliJ - any LSP client:
-
-| Feature | Description |
-|---------|-------------|
-| Hover | Get code info on hover |
-| Goto Definition | Jump to definitions |
-| Find References | Locate symbol usage |
-| Completions | AI-powered suggestions |
-| Code Actions | AI quick fixes |
-| Formatting | Auto-format code |
-
-## 66 Tools
-
-**File:** view, cat, head, tail, read, write, edit, patch, touch, mkdir, rm, cp, mv, ls, cd, pwd, find, tree, glob, wc, stat, diff, sort, uniq
-
-**Git:** status, diff, log, branch, checkout, commit, add, push, pull, stash, clone
-
-**Code:** goto, goto_definition, find_refs, symbols, hover, diagnostics, format, lsp
-
-**System:** bash, execute_command, editor, watch, fetch, bg, wait_bg, agent, mcp
-
-## Architecture
-
-```
-ollamadev (145KB PHP binary)
-├── build.sh → dist/release/ollamadev
-├── 66 embedded tools
-├── LSP server
-├── Terminal multiplexer
-└── AI agent with Ollama
-
-vscode-extension/
-└── ollamadev-lsp-1.1.0.vsix
-```
 
 ## Configuration
 
@@ -157,24 +104,30 @@ vscode-extension/
   "ollama": {
     "host": "http://localhost:11434",
     "defaultModel": "llama3.2:latest"
-  },
-  "mcpServers": {}
+  }
 }
 ```
 
-## Comparison
+## Build from Source
 
-OllamaDev is the **terminal-first** alternative to Cursor/Copilot:
+```bash
+git clone https://github.com/kennethyork/OllamaDev.git
+cd OllamaDev
+./build.sh
+```
 
-- **Cursor** - GUI-native, cloud-optional, Electron
-- **Copilot** - Cloud-first, VS Code plugin only
-- **OllamaDev** - Terminal-native, local-only, any LSP editor, 145KB binary
+## Architecture
 
-Same AI-powered coding assistance with full privacy and CLI flexibility.
+```
+ollamadev (145KB PHP binary)
+├── 66 embedded tools
+├── AI agent (Ollama)
+├── LSP server
+├── Terminal sessions
+└── Git integration
 
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md)
+vscode-extension/ollamadev-lsp-1.1.0.vsix
+```
 
 ## License
 
