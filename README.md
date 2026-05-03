@@ -10,10 +10,21 @@ curl -fsSL https://github.com/kennethyork/OllamaDev/releases/latest/download/oll
 chmod +x /usr/local/bin/ollamadev
 ```
 
-**Windows (PowerShell):**
+**Windows:**
 ```powershell
-irm https://github.com/kennethyork/OllamaDev/releases/latest/download/ollamadev -o $env:LOCALAPPDATA\ollamadev\ollamadev
-# Then run: php $env:LOCALAPPDATA\ollamadev\ollamadev
+# 1. Download binary to a folder
+mkdir $env:LOCALAPPDATA\ollamadev -Force
+irm https://github.com/kennethyork/OllamaDev/releases/latest/download/ollamadev -OutFile $env:LOCALAPPDATA\ollamadev\ollamadev
+
+# 2. Create a .bat wrapper (save as ollamadev.bat in same folder)
+@echo off > $env:LOCALAPPDATA\ollamadev\ollamadev.bat
+echo php "%%~dp0ollamadev" %%* >> $env:LOCALAPPDATA\ollamadev\ollamadev.bat
+
+# 3. Add to PATH (permanent)
+[Environment]::SetEnvironmentVariable("PATH", $env:PATH + ";$env:LOCALAPPDATA\ollamadev", "User")
+
+# 4. Open new terminal and use like normal:
+ollamadev --help
 ```
 
 **Or build from source:**
