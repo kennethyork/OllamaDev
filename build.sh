@@ -15,7 +15,7 @@ cat > "$BUILD_DIR/ollamadev" << 'ENDOFFILE'
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '3.7.0');
+define('OLLAMADEV_VERSION', '3.9.1');
 $GLOBALS['editedFiles'] = [];
 
 function isWindows(): bool { return stripos(PHP_OS, 'WIN') === 0; }
