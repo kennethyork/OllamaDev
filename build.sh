@@ -18,6 +18,73 @@ cat > "$BUILD_DIR/ollamadev" << 'ENDOFFILE'
 define('OLLAMADEV_VERSION', '3.6.0');
 $GLOBALS['editedFiles'] = [];
 
+function isWindows(): bool { return str_stripos(PHP_OS, 'WIN') === 0; }
+
+function crossPlatformLs(string $path): string {
+    $path = rtrim($path, '/\\');
+    if (!is_dir($path)) return "Not a directory: $path";
+    $files = [];
+    try {
+        $iterator = new DirectoryIterator($path);
+        foreach ($iterator as $file) {
+            $name = $file->getFilename();
+            if ($name === '.' || $name === '..') continue;
+            $type = $file->isDir() ? 'd' : '-';
+            $size = $file->getSize();
+            $mtime = date('M d H:i', $file->getMTime());
+            $perms = $file->isDir() ? 'drwxr-xr-x' : '-rw-r--r--';
+            $files[] = sprintf("%s %s %5d %s %s", $perms, $type === 'd' ? '2' : '1', $size, $mtime, $name);
+        }
+        return empty($files) ? "Empty directory" : implode("\n", $files);
+    } catch (Exception $e) {
+        return "Error: " . $e->getMessage();
+    }
+}
+
+function crossPlatformFind(string $dir, string $pattern): string {
+    $dir = rtrim($dir, '/\\');
+    $results = [];
+    $regex = '/^' . str_replace(['*', '?'], ['.*', '.'], preg_quote($pattern, '/')) . '$/i';
+    try {
+        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir));
+        foreach ($iterator as $file) {
+            if ($file->isDir()) continue;
+            if (preg_match($regex, $file->getFilename())) {
+                $results[] = $file->getPathname();
+            }
+        }
+        return empty($results) ? "No matches found" : implode("\n", array_slice($results, 0, 100));
+    } catch (Exception $e) {
+        return "Error: " . $e->getMessage();
+    }
+}
+
+function crossPlatformTree(string $dir, int $depth = 2): string {
+    $dir = rtrim($dir, '/\\');
+    $output = [];
+    try {
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::SELF_FIRST
+        );
+        $maxDepth = $depth;
+        foreach ($iterator as $file) {
+            $depth = $iterator->getDepth();
+            if ($depth > $maxDepth) continue;
+            $prefix = str_repeat('  ', $depth);
+            $name = $file->getFilename();
+            if ($file->isDir()) {
+                $output[] = $prefix . "📁 " . $name;
+            } else {
+                $output[] = $prefix . "📄 " . $name;
+            }
+        }
+        return empty($output) ? "Empty" : implode("\n", $output);
+    } catch (Exception $e) {
+        return "Error: " . $e->getMessage();
+    }
+}
+
 class Config {
     private static $config;
 
@@ -655,18 +722,15 @@ Tools::register('grep', function($p) {
 
 Tools::register('ls', function($p) {
     $path = $p['path'] ?? '.';
-    if (!is_dir($path)) return "Not a directory: $path";
-    return shell_exec("ls -la " . escapeshellarg($path) . " 2>&1") ?: "Empty directory";
+    return crossPlatformLs($path);
 });
 Tools::register('list_directory', function($p) {
     $path = $p['path'] ?? '.';
-    if (!is_dir($path)) return "Not a directory: $path";
-    return shell_exec("ls -la " . escapeshellarg($path) . " 2>&1") ?: "Empty directory";
+    return crossPlatformLs($path);
 });
 Tools::register('list_files', function($p) {
     $path = $p['path'] ?? '.';
-    if (!is_dir($path)) return "Not a directory: $path";
-    return shell_exec("ls -la " . escapeshellarg($path) . " 2>&1") ?: "Empty directory";
+    return crossPlatformLs($path);
 });
 Tools::register('execute_command', function($p) {
     $cmd = $p['command'] ?? '';
@@ -690,24 +754,22 @@ Tools::register('find', function($p) {
     $path = $p['path'] ?? '.';
     $name = $p['name'] ?? '*';
     $type = $p['type'] ?? '';
-    $cmd = "find " . escapeshellarg($path);
-    if ($type === 'd') $cmd .= " -type d";
-    elseif ($type === 'f') $cmd .= " -type f";
-    $cmd .= " -name " . escapeshellarg($name) . " 2>/dev/null";
-    return shell_exec($cmd) ?: "No matches found";
+    return crossPlatformFind($path, $name);
 });
 
 Tools::register('tree', function($p) {
     $path = $p['path'] ?? '.';
-    $depth = $p['depth'] ?? 2;
-    return shell_exec("tree -L $depth -a " . escapeshellarg($path) . " 2>/dev/null") ?: shell_exec("find " . escapeshellarg($path) . " -maxdepth $depth -not -path '*/.*' | sort | sed 's|[^/]*/|  |g'");
+    $depth = isset($p['depth']) ? (int)$p['depth'] : 2;
+    return crossPlatformTree($path, $depth);
 });
 
 Tools::register('stat', function($p) {
     $path = $p['file_path'] ?? $p['path'] ?? '';
     if (empty($path)) return "missing path";
     if (!file_exists($path)) return "Not found: $path";
-    return shell_exec("stat " . escapeshellarg($path) . " 2>&1") ?: "stat failed";
+    $stat = stat($path);
+    $type = is_dir($path) ? 'directory' : 'file';
+    return sprintf("%s (%s)\nSize: %d bytes\nModified: %s\nPermissions: %o", $path, $type, $stat['size'], date('Y-m-d H:i:s', $stat['mtime']), $stat['mode'] & 0777);
 });
 
 Tools::register('diff', function($p) {
@@ -720,27 +782,43 @@ Tools::register('diff', function($p) {
 Tools::register('wc', function($p) {
     $path = $p['file_path'] ?? $p['path'] ?? '';
     if (empty($path)) return "missing file_path";
-    return shell_exec("wc -l " . escapeshellarg($path) . " 2>&1") ?: "wc failed";
+    if (!file_exists($path)) return "File not found: $path";
+    $lines = count(file($path));
+    $chars = strlen(file_get_contents($path));
+    $words = str_word_count(file_get_contents($path));
+    return sprintf("%d lines, %d words, %d chars: %s", $lines, $words, $chars, $path);
 });
 
 Tools::register('sort', function($p) {
     $path = $p['file_path'] ?? $p['path'] ?? '';
     if (empty($path)) return "missing file_path";
-    return shell_exec("sort " . escapeshellarg($path) . " 2>&1") ?: "sort failed";
+    if (!file_exists($path)) return "File not found: $path";
+    $lines = file($path);
+    if ($lines === false) return "Failed to read: $path";
+    sort($lines);
+    return implode('', $lines);
 });
 
 Tools::register('uniq', function($p) {
     $path = $p['file_path'] ?? $p['path'] ?? '';
     if (empty($path)) return "missing file_path";
-    return shell_exec("uniq " . escapeshellarg($path) . " 2>&1") ?: "uniq failed";
+    if (!file_exists($path)) return "File not found: $path";
+    $lines = file($path);
+    if ($lines === false) return "Failed to read: $path";
+    return implode('', array_unique($lines));
 });
 
 Tools::register('mkdir', function($p) {
     $path = $p['path'] ?? $p['dir'] ?? '';
     $parents = $p['parents'] ?? false;
     if (empty($path)) return "missing path";
-    $cmd = $parents ? "mkdir -p" : "mkdir";
-    return shell_exec("$cmd " . escapeshellarg($path) . " 2>&1") ?: "Created $path";
+    if (is_dir($path)) return "Already exists: $path";
+    if ($parents) {
+        if (mkdir($path, 0755, true)) return "Created: $path";
+    } else {
+        if (mkdir($path, 0755)) return "Created: $path";
+    }
+    return "Failed to create: $path";
 });
 
 Tools::register('touch', function($p) {
