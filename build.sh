@@ -90,8 +90,11 @@ class Config {
 
     public static function load(): array {
         if (self::$config) return self::$config;
+        $envOverrides = [];
+        if (getenv('OLLAMA_HOST')) $envOverrides['ollama']['host'] = getenv('OLLAMA_HOST');
+        if (getenv('OLLAMA_MODEL')) $envOverrides['ollama']['defaultModel'] = getenv('OLLAMA_MODEL');
         $defaults = [
-            'ollama' => ['host' => 'http://localhost:11434', 'defaultModel' => 'llama3.2:latest'],
+            'ollama' => ['host' => getenv('OLLAMA_HOST') ?: 'http://localhost:11434', 'defaultModel' => getenv('OLLAMA_MODEL') ?: 'llama3.2:latest'],
             'agents' => ['coder' => ['temperature' => 0.7, 'maxTokens' => 4096]],
             'data' => ['directory' => '.ollamadev']
         ];
@@ -1367,6 +1370,41 @@ Tools::register('git_show', function($p) {
     return shell_exec($cmd . " 2>&1") ?: "Show failed";
 });
 
+Tools::register('git_cherry_pick', function($p) {
+    $path = $p['path'] ?? '.';
+    $ref = $p['ref'] ?? '';
+    $no_commit = $p['no_commit'] ?? false;
+    if (empty($ref)) return "missing ref (commit hash or branch)";
+    $cmd = "cd " . escapeshellarg($path) . " && git cherry-pick";
+    if ($no_commit) $cmd .= " --no-commit";
+    $cmd .= " " . escapeshellarg($ref);
+    return shell_exec($cmd . " 2>&1") ?: "Cherry-pick failed";
+});
+
+Tools::register('git_revert', function($p) {
+    $path = $p['path'] ?? '.';
+    $ref = $p['ref'] ?? '';
+    $no_commit = $p['no_commit'] ?? false;
+    if (empty($ref)) return "missing ref (commit hash or branch)";
+    $cmd = "cd " . escapeshellarg($path) . " && git revert";
+    if ($no_commit) $cmd .= " --no-commit";
+    $cmd .= " " . escapeshellarg($ref);
+    return shell_exec($cmd . " 2>&1") ?: "Revert failed";
+});
+
+Tools::register('git_merge', function($p) {
+    $path = $p['path'] ?? '.';
+    $branch = $p['branch'] ?? '';
+    $no_ff = $p['no_ff'] ?? false;
+    $squash = $p['squash'] ?? false;
+    if (empty($branch)) return "missing branch";
+    $cmd = "cd " . escapeshellarg($path) . " && git merge";
+    if ($no_ff) $cmd .= " --no-ff";
+    if ($squash) $cmd .= " --squash";
+    $cmd .= " " . escapeshellarg($branch);
+    return shell_exec($cmd . " 2>&1") ?: "Merge failed";
+});
+
 class SystemPrompts {
     private static array $prompts = [
         'llama' => 'You are a helpful AI assistant running locally via Ollama. Be precise and explicit in your responses.',
@@ -1488,6 +1526,15 @@ class Agent {
     public function buildSystemPrompt(): array {
         $manualPrompt = Config::get('agents.systemPrompt', '');
         $prompt = !empty($manualPrompt) ? $manualPrompt : SystemPrompts::detectForModel($this->model);
+        
+        $projectMemory = '';
+        $memoryFiles = ['OLLAMADEV.md', '.ollamadev.md', '.ollamadev'];
+        foreach ($memoryFiles as $mf) {
+            if (file_exists($mf)) {
+                $projectMemory = "\n\nPROJECT CONTEXT (from $mf):\n" . file_get_contents($mf);
+                break;
+            }
+        }
 
 $tools = 'TOOLS AVAILABLE:
 
@@ -1597,7 +1644,7 @@ TOOL PERMISSIONS:
 COMPACT/SUMMARIZE:
 - When conversation exceeds ~20 messages, call summarize tool';
 
-        return ['role' => 'system', 'content' => $prompt . "\n\n" . $tools];
+        return ['role' => 'system', 'content' => $prompt . $projectMemory . "\n\n" . $tools];
     }
 
     public function setModel(string $model): void { $this->model = $model; }
