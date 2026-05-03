@@ -573,6 +573,58 @@ Tools::register('changes', function($p) {
     return $out;
 });
 
+Tools::register('watch', function($p) {
+    $path = $p['path'] ?? '.';
+    $exts = $p['extensions'] ?? 'php,js,ts,py,go,rs,html,css,json,yaml';
+    $timeout = (int)($p['timeout'] ?? 30);
+    $extensions = str_replace(',', ' ', $exts);
+
+    // Try inotifywait first (Linux)
+    if (PHP_OS === 'Linux' && shell_exec('which inotifywait 2>/dev/null')) {
+        $cmd = "inotifywait -m -r -e modify,create,delete " . escapeshellarg($path) . " --format '%e %w%f' --timeout $timeout 2>/dev/null";
+        $output = [];
+        exec($cmd, $output, $code);
+        if ($code === 0 && !empty($output)) {
+            $filtered = [];
+            foreach ($output as $line) {
+                if (preg_match('/\.(' . str_replace('.', '\\.', str_replace(',', '|', $exts)) . ')$/i', $line)) {
+                    $filtered[] = $line;
+                }
+            }
+            if (!empty($filtered)) {
+                return "File changes detected:\n" . implode("\n", array_slice($filtered, 0, 20));
+            }
+        }
+        return "No relevant file changes detected";
+    }
+
+    // Fallback: polling
+    $lastMtime = [];
+    $files = [];
+    exec("find " . escapeshellarg($path) . " -type f 2>/dev/null", $files);
+    foreach ($files as $f) {
+        if (preg_match('/\.(' . str_replace('.', '\\.', str_replace(',', '|', $exts)) . ')$/i', $f)) {
+            $lastMtime[$f] = filemtime($f);
+        }
+    }
+
+    sleep($timeout);
+    clearstatcache();
+    $changed = [];
+    exec("find " . escapeshellarg($path) . " -type f 2>/dev/null", $files);
+    foreach ($files as $f) {
+        if (preg_match('/\.(' . str_replace('.', '\\.', str_replace(',', '|', $exts)) . ')$/i', $f)) {
+            $mtime = filemtime($f);
+            if (!isset($lastMtime[$f]) || $lastMtime[$f] < $mtime) {
+                $changed[] = $f;
+            }
+        }
+    }
+
+    if (empty($changed)) return "No file changes detected";
+    return "Changed files:\n" . implode("\n", array_slice($changed, 0, 20));
+});
+
 Tools::register('write', function($p) {
     $path = $p['file_path'] ?? ''; $content = $p['content'] ?? '';
     if (empty($path)) return "missing file_path";
@@ -2063,7 +2115,7 @@ for ($i = 1; $i < $argc; $i++) {
     elseif ($a === '-c' || $a === '--continue') { $flags['continue'] = true; }
     elseif ($a === '-s' || $a === '--session') { $flags['session'] = $argv[++$i] ?? null; }
     elseif ($a === '--fork') { $flags['fork'] = true; }
-    elseif ($a === '--prompt') { $flags['prompt'] = $argv[++$i] ?? null; }
+    elseif ($a === '-p' || $a === '--prompt') { $flags['prompt'] = $argv[++$i] ?? null; }
     elseif ($a === '--agent') { $flags['agent'] = $argv[++$i] ?? null; }
     elseif ($a === '--pure') { $flags['pure'] = true; }
     elseif ($a === '--port') { $flags['port'] = (int)($argv[++$i] ?? 0); }
