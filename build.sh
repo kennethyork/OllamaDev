@@ -577,25 +577,28 @@ Tools::register('watch', function($p) {
     $path = $p['path'] ?? '.';
     $exts = $p['extensions'] ?? 'php,js,ts,py,go,rs,html,css,json,yaml';
     $timeout = (int)($p['timeout'] ?? 30);
-    $extensions = str_replace(',', ' ', $exts);
+    $extensions = str_replace(',', '|', $exts);
+    $extensions = str_replace('.', '\\.', $extensions);
 
-    // Try inotifywait first (Linux)
-    if (PHP_OS === 'Linux' && shell_exec('which inotifywait 2>/dev/null')) {
+    // Try inotifywait first (Linux, must be installed)
+    $hasInotify = PHP_OS === 'Linux' && trim(shell_exec('which inotifywait 2>/dev/null')) !== '';
+
+    if ($hasInotify) {
         $cmd = "inotifywait -m -r -e modify,create,delete " . escapeshellarg($path) . " --format '%e %w%f' --timeout $timeout 2>/dev/null";
         $output = [];
         exec($cmd, $output, $code);
         if ($code === 0 && !empty($output)) {
             $filtered = [];
             foreach ($output as $line) {
-                if (preg_match('/\.(' . str_replace('.', '\\.', str_replace(',', '|', $exts)) . ')$/i', $line)) {
+                if (preg_match('/\.(' . $extensions . ')$/i', $line)) {
                     $filtered[] = $line;
                 }
             }
             if (!empty($filtered)) {
-                return "File changes detected:\n" . implode("\n", array_slice($filtered, 0, 20));
+                return "Changed:\n" . implode("\n", array_slice($filtered, 0, 50));
             }
         }
-        return "No relevant file changes detected";
+        return "No relevant file changes detected within ${timeout}s";
     }
 
     // Fallback: polling
@@ -603,17 +606,17 @@ Tools::register('watch', function($p) {
     $files = [];
     exec("find " . escapeshellarg($path) . " -type f 2>/dev/null", $files);
     foreach ($files as $f) {
-        if (preg_match('/\.(' . str_replace('.', '\\.', str_replace(',', '|', $exts)) . ')$/i', $f)) {
+        if (preg_match('/\.(' . $extensions . ')$/i', $f)) {
             $lastMtime[$f] = filemtime($f);
         }
     }
 
-    sleep($timeout);
+    sleep(min($timeout, 60));
     clearstatcache();
     $changed = [];
     exec("find " . escapeshellarg($path) . " -type f 2>/dev/null", $files);
     foreach ($files as $f) {
-        if (preg_match('/\.(' . str_replace('.', '\\.', str_replace(',', '|', $exts)) . ')$/i', $f)) {
+        if (preg_match('/\.(' . $extensions . ')$/i', $f)) {
             $mtime = filemtime($f);
             if (!isset($lastMtime[$f]) || $lastMtime[$f] < $mtime) {
                 $changed[] = $f;
@@ -621,8 +624,8 @@ Tools::register('watch', function($p) {
         }
     }
 
-    if (empty($changed)) return "No file changes detected";
-    return "Changed files:\n" . implode("\n", array_slice($changed, 0, 20));
+    if (empty($changed)) return "No file changes detected within ${timeout}s";
+    return "Changed:\n" . implode("\n", array_slice($changed, 0, 50));
 });
 
 Tools::register('write', function($p) {
