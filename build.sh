@@ -1370,6 +1370,49 @@ Tools::register('git_show', function($p) {
     return shell_exec($cmd . " 2>&1") ?: "Show failed";
 });
 
+Tools::register('update', function($p) {
+    $install = $p['install'] ?? false;
+    $current = '3.9.5';
+    $ctx = stream_context_create(['http' => ['timeout' => 10, 'ignore_errors' => true]]);
+    $json = @file_get_contents('https://api.github.com/repos/kennethyork/OllamaDev/releases/latest', false, $ctx);
+    if (!$json) return "Error: Could not check for updates. Check your internet connection.";
+    $data = json_decode($json, true);
+    $tag = $data['tag_name'] ?? '';
+    if (!$tag) return "Error: Could not parse release info.";
+    if (version_compare($tag, $current, '<=')) {
+        return "You're up to date (v$current)";
+    }
+    echo "Update available: $tag (current: $current)\n\n";
+    $assets = $data['assets'] ?? [];
+    $binary = null;
+    foreach ($assets as $a) {
+        if ($a['name'] === 'ollamadev') $binary = $a;
+    }
+    if (!$binary && count($assets) > 0) $binary = $assets[0];
+    if ($binary) {
+        echo "Download: {$binary['browser_download_url']}\n";
+        echo "\nTo install:\n";
+        if ($install) {
+            $tmp = sys_get_temp_dir() . '/ollamadev_new';
+            $url = $binary['browser_download_url'];
+            echo "Downloading...\n";
+            $downloaded = @file_put_contents($tmp, fopen($url, 'rb', false, $ctx));
+            if ($downloaded) {
+                chmod($tmp, 0755);
+                $binPath = Config::binaryPath();
+                rename($tmp, $binPath);
+                echo "Updated to $tag. Restart to use new version.\n";
+            } else {
+                echo "Download failed. Try manually: curl -fsSL {$binary['browser_download_url']} -o /usr/local/bin/ollamadev\n";
+            }
+        } else {
+            echo "  curl -fsSL {$binary['browser_download_url']} -o /usr/local/bin/ollamadev\n";
+            echo "\nOr run: ollamadev update --install to auto-download\n";
+        }
+    }
+    return "Run 'ollamadev update' to check again.";
+});
+
 Tools::register('git_cherry_pick', function($p) {
     $path = $p['path'] ?? '.';
     $ref = $p['ref'] ?? '';
@@ -3148,6 +3191,42 @@ if ($cmd === 'chat') {
     echo "New session created.\n";
 } elseif ($cmd === 'list') {
     foreach (Session::listAll($config) as $s) echo "{$s['id']} | {$s['title']} | {$s['model']} | {$s['updated_at']}\n";
+} elseif ($cmd === 'update') {
+    $install = isset($flags['install']);
+    $current = '3.9.5';
+    $ctx = stream_context_create(['http' => ['timeout' => 10, 'ignore_errors' => true, 'header' => "User-Agent: OllamaDev/3.9.5\r\n"]]);
+    $json = @file_get_contents('https://api.github.com/repos/kennethyork/OllamaDev/releases/latest', false, $ctx);
+    if (!$json || strpos($json, 'Request forbidden') !== false) { echo "Error: Could not check for updates (GitHub rate limit). Try again later.\n"; exit(1); }
+    $data = json_decode($json, true);
+    $tag = ltrim($data['tag_name'] ?? '', 'v');
+    if (!$tag) { echo "Error: Could not parse release info.\n"; exit(1); }
+    if (version_compare($tag, $current, '<=')) {
+        echo "You're up to date (v$current)\n"; exit(0);
+    }
+    echo "Update available: v$tag (current: v$current)\n\n";
+    $assets = $data['assets'] ?? [];
+    $binary = null;
+    foreach ($assets as $a) { if ($a['name'] === 'ollamadev') $binary = $a; }
+    if (!$binary && count($assets) > 0) $binary = $assets[0];
+    if ($binary) {
+        echo "Download: {$binary['browser_download_url']}\n";
+        if ($install) {
+            $tmp = sys_get_temp_dir() . '/ollamadev_new';
+            $url = $binary['browser_download_url'];
+            echo "Downloading...\n";
+            $downloaded = @file_put_contents($tmp, fopen($url, 'rb', false, $ctx));
+            if ($downloaded) {
+                chmod($tmp, 0755);
+                $binPath = Config::binaryPath();
+                rename($tmp, $binPath);
+                echo "Updated to v$tag. Restart to use new version.\n";
+            } else {
+                echo "Download failed. Try manually:\n  curl -fsSL {$binary['browser_download_url']} -o /usr/local/bin/ollamadev\n";
+            }
+        } else {
+            echo "\nTo install:\n  curl -fsSL {$binary['browser_download_url']} -o /usr/local/bin/ollamadev\n\nOr run: ollamadev update --install\n";
+        }
+    }
 } elseif ($cmd === 'git') {
     $sub = $arg1 ?: 'status';
     $path = $flags['cwd'] ?? getcwd();
