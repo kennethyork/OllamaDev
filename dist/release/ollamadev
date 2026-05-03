@@ -6,7 +6,7 @@
 define('OLLAMADEV_VERSION', '3.7.0');
 $GLOBALS['editedFiles'] = [];
 
-function isWindows(): bool { return str_stripos(PHP_OS, 'WIN') === 0; }
+function isWindows(): bool { return stripos(PHP_OS, 'WIN') === 0; }
 
 function crossPlatformLs(string $path): string {
     $path = rtrim($path, '/\\');
@@ -824,10 +824,23 @@ Tools::register('cp', function($p) {
     $src = $p['src'] ?? $p['source'] ?? $p['target'] ?? '';
     $dst = $p['dst'] ?? $p['dest'] ?? $p['destination'] ?? $p['target'] ?? '';
     if (empty($src) || empty($dst)) return "missing src or dst";
-    $home = getenv('HOME') ?: '/home/' . getenv('USER');
-    $src = $src === '~' ? $home : (str_starts_with($src, '~/') ? $home . substr($src, 1) : $src);
-    $dst = $dst === '~' ? $home : (str_starts_with($dst, '~/') ? $home . substr($dst, 1) : $dst);
-    return shell_exec("cp -r " . escapeshellarg($src) . " " . escapeshellarg($dst) . " 2>&1") ?: "Copied to $dst";
+    $home = getenv('HOME') ?: (getenv('USERPROFILE') ?: '/tmp');
+    $src = $src === '~' ? $home : (str_starts_with($src, '~/') ? $home . substr($src, 1) : (isWindows() && str_starts_with($src, '~\\') ? $home . substr($src, 1) : $src));
+    $dst = $dst === '~' ? $home : (str_starts_with($dst, '~/') ? $home . substr($dst, 1) : (isWindows() && str_starts_with($dst, '~\\') ? $home . substr($dst, 1) : $dst));
+    if (!file_exists($src)) return "Source not found: $src";
+    if (is_dir($src)) {
+        if (!is_dir($dst)) mkdir($dst, 0755, true);
+        $iter = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($src, RecursiveDirectoryIterator::SKIP_DOTS), RecursiveIteratorIterator::SELF_FIRST);
+        foreach ($iter as $file) {
+            $dstPath = $dst . '/' . $iter->getSubPathName();
+            if ($file->isDir()) mkdir($dstPath, 0755, true);
+            else copy($file->getPathname(), $dstPath);
+        }
+        return "Copied directory to $dst";
+    }
+    $dstDir = dirname($dst);
+    if (!is_dir($dstDir)) mkdir($dstDir, 0755, true);
+    return copy($src, $dst) ? "Copied to $dst" : "Copy failed";
 });
 
 Tools::register('rm', function($p) {
