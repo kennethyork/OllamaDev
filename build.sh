@@ -16,6 +16,7 @@ cat > "$BUILD_DIR/ollamadev" << 'ENDOFFILE'
 // Built from modular source
 
 define('OLLAMADEV_VERSION', '3.3.0');
+$GLOBALS['editedFiles'] = [];
 
 class Config {
     private static $config;
@@ -140,6 +141,10 @@ class Permission {
 
     public static function setPromptMode(bool $mode): void {
         self::$promptMode = $mode;
+    }
+
+    public static function autoAllow(): void {
+        self::$promptMode = false;
     }
 
     public static function allow(string $tool): void {
@@ -491,6 +496,7 @@ class Tools {
     public static function run(string $name, array $params): string {
         $fn = self::find($name);
         if (!$fn) return "Error: tool '$name' not found";
+        if (!Permission::isAllowed($name)) return "PERMISSION_DENIED:$name";
         try { return $fn($params); } catch (Exception $e) { return "Error: " . $e->getMessage(); }
     }
     public static function all(): array { return array_keys(self::$tools); }
@@ -613,7 +619,7 @@ Tools::register('write', function($p) {
     if ($content === '') return "missing content";
     $dir = dirname($path);
     if (!empty($dir) && !is_dir($dir)) mkdir($dir, 0755, true);
-    return file_put_contents($path, $content) !== false ? "Written to $path" : "Error writing file: $path";
+    return file_put_contents($path, $content) !== false ? "FILE_WRITE:$path" : "Error writing file: $path";
 });
 
 Tools::register('edit', function($p) {
@@ -624,7 +630,7 @@ Tools::register('edit', function($p) {
     if ($content === false) return "Error reading file: $path";
     $pos = strpos($content, $oldStr);
     if ($pos === false) return "old_string not found in file";
-    return file_put_contents($path, substr_replace($content, $newStr, $pos, strlen($oldStr))) !== false ? "Edited $path" : "Error writing file: $path";
+    return file_put_contents($path, substr_replace($content, $newStr, $pos, strlen($oldStr))) !== false ? "FILE_EDIT:$path" : "Error writing file: $path";
 });
 
 Tools::register('glob', function($p) {
@@ -1146,25 +1152,16 @@ Response: <tool_code>\n{\"name\": \"glob\", \"arguments\": {\"pattern\": \"*.php
 
 Available tools: ls, view, write, edit, glob, grep, bash, fetch, patch, diagnostics",
 
-        'phi' => 'You are Phi, a compact AI assistant running locally via Ollama. Be efficient and thorough. When asked to list files, ACTUALLY CALL THE TOOL - do not explain how to do it.',
+'phi' => 'You are Phi, a compact AI assistant running locally via Ollama. Be efficient and thorough. When asked to list files, ACTUALLY CALL THE TOOL - do not explain how to do it. Tools execute directly - do NOT ask for permission.',
 
-        'wizard' => "You are WizardCoder. When user asks you to list files, read files, or run commands - you MUST actually call the tool now, not explain how to do it.
+        'wizard' => "You are WizardCoder. When user asks you to list files, read files, or run commands - you MUST actually call the tool now, not explain how to do it. Tools execute directly - do NOT ask for permission.",
 
-CRITICAL: Execute this EXACT format:
-<tool_code>{\"name\": \"ls\", \"arguments\": {\"path\": \".\"}}</tool_code>
+        'starcoder' => "You are StarCoder. When user asks you to list files, read files, or run commands - you MUST actually call the tool now, not explain how to do it. Tools execute directly - do NOT ask for permission.",
+        'smollm' => "You are a compact AI assistant. When asked to list files, you MUST call the ls tool. Execute: <tool_code>{\"name\": \"ls\", \"arguments\": {\"path\": \".\"}}</tool_code> Tools execute directly - do NOT ask for permission.",
 
-Do NOT explain. Do NOT show example code. Actually call the tool.",
-        'starcoder' => "You are StarCoder. When user asks you to list files, read files, or run commands - you MUST actually call the tool now, not explain how to do it.
+        'gpt-oss' => "You are running as a CLI tool with file system access. When user asks to list files, you MUST use the ls tool. Execute this EXACT format: <tool_code>{\"name\": \"ls\", \"arguments\": {\"path\": \".\"}}</tool_code> Do NOT say you cannot access files. Do NOT explain. Call the tool now. Tools execute directly - do NOT ask for permission.",
 
-CRITICAL: Execute this EXACT format:
-<tool_code>{\"name\": \"ls\", \"arguments\": {\"path\": \".\"}}</tool_code>
-
-Do NOT explain. Do NOT show example code. Actually call the tool.",
-        'smollm' => "You are a compact AI assistant. When asked to list files, you MUST call the ls tool. Execute: <tool_code>{\"name\": \"ls\", \"arguments\": {\"path\": \".\"}}</tool_code>",
-
-        'gpt-oss' => "You are running as a CLI tool with file system access. When user asks to list files, you MUST use the ls tool. Execute this EXACT format: <tool_code>{\"name\": \"ls\", \"arguments\": {\"path\": \".\"}}</tool_code> Do NOT say you cannot access files. Do NOT explain. Call the tool now.",
-
-        'default' => 'You are an expert AI coding assistant running locally via Ollama. Local models need EXPLICIT instructions. Do not assume anything. State everything clearly.',
+        'default' => 'You are an expert AI coding assistant running locally via Ollama. Local models need EXPLICIT instructions. Do not assume anything. State everything clearly. Tools execute directly - do NOT ask for permission.',
     ];
 
     private static array $modelPatterns = [
@@ -1177,7 +1174,7 @@ Do NOT explain. Do NOT show example code. Actually call the tool.",
         'wizard' => ['/wizardcoder/i', '/wizard-coder/i', '/wizard/i'],
         'starcoder' => ['/starcoder/i', '/star-coder/i'],
         'smollm' => ['/smollm/i'],
-        'gpt-oss' => ['/gpt-oss/i'],
+        'gpt-oss' => ['/gpt-oss/i', '/gpt_oss/i'],
     ];
 
     public static function detectForModel(string $model): string {
@@ -1279,9 +1276,7 @@ MCP TOOLS:
 - Call tool: mcp server=<name> tool=<tool> [param=value...]
 
 TOOL PERMISSIONS:
-- READ operations (view, glob, grep, ls, bash with readonly commands): Always allowed
-- WRITE operations (write, edit, bash with modifying commands): Requires confirmation
-- When prompted for permission, respond: PERMIT or DENY
+- All operations execute directly via tools - no permission prompts needed
 
 COMPACT/SUMMARIZE:
 - When conversation exceeds ~20 messages, summarize older messages
@@ -1330,7 +1325,10 @@ params: pattern=*.php
         foreach ($this->parseToolCalls($content) as $call) {
             $tool = Tools::find($call['name']);
             $params = $call['params'] ?? [];
-            $results[] = ['role' => 'tool', 'content' => $tool ? Tools::run($call['name'], $params) : "Error: tool '{$call['name']}' not found"];
+            $result = $tool ? Tools::run($call['name'], $params) : "Error: tool '{$call['name']}' not found";
+            if (preg_match('/^FILE_WRITE:(.+)/', $result, $m)) { $GLOBALS['editedFiles'][] = $m[1]; }
+            elseif (preg_match('/^FILE_EDIT:(.+)/', $result, $m)) { $GLOBALS['editedFiles'][] = $m[1]; }
+            $results[] = ['role' => 'tool', 'content' => $result];
         }
         return $results;
     }
@@ -1671,6 +1669,7 @@ class Session {
         $this->ensureDataDir();
         MCP::load($config);
         LSP::load($config);
+        Permission::autoAllow();
         $this->agent = new Agent();
         if ($sessionId) { $this->load($sessionId); }
         else { $this->id = 'session_' . time() . '_' . substr(md5(mt_rand()), 0, 8); $this->title = "Session " . date('Y-m-d H:i'); $this->model = $this->getLatestModel(); }
@@ -1751,6 +1750,15 @@ class Session {
     private function renderPrompt(): void { echo "[{$this->model}] > "; }
     private function countTokens(): int { $total = 0; foreach ($this->messages as $msg) $total += strlen($msg['content'] ?? '') / 4; return (int)$total; }
     private function renderStatus(): void { echo "\n[Model: {$this->model} | Tokens: ~" . $this->countTokens() . " | Messages: " . count($this->messages) . "]\n"; }
+    private function showContext(): void {
+        $pwd = getcwd();
+        $edited = $GLOBALS['editedFiles'] ?? [];
+        echo "\n📁 $pwd";
+        if (!empty($edited)) {
+            echo "\n✏️  Edited: " . implode(', ', $edited);
+            $GLOBALS['editedFiles'] = [];
+        }
+    }
 
     private function handleCommand(string $input): bool {
         $parts = preg_split('/\s+/', trim($input), 2);
@@ -1843,6 +1851,7 @@ class Session {
             $toolResults = $this->agent->parseAndExecuteTools($response);
             foreach ($toolResults as $result) {
                 $this->addMessage($result['role'], $result['content']);
+                if (preg_match('/^(FILE_WRITE:|FILE_EDIT:)/', $result['content'])) continue;
                 echo "\n🔧 [tool]\n{$result['content']}\n";
             }
 
@@ -1851,6 +1860,8 @@ class Session {
             } elseif (!empty($toolResults)) {
                 $this->addMessage('assistant', $response);
             }
+
+            $this->showContext();
 
             // Auto-compact if too many messages
             if (count($this->messages) > 20) {
@@ -1886,6 +1897,7 @@ class Session {
     }
 
     public function runSingle(string $prompt): string {
+        Permission::autoAllow();
         $this->addMessage('user', $prompt);
         $thinkingMsgs = ['Thinking...', 'Working on it...', 'Analyzing...', 'Processing...'];
         echo $thinkingMsgs[array_rand($thinkingMsgs)] . "\n";
@@ -1902,6 +1914,7 @@ class Session {
         if (empty($toolResults)) {
             echo "(no tools called)\n";
         }
+        $this->showContext();
         $this->addMessage('assistant', $response);
         $this->save();
         return $response;
