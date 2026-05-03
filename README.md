@@ -12,8 +12,8 @@ chmod +x /usr/local/bin/ollamadev
 
 **Windows (PowerShell):**
 ```powershell
-irm https://github.com/kennethyork/OllamaDev/releases/latest/download/ollamadev -o $env:LOCALAPPDATA\ollamadev\ollamadev.exe
-# Add to PATH or run directly from $env:LOCALAPPDATA\ollamadev\
+irm https://github.com/kennethyork/OllamaDev/releases/latest/download/ollamadev -o $env:LOCALAPPDATA\ollamadev\ollamadev
+# Then run: php $env:LOCALAPPDATA\ollamadev\ollamadev
 ```
 
 **Or build from source:**
