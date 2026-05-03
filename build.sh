@@ -15,7 +15,7 @@ cat > "$BUILD_DIR/ollamadev" << 'ENDOFFILE'
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '3.9.1');
+define('OLLAMADEV_VERSION', '3.9.2');
 $GLOBALS['editedFiles'] = [];
 
 function isWindows(): bool { return stripos(PHP_OS, 'WIN') === 0; }
@@ -526,6 +526,48 @@ class OllamaClient {
         return [];
     }
 
+    public function completion(string $prompt, string $model = null, int $maxTokens = 200): string {
+        $model = $model ?: Config::get('ollama.defaultModel', 'llama3.2:latest');
+        $params = ['model' => $model, 'prompt' => $prompt, 'stream' => false, 'options' => ['num_predict' => $maxTokens]];
+        $ch = curl_init($this->host . '/api/generate');
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 30
+        ]);
+        $resp = curl_exec($ch);
+        curl_close($ch);
+        if ($resp) {
+            $j = json_decode($resp, true);
+            return $j['response'] ?? '';
+        }
+        return '';
+    }
+
+    public function codeComplete(string $code, string $cursor, string $model = null): string {
+        $prompt = "Complete the following code. Only return the completion, no explanation. No markdown, just code:\n\n" . $code . "\n\nCursor position: " . strlen($code) . "\n=> ";
+        $params = ['model' => $model ?: Config::get('ollama.defaultModel', 'llama3.2:latest'), 'prompt' => $prompt, 'stream' => true, 'options' => ['num_predict' => 150]];
+        $ch = curl_init($this->host . '/api/generate');
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 30
+        ]);
+        $resp = curl_exec($ch);
+        curl_close($ch);
+        if ($resp) {
+            $j = json_decode($resp, true);
+            return trim($j['response'] ?? '');
+        }
+        return '';
+    }
+
+    public function codeReview(string $code): string {
+        $prompt = "Review this code and provide suggestions for improvements, bugs, and best practices. Be concise:\n\n" . substr($code, 0, 4000) . "\n\nReview:";
+        $messages = [['role' => 'user', 'content' => $prompt]];
+        return $this->chatWithModel($model ?? Config::get('ollama.defaultModel', 'llama3.2:latest'), $messages) ?: $this->completion($prompt, $model);
+    }
+
     public function chat(array $messages, callable $handler = null): string {
         $model = Config::get('ollama.defaultModel', 'llama3.2:latest');
         return $this->chatWithModel($model, $messages, $handler);
@@ -783,7 +825,13 @@ Tools::register('diff', function($p) {
     $file1 = $p['file1'] ?? $p['file_path'] ?? $p['file'] ?? $p['source'] ?? '';
     $file2 = $p['file2'] ?? $p['dest'] ?? '';
     if (empty($file1) || empty($file2)) return "missing file1 or file2";
-    return shell_exec("diff " . escapeshellarg($file1) . " " . escapeshellarg($file2) . " 2>&1") ?: "No differences";
+    if (!file_exists($file1) || !file_exists($file2)) return "File not found";
+    $isGitDir = is_dir(dirname($file1) . '/.git') || is_dir($file1);
+    if ($isGitDir || preg_match('/\.git[\/\\\]?$/', dirname($file1))) {
+        return shell_exec("cd " . escapeshellarg(dirname($file1)) . " && git diff " . escapeshellarg(basename($file1)) . " 2>&1") ?: "No differences";
+    }
+    $output = shell_exec("diff -u " . escapeshellarg($file1) . " " . escapeshellarg($file2) . " 2>&1");
+    return empty($output) ? "No differences" : $output;
 });
 
 Tools::register('wc', function($p) {
@@ -2088,7 +2136,7 @@ class Session {
         echo "╚══════════════════════════════════════════════════════════════╝\n\n";
     }
 
-    private function renderPrompt(): void { echo "[{$this->model}] > "; }
+    private function renderPrompt(): void { $cwd = basename(getcwd()); echo "[{$cwd}] [{$this->model}] > "; }
     private function countTokens(): int { $total = 0; foreach ($this->messages as $msg) $total += strlen($msg['content'] ?? '') / 4; return (int)$total; }
     private function renderStatus(): void { echo "\n[Model: {$this->model} | Tokens: ~" . $this->countTokens() . " | Messages: " . count($this->messages) . "]\n"; }
     private function showContext(): void {
@@ -2156,6 +2204,30 @@ class Session {
         while (true) {
             $this->renderPrompt();
             if (function_exists('readline')) {
+                readline_completion_function(function($string, $position) {
+                    $words = ['help', 'exit', 'quit', 'clear', 'model', 'session', 'tools', 'git', 'status', 'compact', 'context'];
+                    $home = getenv('HOME') ?: '/tmp';
+                    $termsDir = $home . '/.ollamadev/terminals';
+                    $line = readline_info()['line_buffer'] ?? '';
+                    $parts = explode(' ', $line);
+                    if (count($parts) > 1 && $parts[0] === 'cd' && strlen($line) > 3) {
+                        $partial = $parts[1];
+                        if (strlen($partial) > 0 && is_dir($partial)) {
+                            $suggest = [];
+                            foreach (scandir($partial) as $f) {
+                                if ($f !== '.' && $f !== '..') {
+                                    $suggest[] = $partial . '/' . $f;
+                                }
+                            }
+                            return $suggest;
+                        }
+                    }
+                    $matches = [];
+                    foreach ($words as $w) {
+                        if (strpos($w, $string) === 0) $matches[] = $w;
+                    }
+                    return $matches;
+                });
                 $input = readline('');
                 if ($input === false) break;
                 $input = trim($input);
@@ -2684,6 +2756,19 @@ if ($cmd === 'chat') {
     echo "New session created.\n";
 } elseif ($cmd === 'list') {
     foreach (Session::listAll($config) as $s) echo "{$s['id']} | {$s['title']} | {$s['model']} | {$s['updated_at']}\n";
+} elseif ($cmd === 'git') {
+    $sub = $arg1 ?: 'status';
+    $path = $flags['cwd'] ?? getcwd();
+    if ($sub === 'status') { echo shell_exec("cd " . escapeshellarg($path) . " && git status 2>&1"); }
+    elseif ($sub === 'diff') { echo shell_exec("cd " . escapeshellarg($path) . " && git diff 2>&1"); }
+    elseif ($sub === 'log') { echo shell_exec("cd " . escapeshellarg($path) . " && git log --oneline -20 2>&1"); }
+    elseif ($sub === 'branch') { echo shell_exec("cd " . escapeshellarg($path) . " && git branch -a 2>&1"); }
+    elseif ($sub === 'commit' && $arg2) { echo shell_exec("cd " . escapeshellarg($path) . " && git add -A && git commit -m " . escapeshellarg($arg2) . " 2>&1"); }
+    elseif ($sub === 'push') { echo shell_exec("cd " . escapeshellarg($path) . " && git push 2>&1"); }
+    elseif ($sub === 'pull') { echo shell_exec("cd " . escapeshellarg($path) . " && git pull 2>&1"); }
+    elseif ($sub === 'stash') { echo shell_exec("cd " . escapeshellarg($path) . " && git stash 2>&1"); }
+    elseif ($sub === 'stash' && $arg2 === 'pop') { echo shell_exec("cd " . escapeshellarg($path) . " && git stash pop 2>&1"); }
+    else { echo "Git commands: status, diff, log, branch, commit <msg>, push, pull, stash\n"; }
 } elseif ($cmd === 'load' && $arg1) {
     $session = new Session($config, $arg1);
     if (!file_exists(Config::sessionsDir() . '/' . $arg1 . '.json')) { echo "Session not found: $arg1\n"; exit(1); }
@@ -2701,21 +2786,26 @@ if ($cmd === 'chat') {
         echo "Commands:\n";
         echo "  terminal list              List all terminals\n";
         echo "  terminal create <name> [--model <model>] [--cwd <path>]\n";
-        echo "  terminal start <name>      Start a terminal\n";
-        echo "  terminal stop <name>       Stop a terminal\n";
-        echo "  terminal delete <name>     Delete a terminal\n";
+        echo "  terminal start <name>     Start a terminal (daemon mode)\n";
+        echo "  terminal stop <name>      Stop terminal (save state)\n";
+        echo "  terminal pause <name>     Pause a running terminal\n";
+        echo "  terminal resume <name>    Resume a paused terminal\n";
+        echo "  terminal delete <name>    Delete a terminal\n";
         echo "  terminal attach <name>     Attach to terminal interactively\n";
+        echo "  terminal detach           Detach from terminal (background)\n";
         echo "  terminal log <name> [n]    View last n lines of log\n";
+        echo "  terminal broadcast <msg>  Send message to all terminals\n";
         echo "  terminal spawn <n> [--model <model>] [--cwd <path>] [--prefix <name>]  Spawn n terminals\n\n";
         echo "Examples:\n";
         echo "  ollamadev terminal create dev --model llama3.2:latest\n";
         echo "  ollamadev terminal spawn 4 --model deepseek-r1:32b\n";
-        echo "  ollamadev terminal list\n";
+        echo "  ollamadev terminal attach dev   (Ctrl+C = detach, stays running)\n";
+        echo "  ollamadev terminal broadcast \"update available\"\n";
     } elseif ($sub === 'list' || $sub === 'ls') {
         $status = $tm->status();
         echo "Terminals: {$status['total']} | Running: {$status['running']} | Stopped: {$status['stopped']}\n\n";
         foreach ($status['terminals'] as $t) {
-            $icon = $t['status'] === 'running' ? '🟢' : '⚫';
+            $icon = $t['status'] === 'running' ? '🟢' : ($t['status'] === 'paused' ? '⏸️' : '⚫');
             echo "$icon {$t['name']} | {$t['model']} | {$t['status']} | cwd: {$t['cwd']}\n";
         }
     } elseif ($sub === 'create' || $sub === 'new') {
@@ -2734,6 +2824,7 @@ if ($cmd === 'chat') {
         for ($i = 1; $i <= $count; $i++) {
             $name = $prefix . '-' . $i;
             $tm->create($name, $model, $cwd);
+            $tm->start($name);
             echo "  Created $name (cwd: $cwd)\n";
         }
         echo "\nUse 'ollamadev terminal attach <name>' to interact\n";
@@ -2746,8 +2837,33 @@ if ($cmd === 'chat') {
     } elseif ($sub === 'stop') {
         $name = $arg2;
         if (!$name) { echo "Usage: terminal stop <name>\n"; exit(1); }
-        $tm->stop($name);
-        echo "Stopped terminal '$name'\n";
+        $result = $tm->stop($name);
+        if (isset($result['error'])) { echo "Error: {$result['error']}\n"; exit(1); }
+        echo "Stopped terminal '$name' (state saved)\n";
+    } elseif ($sub === 'pause') {
+        $name = $arg2;
+        if (!$name) { echo "Usage: terminal pause <name>\n"; exit(1); }
+        $result = $tm->pause($name);
+        if (isset($result['error'])) { echo "Error: {$result['error']}\n"; exit(1); }
+        echo "Paused terminal '$name'\n";
+    } elseif ($sub === 'resume') {
+        $name = $arg2;
+        if (!$name) { echo "Usage: terminal resume <name>\n"; exit(1); }
+        $result = $tm->resume($name);
+        if (isset($result['error'])) { echo "Error: {$result['error']}\n"; exit(1); }
+        echo "Resumed terminal '$name'\n";
+    } elseif ($sub === 'broadcast') {
+        $msg = $arg2;
+        if (!$msg) { echo "Usage: terminal broadcast <message>\n"; exit(1); }
+        $status = $tm->status();
+        $count = 0;
+        foreach ($status['terminals'] as $t) {
+            if ($t['status'] === 'running') {
+                file_put_contents($tm->baseDir . "/{$t['name']}/broadcast.txt", $msg);
+                $count++;
+            }
+        }
+        echo "Broadcast to $count running terminals: $msg\n";
     } elseif ($sub === 'delete' || $sub === 'rm') {
         $name = $arg2;
         if (!$name) { echo "Usage: terminal delete <name>\n"; exit(1); }
@@ -2757,18 +2873,32 @@ if ($cmd === 'chat') {
         $name = $arg2;
         if (!$name) { echo "Usage: terminal attach <name>\n"; exit(1); }
         if (!$tm->exists($name)) { echo "Terminal '$name' not found\n"; exit(1); }
-        echo "Attaching to terminal '$name'... (Ctrl+C to detach)\n";
         $terminal = $tm->loadTerminal($name);
+        echo "Attaching to terminal '$name'...\n";
         echo "Model: {$terminal['model']}\n";
         echo "Working directory: {$terminal['cwd']}\n";
         echo "Log:\n" . str_repeat('-', 40) . "\n";
         echo $tm->getLog($name, 20);
         echo str_repeat('-', 40) . "\n";
-        echo "\nType your message and press Enter:\n";
+        echo "\nType your message and press Enter.\n";
+        echo "Press Ctrl+C to detach (terminal stays running in background).\n";
+        echo "Type 'exit' or 'quit' to stop the terminal completely.\n\n";
+        pcntl_signal(SIGINT, function() use ($name, $tm) {
+            echo "\nDetached from terminal '$name' (still running)\n";
+            exit(0);
+        });
         while (true) {
+            if (file_exists($tm->baseDir . "/$name/broadcast.txt")) {
+                $bc = trim(file_get_contents($tm->baseDir . "/$name/broadcast.txt"));
+                if ($bc) { echo "\n[BROADCAST]: $bc\n"; file_put_contents($tm->baseDir . "/$name/broadcast.txt", ''); }
+            }
             echo "\n[{$name}]> ";
             $input = trim(fgets(STDIN));
-            if ($input === 'exit' || $input === 'quit') break;
+            if ($input === 'exit' || $input === 'quit') {
+                $tm->stop($name);
+                echo "Stopped terminal '$name'\n";
+                break;
+            }
             if (empty($input)) continue;
             $agent = new Agent();
             $agent->setModel($terminal['model']);
@@ -2778,6 +2908,8 @@ if ($cmd === 'chat') {
             file_put_contents($tm->baseDir . "/$name/session.log", "\n[user] $input\n[ai] $result\n", FILE_APPEND);
         }
         echo "Detached from terminal '$name'\n";
+    } elseif ($sub === 'detach') {
+        echo "Detached (terminal continues running in background)\n";
     } elseif ($sub === 'log') {
         $name = $arg2;
         if (!$name) { echo "Usage: terminal log <name> [lines]\n"; exit(1); }
@@ -2787,6 +2919,159 @@ if ($cmd === 'chat') {
         echo "Unknown terminal command: $sub\n";
         echo "Run 'ollamadev terminal help' for usage\n";
         exit(1);
+    }
+} elseif ($cmd === 'lsp') {
+    $port = $flags['port'] ?: 4389;
+    $host = $flags['hostname'] ?: '127.0.0.1';
+    echo "OllamaDev LSP server starting on $host:$port\n";
+    echo "Connect your IDE to localhost:$port\n";
+    echo "Press Ctrl+C to stop\n\n";
+
+    $server = @stream_socket_server("tcp://$host:$port", $errno, $errstr);
+    if (!$server) { echo "Failed: $errstr\n"; exit(1); }
+    echo "LSP server listening on $host:$port\n";
+
+    $ollama = new OllamaClient();
+    $watchedFiles = [];
+    $watcherRunning = true;
+
+    if (function_exists('pcntl_signal')) {
+        pcntl_signal(SIGTERM, function() use (&$watcherRunning) { $watcherRunning = false; });
+        pcntl_signal(SIGINT, function() use (&$watcherRunning) { $watcherRunning = false; });
+    }
+
+    while ($conn = @stream_socket_accept($server, 60)) {
+        $data = '';
+        $len = 0;
+        while (($line = fgets($conn)) !== false) {
+            if (trim($line) === '') break;
+            if (strpos($line, 'Content-Length:') === 0) {
+                $len = (int)trim(substr($line, 15));
+            }
+            $data .= $line;
+        }
+        if ($len > 0) {
+            $body = '';
+            while (strlen($body) < $len && ($line = fgets($conn)) !== false) { $body .= $line; }
+            $data .= $body;
+        }
+        $json = json_decode(trim($data), true);
+        $id = $json['id'] ?? null;
+        $method = $json['method'] ?? '';
+        $params = $json['params'] ?? [];
+
+        $response = ['jsonrpc' => '2.0', 'id' => $id];
+        if ($method === 'initialize') {
+            $response['result'] = [
+                'capabilities' => [
+                    'textDocumentSync' => 1,
+                    'hoverProvider' => true,
+                    'definitionProvider' => true,
+                    'referencesProvider' => true,
+                    'renameProvider' => ['prepareProvider' => true],
+                    'documentSymbolProvider' => true,
+                    'completionProvider' => ['resolveProvider' => true, 'triggerCharacters' => ['.', '>', ':']]
+                ],
+                'serverInfo' => ['name' => 'ollamadev-lsp', 'version' => '1.0']
+            ];
+        } elseif ($method === 'textDocument/hover') {
+            $response['result'] = ['contents' => 'OllamaDev LSP - Ask questions about code via ollamadev terminal'];
+        } elseif ($method === 'textDocument/completion') {
+            $text = $params['textDocument']['uri'] ?? '';
+            $pos = $params['position'] ?? ['line' => 0, 'character' => 0];
+            $context = $params['context'] ?? [];
+            $trigger = $context['triggerCharacter'] ?? '';
+            $model = Config::get('ollama.defaultModel', 'llama3.2:latest');
+            $code = '// ' . $trigger . ' autocomplete';
+            $completion = $ollama->codeComplete($code, $trigger, $model);
+            $items = [];
+            if (!empty(trim($completion))) {
+                $items[] = ['label' => 'ollamadev: ' . substr(trim($completion), 0, 30), 'kind' => 1, 'detail' => 'AI completion', 'insertText' => trim($completion)];
+            }
+            $items[] = ['label' => '// TODO: ', 'kind' => 2, 'detail' => 'Add comment', 'insertText' => '// TODO: '];
+            if ($trigger === '.') {
+                $items[] = ['label' => 'ask AI for method', 'kind' => 1, 'detail' => 'Get AI completion', 'insertText' => ''];
+            }
+            $response['result'] = ['isIncomplete' => true, 'items' => $items];
+        } elseif ($method === 'textDocument/didOpen' || $method === 'textDocument/didChange') {
+            $uri = $params['textDocument']['uri'] ?? '';
+            if ($uri) {
+                $watchedFiles[$uri] = ['uri' => $uri, 'version' => time()];
+            }
+            $response['result'] = null;
+        } elseif ($method === 'textDocument/didSave') {
+            $uri = $params['textDocument']['uri'] ?? '';
+            if ($uri && isset($watchedFiles[$uri])) {
+                $watchedFiles[$uri]['saved'] = date('Y-m-d H:i:s');
+            }
+            $response['result'] = null;
+        } elseif ($method === 'textDocument/documentSymbol') {
+            $uri = $params['textDocument']['uri'] ?? '';
+            $symbols = [];
+            if ($uri && file_exists($uri)) {
+                $content = file_get_contents($uri);
+                $ext = pathinfo($uri, PATHINFO_EXTENSION);
+                $lang = match($ext) { 'php' => 'PHP', 'js' => 'JavaScript', 'ts' => 'TypeScript', 'py' => 'Python', 'go' => 'Go', 'rs' => 'Rust', default => 'plain' };
+                if (preg_match_all('/^(class|interface|trait|function|const|enum|struct)\s+(\w+)/m', $content, $matches, PREG_SET_ORDER)) {
+                    foreach ($matches as $m) {
+                        $kind = match($m[1]) { 'class' => 5, 'interface' => 11, 'trait' => 22, 'function' => 12, 'const' => 14, 'enum' => 24, 'struct' => 23 } ?: 12;
+                        $symbols[] = ['name' => $m[2], 'kind' => $kind, 'location' => ['uri' => $uri, 'range' => ['start' => ['line' => 0, 'character' => 0], 'end' => ['line' => 0, 'character' => 0]]]];
+                    }
+                }
+                if (preg_match_all('/^\s*(public|private|protected)?\s*(static)?\s*\$(\w+)/m', $content, $matches, PREG_SET_ORDER)) {
+                    foreach ($matches as $m) {
+                        $symbols[] = ['name' => '$' . $m[3], 'kind' => 7, 'containerName' => 'properties', 'location' => ['uri' => $uri, 'range' => ['start' => ['line' => 0, 'character' => 0], 'end' => ['line' => 0, 'character' => 0]]]];
+                    }
+                }
+            }
+            $response['result'] = $symbols;
+        } elseif ($method === 'textDocument/references') {
+            $uri = $params['textDocument']['uri'] ?? '';
+            $pos = $params['position'] ?? ['line' => 0, 'character' => 0];
+            $word = 'symbol';
+            if ($uri && file_exists($uri)) {
+                $content = file_get_contents($uri);
+                if (preg_match('/\b(\w+)\b/', substr($content, 0, 500), $m)) $word = $m[1];
+            }
+            $response['result'] = [['uri' => $uri, 'range' => ['start' => ['line' => $pos['line'] ?? 0, 'character' => 0], 'end' => ['line' => $pos['line'] ?? 0, 'character' => strlen($word)]]]];
+        } elseif ($method === 'textDocument/rename') {
+            $uri = $params['textDocument']['uri'] ?? '';
+            $newName = $params['newName'] ?? 'newName';
+            $response['result'] = ['changes' => [$uri => [['range' => ['start' => ['line' => 0, 'character' => 0], 'end' => ['line' => 0, 'character' => 100]], 'newText' => $newName]]]];
+        } elseif ($method === 'textDocument/publishDiagnostics') {
+            $response['result'] = null;
+        } elseif ($method === 'completionItem/resolve') {
+            $item = $params;
+            $response['result'] = $item;
+        } elseif (strpos($method, 'ollamadev/') === 0) {
+            $action = substr($method, 10);
+            if ($action === 'chat') {
+                $msg = $params['message'] ?? '';
+                $result = $ollama->chat([['role' => 'user', 'content' => $msg]]);
+                $response['result'] = ['reply' => $result ?: 'Use ollamadev terminal for full chat'];
+            } elseif ($action === 'review') {
+                $code = $params['code'] ?? '';
+                $result = $ollama->codeReview($code);
+                $response['result'] = ['reply' => $result ?: 'Use ollamadev terminal for code review'];
+            } elseif ($action === 'generate') {
+                $code = $params['code'] ?? '';
+                $prompt = "Improve this code:\n" . $code . "\n\nReturn only the improved code:";
+                $result = $ollama->completion($prompt);
+                $response['result'] = ['reply' => $result ?: 'Use ollamadev terminal for code generation'];
+            } else {
+                $response['result'] = ['reply' => "OllamaDev: $action - use ollamadev terminal"];
+            }
+        } elseif ($method === 'shutdown') {
+            $response['result'] = null;
+        } elseif ($method === 'exit') {
+            fclose($conn);
+            exit(0);
+        } else {
+            $response['result'] = null;
+        }
+        $out = json_encode($response);
+        fwrite($conn, "Content-Length: " . strlen($out) . "\r\n\r\n" . $out);
+        fclose($conn);
     }
 } elseif (empty($cmd)) {
     (new Session($config))->start();
@@ -2807,7 +3092,7 @@ php "%~dp0ollamadev" %*
 BATEOF
 
 # Create version info
-echo "v3.7.0" > "$BUILD_DIR/VERSION"
+echo "v3.9.2" > "$BUILD_DIR/VERSION"
 
 # Show file info
 ls -la "$BUILD_DIR/ollamadev"
