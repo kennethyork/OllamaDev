@@ -1220,7 +1220,7 @@ Tools::register('agent', function($p) {
     $maxIterations = (int)($p['max_iterations'] ?? 5);
     $model = $GLOBALS['currentSessionModel'] ?? Config::get('ollama.defaultModel', 'llama3.2:latest');
 
-    $blocked = ['mistral', 'smollm', 'starcoder', 'qwen', 'phi', 'wizardcoder'];
+    $blocked = ['mistral', 'smollm', 'starcoder', 'qwen', 'phi', 'nomic'];
     foreach ($blocked as $b) { if (stripos($model, $b) !== false) return "Model $model does not support tool calling. Try: gpt-oss, llama3.2, codestral, or deepseek-r1."; }
 
     if (empty($prompt)) return "missing prompt (need 'prompt' or 'task' parameter)";
@@ -1824,6 +1824,22 @@ if (preg_match_all('/<tool_call>\s*(\{.*?\})\s*<\/tool_call>/s', $content, $matc
         if (preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*\n\s+(\w+):\s*(.+?)\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
             foreach ($matches as $m) {
                 $calls[] = ['name' => $m[1], 'params' => [$m[2] => trim($m[3])]];
+            }
+            if (!empty($calls)) return $calls;
+        }
+
+        if (preg_match_all('/<tool_call>\s*<name>(\w+)<\/name>\s*<params>(\w+)="([^"]*)"<\/params>\s*<\/tool_call>/', $content, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $m) {
+                $calls[] = ['name' => $m[1], 'params' => [$m[2] => $m[3]]];
+            }
+            if (!empty($calls)) return $calls;
+        }
+
+        if (preg_match_all('/<tool_call>\s*<name>(\w+)<\/name>\s*<params>([^<]+)<\/params>\s*<\/tool_call>/', $content, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $m) {
+                if (preg_match_all('/(\w+)="([^"]*)"/', $m[2], $kv)) {
+                    $calls[] = ['name' => $m[1], 'params' => array_combine($kv[1], $kv[2])];
+                }
             }
             if (!empty($calls)) return $calls;
         }
