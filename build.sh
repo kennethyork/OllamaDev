@@ -1220,8 +1220,8 @@ Tools::register('agent', function($p) {
     $maxIterations = (int)($p['max_iterations'] ?? 5);
     $model = $GLOBALS['currentSessionModel'] ?? Config::get('ollama.defaultModel', 'llama3.2:latest');
 
-    $blocked = ['mistral', 'smollm', 'starcoder'];
-    foreach ($blocked as $b) { if (str_contains($model, $b)) return "Model $model does not support tool calling. Try: gpt-oss, llama3.2, codestral, deepseek-r1, or qwen."; }
+    $blocked = ['mistral', 'smollm', 'starcoder', 'qwen', 'phi', 'wizardcoder'];
+    foreach ($blocked as $b) { if (stripos($model, $b) !== false) return "Model $model does not support tool calling. Try: gpt-oss, llama3.2, codestral, or deepseek-r1."; }
 
     if (empty($prompt)) return "missing prompt (need 'prompt' or 'task' parameter)";
 
@@ -1817,6 +1817,13 @@ if (preg_match_all('/<tool_call>\s*(\{.*?\})\s*<\/tool_call>/s', $content, $matc
         if (preg_match_all('/name:\s*(\w+)\s*\n\s*params:\s*(\w+)=["\']([^"\']*)["\']/', $content, $matches, PREG_SET_ORDER)) {
             foreach ($matches as $m) {
                 $calls[] = ['name' => $m[1], 'params' => [$m[2] => $m[3]]];
+            }
+            if (!empty($calls)) return $calls;
+        }
+
+        if (preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*\n\s+(\w+):\s*(.+?)\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $m) {
+                $calls[] = ['name' => $m[1], 'params' => [$m[2] => trim($m[3])]];
             }
             if (!empty($calls)) return $calls;
         }
