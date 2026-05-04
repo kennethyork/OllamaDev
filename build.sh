@@ -1248,6 +1248,9 @@ Tools::register('agent', function($p) {
         if ($isGptOss && empty($toolCalls)) {
             $toolCalls = $subAgent->parseGptOssToolCalls($response);
         }
+        if (empty($toolCalls) && (str_contains($model, 'command') || str_contains($model, 'gemma'))) {
+            $toolCalls = $subAgent->parseGptOssToolCalls($response);
+        }
         $messages[] = ['role' => 'assistant', 'content' => $response];
 
         if (empty($toolCalls)) {
@@ -1842,11 +1845,11 @@ if (preg_match_all('/<tool_call>\s*(\{.*?\})\s*<\/tool_call>/s', $content, $matc
             if (!empty($calls)) return $calls;
         }
 
-        if (preg_match_all('/<tool_code>\s*(\{.*?\})\s*<\/tool_code>/s', $content, $matches, PREG_SET_ORDER)) {
+if (preg_match_all('/<tool_code>\s*(\{[\s\S]*?\})\s*<\/tool_code>/', $content, $matches, PREG_SET_ORDER)) {
             foreach ($matches as $m) {
                 $json = json_decode($m[1], true);
                 if ($json && isset($json['name'])) {
-                    $calls[] = ['name' => $json['name'], 'params' => $json['arguments'] ?? []];
+                    $calls[] = ['name' => $json['name'], 'params' => $json['params'] ?? $json['arguments'] ?? []];
                 }
             }
             if (!empty($calls)) return $calls;
@@ -1999,7 +2002,7 @@ if (empty($calls)) {
             }
         }
 
-        if (empty($calls)) {
+if (empty($calls)) {
             preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*\{([^}]+)\}\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
             foreach ($matches as $m) {
                 $toolName = trim($m[1]);
@@ -2009,7 +2012,31 @@ if (empty($calls)) {
                     foreach ($kvMatches[1] as $i => $key) {
                         $params[$key] = $kvMatches[2][$i];
                     }
-                    if (isset($params['task'])) {
+                    if (!empty($params)) {
+                        $calls[] = ['name' => $toolName, 'params' => $params];
+                    }
+                }
+            }
+        }
+
+        if (empty($calls)) {
+            preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*(\w+)=["\']?([^"\'\s]+)["\']?/s', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $calls[] = ['name' => $m[1], 'params' => [$m[2] => $m[3]]];
+            }
+        }
+
+        if (empty($calls)) {
+            preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*\{([^}]+)\}\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $toolName = trim($m[1]);
+                $rawParams = trim($m[2]);
+                if (preg_match_all('/(\w+)\s*:\s*([^\s,}]+)/', $rawParams, $kvMatches, PREG_SET_ORDER)) {
+                    $params = [];
+                    foreach ($kvMatches[1] as $i => $key) {
+                        $params[$key] = trim($kvMatches[2][$i], "\"'\"");
+                    }
+                    if (!empty($params)) {
                         $calls[] = ['name' => $toolName, 'params' => $params];
                     }
                 }
