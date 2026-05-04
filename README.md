@@ -1,6 +1,6 @@
 # OllamaDev
 
-**Local AI coding agent** - 151KB single PHP binary, runs entirely on your machine with Ollama. No cloud, no data leaves your computer.
+**Local AI coding agent** - 153KB single PHP binary, runs entirely on your machine with Ollama. No cloud, no data leaves your computer.
 
 ## Install (30 seconds)
 
@@ -21,6 +21,7 @@ ollamadev                     # Interactive chat
 ollamadev "fix this bug"      # Single prompt
 ollamadev git status           # Git commands
 ollamadev terminal create dev  # Named sessions
+ollamadev agent task="search codebase"  # Sequential orchestration
 ollamadev update              # Check for updates
 ```
 
@@ -32,11 +33,19 @@ ollamadev update              # Check for updates
 | Terminal-native | ✅ | ✅ | ❌ |
 | Named sessions | ✅ | ❌ | ❌ |
 | LSP for any IDE | ✅ | ❌ | ❌ |
-| Free | ✅ | ❌ ($20/mo) | ❌ |
-| 151KB binary | ✅ | ~100MB | ~100MB |
 | Sequential orchestration | ✅ | ✅ | ❌ |
+| Free | ✅ | ❌ ($20/mo) | ❌ |
+| 153KB binary | ✅ | ~100MB | ~100MB |
+| Auto-update | ✅ (manual) | ✅ (auto) | ❌ |
 
 ## Features
+
+### Sequential Orchestration
+Run multi-step agentic tasks:
+```bash
+ollamadev agent task="search codebase, analyze findings, write tests"
+```
+Agent runs iterations, calling tools sequentially until task is done.
 
 ### Git (full workflow)
 ```bash
@@ -45,7 +54,7 @@ ollamadev git commit "fix: resolve issue"
 ollamadev git_cherry_pick ref=<hash>       # Cherry-pick commit
 ollamadev git_revert ref=<hash>            # Revert commit
 ollamadev git_merge branch=main no_ff=true  # No fast-forward merge
-ollamadev git_merge branch=main squash=true # Squash merge
+ollamadev git_merge branch=main squash=true  # Squash merge
 ```
 
 ### Auto-update
@@ -60,17 +69,16 @@ OLLAMA_HOST=http://localhost:11434 ollamadev chat
 OLLAMA_MODEL=deepseek-r1:32b ollamadev chat
 ```
 
-### Project memory
+### Project memory (optional)
 Create `OLLAMADEV.md` in project root for persistent context:
 ```markdown
 # Project Context
 - Framework: Laravel 10
 - Code style: PSR-12
 - Testing: PHPUnit
-- Main model: User
 ```
 
-AI reads this on every prompt - like Claude Code's CLAUDE.md.
+AI reads this on every prompt. Without this file, AI works fine with defaults.
 
 ### Terminal Sessions
 ```bash
@@ -95,9 +103,9 @@ Auto-starts when VS Code extension is loaded.
 
 **Code:** goto, find_refs, symbols, hover, diagnostics, format, lsp
 
-**System:** bash, execute_command, fetch, watch, bg, agent, mcp, update
+**Agent:** Sequential orchestration for multi-step tasks
 
-**Agent:** Sequential orchestration for multi-step tasks.
+**System:** bash, execute_command, fetch, watch, bg, agent, mcp, update
 
 ## VS Code Extension
 
@@ -140,6 +148,12 @@ Auto-starts LSP on load (no manual server needed).
 }
 ```
 
+Or use environment variables:
+```bash
+OLLAMA_HOST=http://localhost:11434
+OLLAMA_MODEL=deepseek-r1:32b
+```
+
 ## Build from Source
 
 ```bash
@@ -151,14 +165,15 @@ cd OllamaDev
 ## Architecture
 
 ```
-ollamadev (151KB PHP binary)
+ollamadev (153KB PHP binary)
 ├── 68 embedded tools
 ├── AI agent (Ollama)
+├── Sequential orchestrator
 ├── LSP server
 ├── Terminal sessions
 ├── Git integration
 ├── Auto-updater
-└── Sequential orchestration
+└── Named sessions
 
 vscode-extension/ollamadev-lsp-1.1.0.vsix
 ```
