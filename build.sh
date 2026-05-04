@@ -1218,13 +1218,17 @@ Tools::register('agent', function($p) {
     $prompt = $p['prompt'] ?? $p['task'] ?? '';
     $context = $p['context'] ?? '';
     $maxIterations = (int)($p['max_iterations'] ?? 5);
+    $model = $GLOBALS['currentSessionModel'] ?? Config::get('ollama.defaultModel', 'llama3.2:latest');
+
+    $blocked = ['mistral', 'smollm', 'starcoder'];
+    foreach ($blocked as $b) { if (str_contains($model, $b)) return "Model $model does not support tool calling. Try: gpt-oss, llama3.2, codestral, deepseek-r1, or qwen."; }
+
     if (empty($prompt)) return "missing prompt (need 'prompt' or 'task' parameter)";
 
     $subAgent = new Agent();
-    $model = Config::get('ollama.defaultModel', 'llama3.2:latest');
     $subAgent->setModel($model);
     $isGptOss = str_contains($model, 'gpt-oss');
-    
+
     $systemPrompt = $subAgent->buildSystemPrompt();
     if (!empty($context)) {
         $systemPrompt['content'] .= "\n\nCONTEXT: $context";
@@ -2501,7 +2505,8 @@ class Session {
         echo "\n📁 $pwd";
         if (!empty($edited)) {
             echo "\n✏️  Edited: " . implode(', ', $edited);
-            $GLOBALS['editedFiles'] = [];
+$GLOBALS['editedFiles'] = [];
+$GLOBALS['currentSessionModel'] = null;
         }
     }
 
@@ -2516,7 +2521,7 @@ class Session {
             case 'mode': echo "Mode set to: " . ($args ?: 'auto') . "\n"; return false;
             case 'verbose': $GLOBALS['verbose'] = trim($args) === 'on'; echo "Verbose: " . ($GLOBALS['verbose'] ? 'on' : 'off') . "\n"; return false;
             case 'model':
-                if (!empty($args)) { $this->agent->setModel($args); $this->model = $args; echo "Model: $args\n"; }
+                if (!empty($args)) { $this->agent->setModel($args); $this->model = $args; $GLOBALS['currentSessionModel'] = $args; echo "Model: $args\n"; }
                 else {
                     $models = $this->agent->listModelsDetailed();
                     echo "\nAvailable Models:\n";

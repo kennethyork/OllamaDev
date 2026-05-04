@@ -1523,16 +1523,25 @@ Tools: ls, view, write, edit, glob, grep pattern=REGEX path=PATH, bash command=C
         'starcoder' => "You are StarCoder. When user asks you to list files, read files, or run commands - you MUST actually call the tool now, not explain how to do it. Tools execute directly - do NOT ask for permission.",
         'smollm' => "You are a compact AI assistant. When asked to list files, you MUST call the ls tool. Execute: <tool_code>{\"name\": \"ls\", \"arguments\": {\"path\": \".\"}}</tool_code> Tools execute directly - do NOT ask for permission.",
 
-        'gpt-oss' => 'You are a CLI tool with file access. When user asks to view, list, read, write, edit, search, or run commands - ALWAYS call the appropriate tool.
+        'gpt-oss' => 'You are a CLI tool with file access. When user asks to run shell commands (echo, ls, cat, pwd, etc) - use bash tool. For file operations use view, write, edit, grep, glob.
+
+TOOL CALL FORMAT (MUST use this exact XML format):
+<tool_call>
+name: bash
+params: command="echo hello world"
+</tool_call>
+
+For bash commands:
+- echo TEXT → bash with command="echo TEXT"
+- ls → bash with command="ls"
+- cat FILE → view with file_path=FILE
 
 For file operations:
-- "view FILE" → <tool_code>{"name": "view", "arguments": {"file_path": "FILE"}}</tool_code>
-- "ls DIR" → <tool_code>{"name": "ls", "arguments": {"path": "DIR"}}</tool_code>
-- "write FILE CONTENT" → <tool_code>{"name": "write", "arguments": {"file_path": "FILE", "content": "CONTENT"}}</tool_code>
-- "grep PATTERN FILE" → <tool_code>{"name": "grep", "arguments": {"pattern": "PATTERN", "path": "FILE"}}</tool_code>
-- "glob PATTERN" → <tool_code>{"name": "glob", "arguments": {"pattern": "PATTERN"}}</tool_code>
+- view FILE → view with file_path=FILE
+- write FILE CONTENT → write with file_path=FILE content=CONTENT
+- grep PATTERN FILE → grep with pattern=PATTERN path=FILE
 
-DO NOT explain. DO NOT ask questions. Just call the tool.',
+DO NOT use write tool for echo. DO NOT explain. Just call the tool.',
 
         'default' => 'You are an AI coding assistant. When user asks you to do something, call the appropriate tool.
 
@@ -1771,13 +1780,27 @@ if (preg_match_all('/<tool_code>\s*(\{.*?\})\s*<\/tool_code>/s', $content, $matc
             if (!empty($calls)) return $calls;
         }
         
-        if (preg_match_all('/<tool_call>\s*(\{.*?\})\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
+if (preg_match_all('/<tool_call>\s*(\{.*?\})\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
             foreach ($matches as $m) {
                 $json = json_decode($m[1], true);
                 if ($json && isset($json['name'])) {
                     $args = $json['arguments'] ?? $json['params'] ?? [];
                     $calls[] = ['name' => $json['name'], 'params' => $args];
                 }
+            }
+            if (!empty($calls)) return $calls;
+        }
+
+        if (preg_match_all('/<tool_call>\s*<name>(\w+)<\/name>\s*<params>\s*<(\w+)>([^<]*)<\/\2>\s*<\/params>\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $m) {
+                $calls[] = ['name' => $m[1], 'params' => [$m[2] => $m[3]]];
+            }
+            if (!empty($calls)) return $calls;
+        }
+
+        if (preg_match_all('/name:\s*(\w+)\s*\n\s*params:\s*(\w+)=["\']([^"\']*)["\']/', $content, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $m) {
+                $calls[] = ['name' => $m[1], 'params' => [$m[2] => $m[3]]];
             }
             if (!empty($calls)) return $calls;
         }
@@ -1934,12 +1957,28 @@ if (empty($calls)) {
     public function parseGptOssToolCalls(string $content): array {
         $calls = [];
 
-        preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*(\{[\s\S]*?\})\s*<\/tool_call>/', $content, $matches, PREG_SET_ORDER);
+        preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*\n?\s*(\{[\s\S]*?\})\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
         foreach ($matches as $m) {
             $toolName = trim($m[1]);
-            $jsonParams = json_decode(trim($m[2]), true);
+            $rawJson = trim($m[2]);
+            $rawJson = preg_replace('/\s+/', ' ', $rawJson);
+            $jsonParams = json_decode($rawJson, true);
             if ($jsonParams && isset($jsonParams['task'])) {
                 $calls[] = ['name' => $toolName, 'params' => $jsonParams];
+            }
+        }
+
+        if (empty($calls)) {
+            preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*\n\s*(\w+):\s*"([^"]*)"/s', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $calls[] = ['name' => $m[1], 'params' => [$m[2] => $m[3]]];
+            }
+        }
+
+        if (empty($calls)) {
+            preg_match_all('/<tool_call>\s*<name>(\w+)<\/name>\s*<params>\s*<(\w+)>([^<]*)<\/\2>\s*<\/params>\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $calls[] = ['name' => $m[1], 'params' => [$m[2] => $m[3]]];
             }
         }
 
