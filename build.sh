@@ -1219,9 +1219,11 @@ Tools::register('agent', function($p) {
     $context = $p['context'] ?? '';
     $maxIterations = (int)($p['max_iterations'] ?? 5);
     if (empty($prompt)) return "missing prompt (need 'prompt' or 'task' parameter)";
-    
+
     $subAgent = new Agent();
-    $subAgent->setModel(Config::get('ollama.defaultModel', 'llama3.2:latest'));
+    $model = Config::get('ollama.defaultModel', 'llama3.2:latest');
+    $subAgent->setModel($model);
+    $isGptOss = str_contains($model, 'gpt-oss');
     
     $systemPrompt = $subAgent->buildSystemPrompt();
     if (!empty($context)) {
@@ -1237,7 +1239,13 @@ Tools::register('agent', function($p) {
         $iteration++;
         $response = $subAgent->run($messages);
         $output[] = "=== Iteration $iteration ===\n$response\n";
-        
+
+        $toolCalls = $subAgent->parseToolCalls($response);
+        if ($isGptOss && empty($toolCalls)) {
+            $toolCalls = $subAgent->parseGptOssToolCalls($response);
+        }
+        $messages[] = ['role' => 'assistant', 'content' => $response];
+
         if (empty($toolCalls)) {
             $lastMsg = end($messages);
             if (strpos(strtolower($lastMsg['content']), 'task complete') !== false || 
@@ -1245,12 +1253,9 @@ Tools::register('agent', function($p) {
                 strpos(strtolower($response), 'done') !== false) {
                 break;
             }
-            $messages[] = ['role' => 'assistant', 'content' => $response];
             $messages[] = ['role' => 'user', 'content' => 'Continue or finish? If done, say "TASK_COMPLETE".'];
             continue;
         }
-        
-        $messages[] = ['role' => 'assistant', 'content' => $response];
         
         foreach ($toolCalls as $call) {
             $toolName = $call['name'];
@@ -1530,16 +1535,25 @@ Tools: ls, view, write, edit, glob, grep pattern=REGEX path=PATH, bash command=C
         'starcoder' => "You are StarCoder. When user asks you to list files, read files, or run commands - you MUST actually call the tool now, not explain how to do it. Tools execute directly - do NOT ask for permission.",
         'smollm' => "You are a compact AI assistant. When asked to list files, you MUST call the ls tool. Execute: <tool_code>{\"name\": \"ls\", \"arguments\": {\"path\": \".\"}}</tool_code> Tools execute directly - do NOT ask for permission.",
 
-        'gpt-oss' => 'You are a CLI tool with file access. When user asks to view, list, read, write, edit, search, or run commands - ALWAYS call the appropriate tool.
+        'gpt-oss' => 'You are a CLI tool with file access. When user asks to run shell commands (echo, ls, cat, pwd, etc) - use bash tool. For file operations use view, write, edit, grep, glob.
+
+TOOL CALL FORMAT (MUST use this exact XML format):
+<tool_call>
+name: bash
+params: command="echo hello world"
+</tool_call>
+
+For bash commands:
+- echo TEXT → bash with command="echo TEXT"
+- ls → bash with command="ls"
+- cat FILE → view with file_path=FILE
 
 For file operations:
-- "view FILE" → <tool_code>{"name": "view", "arguments": {"file_path": "FILE"}}</tool_code>
-- "ls DIR" → <tool_code>{"name": "ls", "arguments": {"path": "DIR"}}</tool_code>
-- "write FILE CONTENT" → <tool_code>{"name": "write", "arguments": {"file_path": "FILE", "content": "CONTENT"}}</tool_code>
-- "grep PATTERN FILE" → <tool_code>{"name": "grep", "arguments": {"pattern": "PATTERN", "path": "FILE"}}</tool_code>
-- "glob PATTERN" → <tool_code>{"name": "glob", "arguments": {"pattern": "PATTERN"}}</tool_code>
+- view FILE → view with file_path=FILE
+- write FILE CONTENT → write with file_path=FILE content=CONTENT
+- grep PATTERN FILE → grep with pattern=PATTERN path=FILE
 
-DO NOT explain. DO NOT ask questions. Just call the tool.',
+DO NOT use write tool for echo. DO NOT explain. Just call the tool.',
 
         'default' => 'You are an AI coding assistant. When user asks you to do something, call the appropriate tool.
 
@@ -1765,7 +1779,7 @@ public function run(array $messages, callable $handler = null): string {
         return $results;
     }
 
-private function parseToolCalls(string $content): array {
+public function parseToolCalls(string $content): array {
         $calls = [];
 
 if (preg_match_all('/<tool_code>\s*(\{.*?\})\s*<\/tool_code>/s', $content, $matches, PREG_SET_ORDER)) {
@@ -1922,7 +1936,117 @@ if (preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*arguments:\s*\{[^}]*\}[\s\n]*
             }
         }
 
-return $calls;
+if (empty($calls)) {
+            preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*([^\n<]+)\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $toolName = trim($m[1]);
+                $rawParams = trim($m[2]);
+                if (!empty($toolName) && !empty($rawParams)) {
+                    $tool = Tools::find($toolName);
+                    $paramName = $tool ? ($tool->params[0] ?? 'command') : 'command';
+                    $calls[] = ['name' => $toolName, 'params' => [$paramName => $rawParams]];
+                }
+            }
+        }
+
+        return $calls;
+    }
+
+    public function parseGptOssToolCalls(string $content): array {
+        $calls = [];
+
+        preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*\n?\s*(\{[\s\S]*?\})\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
+        foreach ($matches as $m) {
+            $toolName = trim($m[1]);
+            $rawJson = trim($m[2]);
+            $rawJson = preg_replace('/\s+/', ' ', $rawJson);
+            $jsonParams = json_decode($rawJson, true);
+            if ($jsonParams && isset($jsonParams['task'])) {
+                $calls[] = ['name' => $toolName, 'params' => $jsonParams];
+            }
+        }
+
+        if (empty($calls)) {
+            preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*\n\s*(\w+):\s*"([^"]*)"/s', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $calls[] = ['name' => $m[1], 'params' => [$m[2] => $m[3]]];
+            }
+        }
+
+        if (empty($calls)) {
+            preg_match_all('/<tool_call>\s*<name>(\w+)<\/name>\s*<params>\s*<(\w+)>([^<]*)<\/\2>\s*<\/params>\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $calls[] = ['name' => $m[1], 'params' => [$m[2] => $m[3]]];
+            }
+        }
+
+        if (empty($calls)) {
+            preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*\{([^}]+)\}\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $toolName = trim($m[1]);
+                $rawParams = trim($m[2]);
+                if (preg_match_all('/(\w+)\s*:\s*"([^"]*)"/', $rawParams, $kvMatches, PREG_SET_ORDER)) {
+                    $params = [];
+                    foreach ($kvMatches[1] as $i => $key) {
+                        $params[$key] = $kvMatches[2][$i];
+                    }
+                    if (isset($params['task'])) {
+                        $calls[] = ['name' => $toolName, 'params' => $params];
+                    }
+                }
+            }
+        }
+
+        if (empty($calls)) {
+            preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*\{([^}]+)\}\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $toolName = trim($m[1]);
+                $rawParams = trim($m[2]);
+                if (preg_match('/(\w+)\s*:\s*"([^"]*)"/', $rawParams, $kvMatch)) {
+                    $calls[] = ['name' => $toolName, 'params' => [$kvMatch[1] => $kvMatch[2]]];
+                }
+            }
+        }
+
+        if (empty($calls)) {
+            preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*([^\n<]+)\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $toolName = trim($m[1]);
+                $rawParams = trim($m[2]);
+                if (!empty($toolName) && !empty($rawParams)) {
+                    $tool = Tools::find($toolName);
+                    $paramName = $tool ? ($tool->params[0] ?? 'command') : 'command';
+                    $calls[] = ['name' => $toolName, 'params' => [$paramName => $rawParams]];
+                }
+            }
+        }
+
+        if (empty($calls)) {
+            preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*(\w+)\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $toolName = trim($m[1]);
+                $tool = Tools::find($toolName);
+                if ($tool) {
+                    $paramName = $tool->params[0] ?? 'command';
+                    $calls[] = ['name' => $toolName, 'params' => [$paramName => trim($m[2])]];
+                }
+            }
+        }
+
+        if (empty($calls)) {
+            preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*(.+?)\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $toolName = trim($m[1]);
+                $rawParams = trim($m[2]);
+                $tool = Tools::find($toolName);
+                if ($tool && !empty($rawParams)) {
+                    $paramName = $tool->params[0] ?? 'command';
+                    $calls[] = ['name' => $toolName, 'params' => [$paramName => $rawParams]];
+                }
+            }
+        }
+
+        return $calls;
     }
 
     private function parseParams(string $argsStr): array {
