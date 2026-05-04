@@ -1203,15 +1203,60 @@ Tools::register('patch', function($p) {
 });
 
 Tools::register('agent', function($p) {
-    $prompt = $p['prompt'] ?? '';
-    if (empty($prompt)) return "missing prompt";
+    $prompt = $p['prompt'] ?? $p['task'] ?? '';
     $context = $p['context'] ?? '';
-    $session = new Session(Config::load());
-    $session->setAgentContext($context);
-    ob_start();
-    $session->startAgentLoop($prompt);
-    $output = ob_get_clean();
-    return $output ?: "Agent completed";
+    $maxIterations = (int)($p['max_iterations'] ?? 5);
+    if (empty($prompt)) return "missing prompt (need 'prompt' or 'task' parameter)";
+    
+    $subAgent = new Agent();
+    $subAgent->setModel(Config::get('ollama.defaultModel', 'llama3.2:latest'));
+    
+    $systemPrompt = $subAgent->buildSystemPrompt();
+    if (!empty($context)) {
+        $systemPrompt['content'] .= "\n\nCONTEXT: $context";
+    }
+    
+    $messages = [['role' => 'system', 'content' => $systemPrompt['content']], ['role' => 'user', 'content' => "Task: $prompt\n\nWork through this step by step. Use tools as needed and report results."]];
+    
+    $output = [];
+    $iteration = 0;
+    
+    while ($iteration < $maxIterations) {
+        $iteration++;
+        $response = $subAgent->run($messages);
+        $output[] = "=== Iteration $iteration ===\n$response\n";
+        
+        if (empty($toolCalls)) {
+            $lastMsg = end($messages);
+            if (strpos(strtolower($lastMsg['content']), 'task complete') !== false || 
+                strpos(strtolower($response), 'task complete') !== false ||
+                strpos(strtolower($response), 'done') !== false) {
+                break;
+            }
+            $messages[] = ['role' => 'assistant', 'content' => $response];
+            $messages[] = ['role' => 'user', 'content' => 'Continue or finish? If done, say "TASK_COMPLETE".'];
+            continue;
+        }
+        
+        $messages[] = ['role' => 'assistant', 'content' => $response];
+        
+        foreach ($toolCalls as $call) {
+            $toolName = $call['name'];
+            $params = $call['params'] ?? [];
+            $tool = Tools::find($toolName);
+            
+            if (!$tool) {
+                $result = "Error: tool '$toolName' not found";
+            } else {
+                $result = $tool($params);
+            }
+            
+            $messages[] = ['role' => 'tool', 'content' => "[$toolName] result: $result"];
+            $output[] = "[$toolName] → " . substr($result, 0, 200) . (strlen($result) > 200 ? '...' : '') . "\n";
+        }
+    }
+    
+    return implode("\n", $output);
 });
 
 Tools::register('git_status', function($p) {
@@ -1711,7 +1756,7 @@ public function run(array $messages, callable $handler = null): string {
 private function parseToolCalls(string $content): array {
         $calls = [];
 
-        if (preg_match_all('/<tool_code>\s*(\{.*?\})\s*<\/tool_code>/s', $content, $matches, PREG_SET_ORDER)) {
+if (preg_match_all('/<tool_code>\s*(\{.*?\})\s*<\/tool_code>/s', $content, $matches, PREG_SET_ORDER)) {
             foreach ($matches as $m) {
                 $json = json_decode($m[1], true);
                 if ($json && isset($json['name'])) {
@@ -1720,11 +1765,14 @@ private function parseToolCalls(string $content): array {
             }
             if (!empty($calls)) return $calls;
         }
-
-        if (preg_match_all('/call:(\w+):(\w+)\s*(\{[^}]*\})?/', $content, $matches, PREG_SET_ORDER)) {
+        
+        if (preg_match_all('/<tool_call>\s*(\{.*?\})\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
             foreach ($matches as $m) {
-                $args = json_decode($m[3] ?? '{}', true) ?: [];
-                $calls[] = ['name' => $m[2], 'params' => $args];
+                $json = json_decode($m[1], true);
+                if ($json && isset($json['name'])) {
+                    $args = $json['arguments'] ?? $json['params'] ?? [];
+                    $calls[] = ['name' => $json['name'], 'params' => $args];
+                }
             }
             if (!empty($calls)) return $calls;
         }
