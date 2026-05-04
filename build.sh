@@ -1792,13 +1792,27 @@ if (preg_match_all('/<tool_code>\s*(\{.*?\})\s*<\/tool_code>/s', $content, $matc
             if (!empty($calls)) return $calls;
         }
         
-        if (preg_match_all('/<tool_call>\s*(\{.*?\})\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
+if (preg_match_all('/<tool_call>\s*(\{.*?\})\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
             foreach ($matches as $m) {
                 $json = json_decode($m[1], true);
                 if ($json && isset($json['name'])) {
                     $args = $json['arguments'] ?? $json['params'] ?? [];
                     $calls[] = ['name' => $json['name'], 'params' => $args];
                 }
+            }
+            if (!empty($calls)) return $calls;
+        }
+
+        if (preg_match_all('/<tool_call>\s*<name>(\w+)<\/name>\s*<params>\s*<(\w+)>([^<]*)<\/\2>\s*<\/params>\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $m) {
+                $calls[] = ['name' => $m[1], 'params' => [$m[2] => $m[3]]];
+            }
+            if (!empty($calls)) return $calls;
+        }
+
+        if (preg_match_all('/name:\s*(\w+)\s*\n\s*params:\s*(\w+)=["\']([^"\']*)["\']/', $content, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $m) {
+                $calls[] = ['name' => $m[1], 'params' => [$m[2] => $m[3]]];
             }
             if (!empty($calls)) return $calls;
         }
