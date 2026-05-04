@@ -1008,6 +1008,12 @@ Tools::register('bash', function($p) {
     return shell_exec($cmd . ' 2>&1') ?: "(no output)";
 });
 
+Tools::register('git', function($p) {
+    $cmd = $p['cmd'] ?? $p['command'] ?? '';
+    if (empty($cmd)) return "missing cmd";
+    return shell_exec("git $cmd 2>&1") ?: "(no output)";
+});
+
 Tools::register('bg', function($p) {
     $cmd = $p['command'] ?? $p['cmd'] ?? '';
     if (empty($cmd)) return "missing command";
@@ -1220,7 +1226,7 @@ Tools::register('agent', function($p) {
     $maxIterations = (int)($p['max_iterations'] ?? 5);
     $model = $GLOBALS['currentSessionModel'] ?? Config::get('ollama.defaultModel', 'llama3.2:latest');
 
-    $blocked = ['mistral', 'smollm', 'starcoder', 'qwen', 'phi', 'firefunction', 'tinyllama', 'phi-2', 'llava', 'nanollm', 'mixtral', 'codellama', 'code-llama', 'nemotron', 'granite'];
+    $blocked = ['mistral', 'smollm', 'starcoder', 'qwen', 'phi', 'firefunction', 'tinyllama', 'phi-2', 'llava', 'nanollm', 'mixtral', 'codellama', 'code-llama'];
     foreach ($blocked as $b) { if (stripos($model, $b) !== false) return "Model $model does not support tool calling. Try: gpt-oss, llama3.2, codestral, or deepseek-r1."; }
 
     if (empty($prompt)) return "missing prompt (need 'prompt' or 'task' parameter)";
@@ -1856,7 +1862,40 @@ if (preg_match_all('/<tool_code>\s*(\{[\s\S]*?\})\s*<\/tool_code>/', $content, $
             if (!empty($calls)) return $calls;
         }
 
-        if (preg_match_all('/<tool_code>\s*(\{[^}]+\})\s*<\/tool_code>/s', $content, $matches, PREG_SET_ORDER)) {
+        if (preg_match_all('/<tool_call>\s*"server":\s*"([^"]+)",\s*"tool":\s*"([^"]+)"[^}]*\}/s', $content, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $m) {
+                $server = $m[1];
+                $tool = $m[2];
+                $args = [];
+                if (preg_match('/"args":\s*(\{[^}]+\}|"[^"]*")/', $m[0], $argMatch)) {
+                    $args = json_decode($argMatch[1], true) ?? [];
+                }
+                $calls[] = ['name' => 'mcp', 'params' => ['server' => $server, 'tool' => $tool, 'args' => $args]];
+            }
+            if (!empty($calls)) return $calls;
+        }
+
+        if (preg_match_all('/<\/tool_call>\s*(\{[\s\S]*?\})\s*$/m', $content, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $m) {
+                $json = json_decode(trim($m[1]), true);
+                if ($json && isset($json['name'])) {
+                    $args = $json['arguments'] ?? $json['params'] ?? [];
+                    $calls[] = ['name' => $json['name'], 'params' => is_array($args) ? $args : []];
+                }
+            }
+            if (!empty($calls)) return $calls;
+        }
+
+        if (empty($calls) && preg_match_all('/\{"name":\s*"(\w+)",\s*"arguments":\s*(\{[^}]+\})\}/', $content, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $m) {
+                $args = json_decode($m[2], true) ?? [];
+                $calls[] = ['name' => $m[1], 'params' => $args];
+            }
+            if (!empty($calls)) return $calls;
+        }
+
+        if (empty($calls)) {
+            preg_match_all('/<tool_code>\s*(\{[^}]+\})\s*<\/tool_code>/s', $content, $matches, PREG_SET_ORDER);
             foreach ($matches as $m) {
                 $json = json_decode($m[1], true);
                 if ($json && isset($json['name'])) {
