@@ -999,7 +999,7 @@ Tools::register('editor', function($p) {
 });
 
 Tools::register('bash', function($p) {
-    $cmd = $p['command'] ?? '';
+    $cmd = $p['command'] ?? $p['cmd'] ?? '';
     if (empty($cmd)) return "missing command";
     $readonly = ['ls', 'pwd', 'cat', 'head', 'tail', 'grep', 'find', 'git', 'echo', 'wc', 'sort', 'uniq', 'awk', 'sed', 'cut', 'tr', 'file', 'stat', 'diff', 'tree'];
     $first = strtok($cmd, ' ');
@@ -1220,7 +1220,7 @@ Tools::register('agent', function($p) {
     $maxIterations = (int)($p['max_iterations'] ?? 5);
     $model = $GLOBALS['currentSessionModel'] ?? Config::get('ollama.defaultModel', 'llama3.2:latest');
 
-    $blocked = ['mistral', 'smollm', 'starcoder', 'qwen', 'phi', 'firefunction', 'tinyllama', 'phi-2', 'llava', 'nanollm', 'mixtral', 'codellama', 'code-llama'];
+    $blocked = ['mistral', 'smollm', 'starcoder', 'qwen', 'phi', 'firefunction', 'tinyllama', 'phi-2', 'llava', 'nanollm', 'mixtral', 'codellama', 'code-llama', 'nemotron', 'granite'];
     foreach ($blocked as $b) { if (stripos($model, $b) !== false) return "Model $model does not support tool calling. Try: gpt-oss, llama3.2, codestral, or deepseek-r1."; }
 
     if (empty($prompt)) return "missing prompt (need 'prompt' or 'task' parameter)";
@@ -1849,7 +1849,8 @@ if (preg_match_all('/<tool_code>\s*(\{[\s\S]*?\})\s*<\/tool_code>/', $content, $
             foreach ($matches as $m) {
                 $json = json_decode($m[1], true);
                 if ($json && isset($json['name'])) {
-                    $calls[] = ['name' => $json['name'], 'params' => $json['params'] ?? $json['arguments'] ?? []];
+                    $args = $json['arguments'] ?? $json['params'] ?? [];
+                    $calls[] = ['name' => $json['name'], 'params' => is_array($args) ? $args : []];
                 }
             }
             if (!empty($calls)) return $calls;
@@ -2020,7 +2021,7 @@ if (empty($calls)) {
         }
 
         if (empty($calls)) {
-            preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*(\w+)=["\']?([^"\'\s]+)["\']?/s', $content, $matches, PREG_SET_ORDER);
+            preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*(\w+):\s*(\S+)\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
             foreach ($matches as $m) {
                 $calls[] = ['name' => $m[1], 'params' => [$m[2] => $m[3]]];
             }
