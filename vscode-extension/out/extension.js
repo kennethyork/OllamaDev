@@ -470,13 +470,70 @@ async function quickFix() {
         vscode.window.showErrorMessage('Quick fix failed: ' + err);
     }
 }
+async function terminalAttach() {
+    const sessions = await aiRequest('ollamadev/terminal', { action: 'list' }).catch(() => '[]');
+    let sessionList = [];
+    try {
+        sessionList = JSON.parse(sessions);
+    }
+    catch { }
+    if (sessionList.length === 0) {
+        vscode.window.showInformationMessage('No active terminal sessions. Run "ollamadev terminal" first.');
+        return;
+    }
+    const selected = await vscode.window.showQuickPick(sessionList.length > 0 ? sessionList : ['default'], {
+        placeHolder: 'Select terminal session to attach'
+    });
+    if (selected) {
+        const terminal = vscode.window.createTerminal({ name: `OllamaDev: ${selected}` });
+        terminal.show();
+        terminal.sendText(`ollamadev terminal attach ${selected}`);
+    }
+}
+async function terminalList() {
+    try {
+        const result = await aiRequest('ollamadev/terminal', { action: 'list' });
+        let sessionList = [];
+        try {
+            sessionList = JSON.parse(result);
+        }
+        catch {
+            sessionList = result.split('\n').filter((s) => s.trim());
+        }
+        if (sessionList.length === 0) {
+            vscode.window.showInformationMessage('No active terminal sessions');
+            return;
+        }
+        const doc = await vscode.workspace.openTextDocument({ content: `# Terminal Sessions\n\n${sessionList.join('\n')}`, language: 'markdown' });
+        await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+    }
+    catch (err) {
+        vscode.window.showErrorMessage('List failed: ' + err);
+    }
+}
+const WORKING_MODELS = [
+    'llama3.2:latest', 'llama3.2:3b', 'llama3.1:8b', 'codestral', 'deepseek-r1:32b',
+    'deepseek-coder:33b', 'gemma4:26b', 'gemma4:31b', 'qwen3.5:35b', 'command-r',
+    'wizardcoder', 'codeqwen', 'starcoder', 'smollm2', 'devstral-small-2:24b',
+    'olmo-3.1', 'nemotron3:33b', 'aya:35b', 'glm-4.7-flash', 'lfm2', 'gpt-oss'
+];
+async function modelSelect() {
+    const quickPick = await vscode.window.showQuickPick(WORKING_MODELS, {
+        placeHolder: 'Select Ollama model for OllamaDev'
+    });
+    if (quickPick) {
+        const config = vscode.workspace.getConfiguration('ollamadev');
+        await config.update('model', quickPick, true);
+        vscode.window.showInformationMessage(`OllamaDev model: ${quickPick}`);
+    }
+}
 function activate(context) {
     createStatusBar();
     const provider = new InlineCompletionProvider();
     context.subscriptions.push(vscode.languages.registerInlineCompletionItemProvider({ pattern: '**' }, provider));
     const config = getConfig();
     provider.enabled = config.inlineCompletionEnabled;
-    context.subscriptions.push(vscode.commands.registerCommand('ollamadev-lsp.start', startLSPProcess), vscode.commands.registerCommand('ollamadev-lsp.stop', stopLSP), vscode.commands.registerCommand('ollamadev-lsp.restart', restartLSP), vscode.commands.registerCommand('ollamadev-lsp.status', showStatus), vscode.commands.registerCommand('ollamadev.generate', generateCode), vscode.commands.registerCommand('ollamadev.review', reviewCode), vscode.commands.registerCommand('ollamadev.ask', askAI), vscode.commands.registerCommand('ollamadev.inlineComplete', () => toggleInlineCompletion(provider)), vscode.commands.registerCommand('ollamadev.chat', () => createChatPanel(context)), vscode.commands.registerCommand('ollamadev.complete', getCompletion), vscode.commands.registerCommand('ollamadev.format', formatDocument), vscode.commands.registerCommand('ollamadev.quickfix', quickFix));
+    context.subscriptions.push(vscode.commands.registerCommand('ollamadev-lsp.start', startLSPProcess), vscode.commands.registerCommand('ollamadev-lsp.stop', stopLSP), vscode.commands.registerCommand('ollamadev-lsp.restart', restartLSP), vscode.commands.registerCommand('ollamadev-lsp.status', showStatus), vscode.commands.registerCommand('ollamadev.generate', generateCode), vscode.commands.registerCommand('ollamadev.review', reviewCode), vscode.commands.registerCommand('ollamadev.ask', askAI), vscode.commands.registerCommand('ollamadev.inlineComplete', () => toggleInlineCompletion(provider)), vscode.commands.registerCommand('ollamadev.chat', () => createChatPanel(context)), vscode.commands.registerCommand('ollamadev.complete', getCompletion), vscode.commands.registerCommand('ollamadev.format', formatDocument), vscode.commands.registerCommand('ollamadev.quickfix', quickFix), vscode.commands.registerCommand('ollamadev.terminalAttach', terminalAttach), vscode.commands.registerCommand('ollamadev.terminalList', terminalList), vscode.commands.registerCommand('ollamadev.modelSelect', modelSelect));
     startLSPProcess().catch(err => console.error('Activation error:', err));
 }
 function deactivate() { stopLSP(); }

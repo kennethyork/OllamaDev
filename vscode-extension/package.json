@@ -2,7 +2,7 @@
   "name": "ollamadev-lsp",
   "displayName": "OllamaDev AI",
   "description": "Local AI coding assistant - Copilot alternative using Ollama",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "publisher": "ollamadev",
   "engines": {
     "vscode": "^1.75.0"
@@ -106,6 +106,21 @@
         "command": "ollamadev.quickfix",
         "title": "OllamaDev: Quick Fix",
         "category": "OllamaDev"
+      },
+      {
+        "command": "ollamadev.terminalAttach",
+        "title": "OllamaDev: Attach to Terminal Session",
+        "category": "OllamaDev"
+      },
+      {
+        "command": "ollamadev.terminalList",
+        "title": "OllamaDev: List Terminal Sessions",
+        "category": "OllamaDev"
+      },
+      {
+        "command": "ollamadev.modelSelect",
+        "title": "OllamaDev: Select Model",
+        "category": "OllamaDev"
       }
     ],
     "keybindings": [
@@ -142,6 +157,21 @@
       {
         "command": "ollamadev.quickfix",
         "key": "ctrl+.",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "ollamadev.terminalAttach",
+        "key": "ctrl+shift+t",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "ollamadev.terminalList",
+        "key": "ctrl+shift+t",
+        "when": "editorTextFocus && ollamadev.terminalActive"
+      },
+      {
+        "command": "ollamadev.modelSelect",
+        "key": "ctrl+shift+m",
         "when": "editorTextFocus"
       }
     ],

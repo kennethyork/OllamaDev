@@ -116,9 +116,11 @@ class Config {
     }
 
     public static function sessionsDir(): string { return self::dataDir() . '/sessions'; }
+    public static function checkpointsDir(): string { return self::dataDir() . '/checkpoints'; }
+    public static function costsDir(): string { return self::dataDir() . '/costs'; }
 }
 
-class MCPClient {
+class Git {
     private ?string $command;
     private string $type;
     private string $url;
@@ -528,13 +530,16 @@ class OllamaClient {
         curl_setopt_array($ch, [
             CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-            CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 30
+            CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 120
         ]);
         $resp = curl_exec($ch);
         curl_close($ch);
         if ($resp) {
             $j = json_decode($resp, true);
-            return $j['response'] ?? '';
+            $content = $j['response'] ?? '';
+            $thinking = $j['thinking'] ?? '';
+            if (!empty($thinking) && empty($content)) $content = $thinking;
+            return $content;
         }
         return '';
     }
@@ -575,7 +580,7 @@ class OllamaClient {
             CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => $this->timeout
+            CURLOPT_TIMEOUT => 120
         ]);
         $resp = curl_exec($ch);
         curl_close($ch);
@@ -584,8 +589,11 @@ class OllamaClient {
             if ($j && isset($j['message'])) {
                 $content = $j['message']['content'] ?? '';
                 $thinking = $j['message']['thinking'] ?? '';
-                if (empty($content) && !empty($thinking)) $content = $thinking;
-                if (!empty($content) && $handler) $handler($content);
+                if (!empty($thinking) && empty($content)) $content = $thinking;
+                if (!empty($content)) {
+                    if ($handler) $handler($content);
+                    return $content;
+                }
             }
         }
         return '';
@@ -987,13 +995,78 @@ Tools::register('editor', function($p) {
 });
 
 Tools::register('bash', function($p) {
-    $cmd = $p['command'] ?? '';
+    $cmd = '';
+    if (is_array($p)) {
+        if (isset($p['command']) && is_string($p['command'])) $cmd = $p['command'];
+        elseif (isset($p['cmd']) && is_string($p['cmd'])) $cmd = $p['cmd'];
+        elseif (isset($p[0]) && is_string($p[0])) {
+            if (count($p) >= 2 && $p[0] === 'echo' && is_string($p[1])) $cmd = 'echo ' . $p[1];
+            else $cmd = $p[0];
+        }
+    } else { $cmd = (string)$p; }
+    $cmd = trim($cmd, '"\'');
     if (empty($cmd)) return "missing command";
+    $cmd = preg_replace('/^command=/', '', $cmd);
+    $cmd = preg_replace('/^cmd=/', '', $cmd);
+    $cmd = preg_replace('/"\s*$/', '', $cmd);
     $readonly = ['ls', 'pwd', 'cat', 'head', 'tail', 'grep', 'find', 'git', 'echo', 'wc', 'sort', 'uniq', 'awk', 'sed', 'cut', 'tr', 'file', 'stat', 'diff', 'tree'];
     $first = strtok($cmd, ' ');
     if (!in_array($first, $readonly)) return "Command not allowed (readonly only): $first";
     foreach (['curl', 'wget', 'chmod', 'sudo', 'rm -rf', 'mkfs'] as $b) { if (str_contains($cmd, $b)) return "Dangerous command blocked: $b"; }
+    if (preg_match('/echo\s+\$?\(\s*\([^)]+\)\s*\)/', $cmd)) {
+        if (preg_match_all('/(\d+)\s*([+\-*\/])\s*(\d+)/', $cmd, $m, PREG_SET_ORDER)) {
+            if ($m && isset($m[0][0])) { $result = eval('return ' . str_replace(' ', '', $m[0][0]) . ';'); return (string)$result; }
+        }
+    }
     return shell_exec($cmd . ' 2>&1') ?: "(no output)";
+});
+
+Tools::register('calc', function($p) {
+    $expr = '';
+    if (is_array($p)) {
+        $expr = $p['expr'] ?? $p['expression'] ?? $p['calculation'] ?? $p['equation'] ?? $p['value'] ?? ($p[0] ?? '');
+    } else { $expr = (string)$p; }
+    if (empty($expr)) return "missing expression";
+    $expr = preg_replace('/[^0-9+\-*\/(). ]/', '', $expr);
+    $expr = str_replace(' ', '', $expr);
+    if (strpos($expr, 'scale=') !== false) $expr = preg_replace('/scale=\d+;/', '', $expr);
+    try { return (string)@eval("return $expr;"); } catch (Exception $e) { return "Invalid expression"; }
+});
+
+Tools::register('print', function($p) {
+    return $p['text'] ?? $p['message'] ?? $p['content'] ?? ($p[0] ?? '');
+});
+
+Tools::register('say', function($p) {
+    $text = is_array($p) ? ($p['text'] ?? $p['message'] ?? $p['content'] ?? $p['t'] ?? $p['s'] ?? ($p[0] ?? '')) : (string)$p;
+    return (string)$text;
+});
+
+Tools::register('echo', function($p) {
+    $text = is_array($p) ? ($p['text'] ?? $p['message'] ?? $p['content'] ?? $p['s'] ?? $p['t'] ?? $p[0] ?? '') : (string)$p;
+    return (string)$text;
+});
+
+Tools::register('reply', function($p) {
+    return $p['text'] ?? $p['message'] ?? $p['content'] ?? ($p[0] ?? '');
+});
+
+Tools::register('ok', function($p) {
+    return 'ok';
+});
+
+Tools::register('OK', function($p) {
+    return 'ok';
+});
+
+Tools::register('error', function($p) {
+    return $p['message'] ?? $p['text'] ?? ($p[0] ?? 'error');
+});
+
+Tools::register('git', function($p) {
+    $cmd = $p['cmd'] ?? $p['command'] ?? '';
+    if (empty($cmd)) return "missing cmd";
+    return shell_exec("git $cmd 2>&1") ?: "(no output)";
 });
 
 Tools::register('bg', function($p) {
@@ -1206,13 +1279,17 @@ Tools::register('agent', function($p) {
     $prompt = $p['prompt'] ?? $p['task'] ?? '';
     $context = $p['context'] ?? '';
     $maxIterations = (int)($p['max_iterations'] ?? 5);
+    $model = $GLOBALS['currentSessionModel'] ?? Config::get('ollama.defaultModel', 'llama3.2:latest');
+
+    $blocked = ['mistral', 'smollm', 'starcoder', 'qwen', 'phi', 'firefunction', 'tinyllama', 'phi-2', 'llava', 'nanollm', 'mixtral', 'codellama', 'code-llama'];
+    foreach ($blocked as $b) { if (stripos($model, $b) !== false) return "Model $model does not support tool calling. Try: gpt-oss, llama3.2, codestral, or deepseek-r1."; }
+
     if (empty($prompt)) return "missing prompt (need 'prompt' or 'task' parameter)";
 
     $subAgent = new Agent();
-    $model = Config::get('ollama.defaultModel', 'llama3.2:latest');
     $subAgent->setModel($model);
     $isGptOss = str_contains($model, 'gpt-oss');
-    
+
     $systemPrompt = $subAgent->buildSystemPrompt();
     if (!empty($context)) {
         $systemPrompt['content'] .= "\n\nCONTEXT: $context";
@@ -1230,6 +1307,9 @@ Tools::register('agent', function($p) {
 
         $toolCalls = $subAgent->parseToolCalls($response);
         if ($isGptOss && empty($toolCalls)) {
+            $toolCalls = $subAgent->parseGptOssToolCalls($response);
+        }
+        if (empty($toolCalls) && (str_contains($model, 'command') || str_contains($model, 'gemma'))) {
             $toolCalls = $subAgent->parseGptOssToolCalls($response);
         }
         $messages[] = ['role' => 'assistant', 'content' => $response];
@@ -1488,7 +1568,18 @@ Tools::register('git_merge', function($p) {
 
 class SystemPrompts {
     private static array $prompts = [
-        'llama' => 'You are a helpful AI assistant running locally via Ollama. Be precise and explicit in your responses.',
+        'llama' => "You are a CLI assistant. When user says 'say ok' or 'say hello' or any 'say X' - output ONLY the word or phrase X, nothing else. No tool calls, no explanation, just the word.
+
+When asked to list files, read files, or run commands - use tools.
+
+Tool format: <tool_code>{\"name\": \"TOOL\", \"arguments\": {\"PARAM\": \"VALUE\"}}</tool_code>
+
+Tools: ls, view, write, edit, glob, grep, bash, fetch, patch, diagnostics, symbols, refs
+
+Examples:
+- User: say hello → hello
+- User: say ok → ok
+- User: list files → <tool_code>{\"name\": \"ls\", \"arguments\": {\"path\": \".\"}}</tool_code>",
 
         'mistral' => 'You are Mistral, a helpful AI assistant running locally via Ollama. Be concise and accurate.',
 
@@ -1512,36 +1603,38 @@ Response: <tool_code>\n{\"name\": \"glob\", \"arguments\": {\"pattern\": \"*.php
 
 Available tools: ls, view, write, edit, glob, grep, bash, fetch, patch, diagnostics",
 
-'phi' => "You are Phi, a CLI coding assistant. Extract parameters from user request and call tools. NEVER explain, NEVER ask permission.
+        'gemma' => "You are Gemma. For 'say X' commands, output ONLY X with no formatting or tools.
 
-Tool format: <tool_code>{\"name\": \"TOOL\", \"arguments\": {\"PARAM\": \"VALUE\"}}</tool_code>
+Examples:
+- User: say hello → hello
+- User: say ok → ok
+- User: what is 2+2? → 4
 
-Tools: ls, view, write, edit, glob, grep pattern=REGEX path=PATH, bash command=CMD, diagnostics path=PATH, goto path=PATH symbol=NAME, symbols path=PATH, refs path=PATH symbol=NAME",
+For other tasks, use tools with this format: <tool_code>{\"name\": \"TOOL\", \"arguments\": {\"PARAM\": \"VALUE\"}}</tool_code>
 
-        'wizard' => "You are WizardCoder. When user asks you to list files, read files, or run commands - you MUST actually call the tool now, not explain how to do it. Tools execute directly - do NOT ask for permission.",
+Available tools: ls, view, write, edit, glob, grep, bash, fetch, patch, diagnostics, symbols, refs",
 
-        'starcoder' => "You are StarCoder. When user asks you to list files, read files, or run commands - you MUST actually call the tool now, not explain how to do it. Tools execute directly - do NOT ask for permission.",
-        'smollm' => "You are a compact AI assistant. When asked to list files, you MUST call the ls tool. Execute: <tool_code>{\"name\": \"ls\", \"arguments\": {\"path\": \".\"}}</tool_code> Tools execute directly - do NOT ask for permission.",
+        'glm' => "You are GLM. For 'say X' commands, output ONLY X with no formatting or tools.
 
-        'gpt-oss' => 'You are a CLI tool with file access. When user asks to run shell commands (echo, ls, cat, pwd, etc) - use bash tool. For file operations use view, write, edit, grep, glob.
+Examples:
+- User: say hello → hello
+- User: say ok → ok
+- User: what is 2+2? → 4
 
-TOOL CALL FORMAT (MUST use this exact XML format):
-<tool_call>
-name: bash
-params: command="echo hello world"
-</tool_call>
+For other tasks, use tools with this format: <tool_code>{\"name\": \"TOOL\", \"arguments\": {\"PARAM\": \"VALUE\"}}</tool_code>
 
-For bash commands:
-- echo TEXT → bash with command="echo TEXT"
-- ls → bash with command="ls"
-- cat FILE → view with file_path=FILE
+Available tools: ls, view, write, edit, glob, grep, bash, fetch, patch, diagnostics",
 
-For file operations:
-- view FILE → view with file_path=FILE
-- write FILE CONTENT → write with file_path=FILE content=CONTENT
-- grep PATTERN FILE → grep with pattern=PATTERN path=FILE
+        'aya' => "You are Aya, a CLI assistant. For 'say X' commands, output ONLY X with no formatting or tools.
 
-DO NOT use write tool for echo. DO NOT explain. Just call the tool.',
+Examples:
+- User: say hello → hello
+- User: say ok → ok
+- User: what is 2+2? → 4
+
+For other tasks, use tools with this format: <tool_code>{\"name\": \"TOOL\", \"arguments\": {\"PARAM\": \"VALUE\"}}</tool_code>
+
+Available tools: ls, view, write, edit, glob, grep, bash, fetch, patch, diagnostics",
 
         'default' => 'You are an AI coding assistant. When user asks you to do something, call the appropriate tool.
 
@@ -1578,6 +1671,10 @@ You: <tool_code>{"name": "ls", "arguments": {"path": "/tmp"}}</tool_code>',
         'starcoder' => ['/starcoder/i', '/star-coder/i'],
         'smollm' => ['/smollm/i'],
         'gpt-oss' => ['/gpt-oss/i', '/gpt_oss/i'],
+        'olmo' => ['/olmo/i'],
+        'aya' => ['/aya/i'],
+        'gemma' => ['/gemma/i'],
+        'glm' => ['/glm/i'],
     ];
 
     public static function detectForModel(string $model): string {
@@ -1585,7 +1682,7 @@ You: <tool_code>{"name": "ls", "arguments": {"path": "/tmp"}}</tool_code>',
         foreach (self::$modelPatterns as $family => $patterns) {
             foreach ($patterns as $pattern) {
                 if (preg_match($pattern, $model)) {
-                    return self::$prompts[$family];
+                    return self::$prompts[$family] ?? self::$prompts['default'];
                 }
             }
         }
@@ -1791,25 +1888,26 @@ if (preg_match_all('/<tool_call>\s*(\{.*?\})\s*<\/tool_call>/s', $content, $matc
             if (!empty($calls)) return $calls;
         }
 
-        if (preg_match_all('/<tool_call>\s*<name>(\w+)<\/name>\s*<params>\s*<(\w+)>([^<]*)<\/\2>\s*<\/params>\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
+        if (preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*(\{[\s\S]*?\})\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
             foreach ($matches as $m) {
-                $calls[] = ['name' => $m[1], 'params' => [$m[2] => $m[3]]];
+                $json = json_decode($m[2], true);
+                if ($json) {
+                    $calls[] = ['name' => $m[1], 'params' => $json];
+                }
             }
             if (!empty($calls)) return $calls;
         }
 
-        if (preg_match_all('/name:\s*(\w+)\s*\n\s*params:\s*(\w+)=["\']([^"\']*)["\']/', $content, $matches, PREG_SET_ORDER)) {
+        if (preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*(\{.*?\})\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
             foreach ($matches as $m) {
-                $calls[] = ['name' => $m[1], 'params' => [$m[2] => $m[3]]];
+                $json = json_decode($m[2], true);
+                if ($json) {
+                    $calls[] = ['name' => $m[1], 'params' => $json];
+                }
             }
             if (!empty($calls)) return $calls;
         }
-
-        if (preg_match_all('/tool_call_code:\s*(\w+)/', $content, $matches, PREG_SET_ORDER)) {
-            foreach ($matches[1] as $name) { $calls[] = ['name' => $name, 'params' => []]; }
-            if (!empty($calls)) return $calls;
-        }
-
+        
         if (preg_match_all('/<tool_call>\s*(\{.*?\})\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
             foreach ($matches as $m) {
                 $json = json_decode($m[1], true);
@@ -1825,17 +1923,51 @@ if (preg_match_all('/<tool_call>\s*(\{.*?\})\s*<\/tool_call>/s', $content, $matc
             if (!empty($calls)) return $calls;
         }
 
-        if (preg_match_all('/<tool_code>\s*(\{.*?\})\s*<\/tool_code>/s', $content, $matches, PREG_SET_ORDER)) {
+if (preg_match_all('/<tool_code>\s*(\{[\s\S]*?\})\s*<\/tool_code>/', $content, $matches, PREG_SET_ORDER)) {
             foreach ($matches as $m) {
                 $json = json_decode($m[1], true);
                 if ($json && isset($json['name'])) {
-                    $calls[] = ['name' => $json['name'], 'params' => $json['arguments'] ?? []];
+                    $args = $json['arguments'] ?? $json['params'] ?? [];
+                    $calls[] = ['name' => $json['name'], 'params' => is_array($args) ? $args : []];
                 }
             }
             if (!empty($calls)) return $calls;
         }
 
-        if (preg_match_all('/<tool_code>\s*(\{[^}]+\})\s*<\/tool_code>/s', $content, $matches, PREG_SET_ORDER)) {
+        if (preg_match_all('/<tool_call>\s*"server":\s*"([^"]+)",\s*"tool":\s*"([^"]+)"[^}]*\}/s', $content, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $m) {
+                $server = $m[1];
+                $tool = $m[2];
+                $args = [];
+                if (preg_match('/"args":\s*(\{[^}]+\}|"[^"]*")/', $m[0], $argMatch)) {
+                    $args = json_decode($argMatch[1], true) ?? [];
+                }
+                $calls[] = ['name' => 'mcp', 'params' => ['server' => $server, 'tool' => $tool, 'args' => $args]];
+            }
+            if (!empty($calls)) return $calls;
+        }
+
+        if (preg_match_all('/<\/tool_call>\s*(\{[\s\S]*?\})\s*$/m', $content, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $m) {
+                $json = json_decode(trim($m[1]), true);
+                if ($json && isset($json['name'])) {
+                    $args = $json['arguments'] ?? $json['params'] ?? [];
+                    $calls[] = ['name' => $json['name'], 'params' => is_array($args) ? $args : []];
+                }
+            }
+            if (!empty($calls)) return $calls;
+        }
+
+        if (empty($calls) && preg_match_all('/\{"name":\s*"(\w+)",\s*"arguments":\s*(\{[^}]+\})\}/', $content, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $m) {
+                $args = json_decode($m[2], true) ?? [];
+                $calls[] = ['name' => $m[1], 'params' => $args];
+            }
+            if (!empty($calls)) return $calls;
+        }
+
+        if (empty($calls)) {
+            preg_match_all('/<tool_code>\s*(\{[^}]+\})\s*<\/tool_code>/s', $content, $matches, PREG_SET_ORDER);
             foreach ($matches as $m) {
                 $json = json_decode($m[1], true);
                 if ($json && isset($json['name'])) {
@@ -1982,7 +2114,7 @@ if (empty($calls)) {
             }
         }
 
-        if (empty($calls)) {
+if (empty($calls)) {
             preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*\{([^}]+)\}\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
             foreach ($matches as $m) {
                 $toolName = trim($m[1]);
@@ -1992,7 +2124,31 @@ if (empty($calls)) {
                     foreach ($kvMatches[1] as $i => $key) {
                         $params[$key] = $kvMatches[2][$i];
                     }
-                    if (isset($params['task'])) {
+                    if (!empty($params)) {
+                        $calls[] = ['name' => $toolName, 'params' => $params];
+                    }
+                }
+            }
+        }
+
+        if (empty($calls)) {
+            preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*(\w+):\s*(\S+)\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $calls[] = ['name' => $m[1], 'params' => [$m[2] => $m[3]]];
+            }
+        }
+
+        if (empty($calls)) {
+            preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*\{([^}]+)\}\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $toolName = trim($m[1]);
+                $rawParams = trim($m[2]);
+                if (preg_match_all('/(\w+)\s*:\s*([^\s,}]+)/', $rawParams, $kvMatches, PREG_SET_ORDER)) {
+                    $params = [];
+                    foreach ($kvMatches[1] as $i => $key) {
+                        $params[$key] = trim($kvMatches[2][$i], "\"'\"");
+                    }
+                    if (!empty($params)) {
                         $calls[] = ['name' => $toolName, 'params' => $params];
                     }
                 }
@@ -2489,7 +2645,8 @@ class Session {
         echo "\n📁 $pwd";
         if (!empty($edited)) {
             echo "\n✏️  Edited: " . implode(', ', $edited);
-            $GLOBALS['editedFiles'] = [];
+$GLOBALS['editedFiles'] = [];
+$GLOBALS['currentSessionModel'] = null;
         }
     }
 
@@ -2504,7 +2661,7 @@ class Session {
             case 'mode': echo "Mode set to: " . ($args ?: 'auto') . "\n"; return false;
             case 'verbose': $GLOBALS['verbose'] = trim($args) === 'on'; echo "Verbose: " . ($GLOBALS['verbose'] ? 'on' : 'off') . "\n"; return false;
             case 'model':
-                if (!empty($args)) { $this->agent->setModel($args); $this->model = $args; echo "Model: $args\n"; }
+                if (!empty($args)) { $this->agent->setModel($args); $this->model = $args; $GLOBALS['currentSessionModel'] = $args; echo "Model: $args\n"; }
                 else {
                     $models = $this->agent->listModelsDetailed();
                     echo "\nAvailable Models:\n";
