@@ -2632,23 +2632,127 @@ class Session {
         return $bytes . ' B';
     }
 
-    private function renderBanner(): void {
-        $models = $this->agent->listModelsDetailed();
-        $modelCount = count($models);
-        echo "\n╔══════════════════════════════════════════════════════════════╗\n";
-        echo "║                     OllamaDev                                ║\n";
-        echo "║  Local AI coding agent powered by Ollama                     ║\n";
-        echo "╠══════════════════════════════════════════════════════════════╣\n";
-        echo "║  Current Model: {$this->model}                              ║\n";
-        echo "║  {$modelCount} model(s) available                                ║\n";
-        echo "╠══════════════════════════════════════════════════════════════╣\n";
-        echo "║  Tools: view, write, edit, glob, grep, ls, bash, fetch, mcp, permission ║\n";
-        echo "║  Auto-compact: enabled (at 20+ messages)                             ║\n";
-        echo "║  Commands: exit, new, mode, verbose, model, clear, help      ║\n";
-        echo "╚══════════════════════════════════════════════════════════════╝\n\n";
+    private function handleSlashCommand(string $input): string|false {
+        if (!str_starts_with($input, '/')) return false;
+
+        $parts = preg_split('/\s+/', trim($input), 2);
+        $cmd = strtolower($parts[0]);
+        $cmd = substr($cmd, 1);
+        $args = $parts[1] ?? '';
+
+        return match($cmd) {
+            'help' => $this->renderBanner(),
+            'models' => $this->listModels($args),
+            'model' => $this->switchModel($args),
+            'new' => $this->newSession(),
+            'exit', 'quit' => $this->exitCli(),
+            'clear' => $this->clearScreen(),
+            'verbose' => $this->toggleVerbose($args),
+            'compact' => $this->compactSession(),
+            'save' => $this->saveSession(),
+            'session' => $this->showSession(),
+            'git' => $this->runGit($args),
+            default => false
+        };
     }
 
-    private function renderPrompt(): void { $cwd = basename(getcwd()); echo "[{$cwd}] [{$this->model}] > "; }
+    private function renderBanner(): string {
+        $models = $this->agent->listModelsDetailed();
+        $modelCount = count($models);
+        $out = "\n╔══════════════════════════════════════════════════════════════╗\n";
+        $out .= "║                     OllamaDev                                ║\n";
+        $out .= "║  Local AI coding agent powered by Ollama                     ║\n";
+        $out .= "╠══════════════════════════════════════════════════════════════╣\n";
+        $out .= "║  Current Model: {$this->model}                              ║\n";
+        $out .= "║  {$modelCount} model(s) available                                ║\n";
+        $out .= "╠══════════════════════════════════════════════════════════════╣\n";
+        $out .= "║  Commands: /help /models /model /new /clear /exit            ║\n";
+        $out .= "║            /verbose /compact /save /session /git             ║\n";
+        $out .= "╚══════════════════════════════════════════════════════════════╝\n\n";
+        return $out;
+    }
+
+    private function listModels(string $args = ''): string {
+        if (!empty($args)) return $this->switchModel($args);
+        $models = $this->agent->listModelsDetailed();
+        $out = "\nAvailable Models:\n" . str_repeat('-', 45) . "\n";
+        foreach ($models as $m) {
+            $name = $m['name'] ?? 'unknown';
+            $size = isset($m['size']) ? $this->formatBytes($m['size']) : 'unknown';
+            $marker = $name === $this->model ? ' *' : '';
+            $out .= sprintf("  %-20s %s%s\n", $name, $size, $marker);
+        }
+        $out .= str_repeat('-', 45) . "\n";
+        $out .= "Current: {$this->model}\n";
+        return $out;
+    }
+
+    private function switchModel(string $name): string {
+        if (empty($name)) return "Usage: /model <name>\n";
+        $this->agent->setModel($name);
+        $this->model = $name;
+        $GLOBALS['currentSessionModel'] = $name;
+        return "Model: $name\n";
+    }
+
+    private function newSession(): string {
+        $this->save();
+        (new Session($this->config))->start();
+        return '';
+    }
+
+    private function exitCli(): string {
+        echo "Goodbye!\n";
+        exit(0);
+    }
+
+    private function clearScreen(): string {
+        return "\033[2J\033[H";
+    }
+
+    private function toggleVerbose(string $arg): string {
+        $GLOBALS['verbose'] = trim($arg) === 'on';
+        return "Verbose: " . ($GLOBALS['verbose'] ? 'on' : 'off') . "\n";
+    }
+
+    private function compactSession(): string {
+        $this->compactMessages();
+        return '';
+    }
+
+    private function saveSession(): string {
+        $this->save();
+        return "Session saved.\n";
+    }
+
+    private function showSession(): string {
+        return "Session: {$this->id} | Model: {$this->model} | Messages: " . count($this->messages) . "\n";
+    }
+
+    private function runGit(string $args): string {
+        if (empty($args)) return "Usage: /git <command>\n";
+        $gitAliases = [
+            'status' => 'git status',
+            'diff' => 'git diff',
+            'log' => 'git log --oneline -n 10',
+            'branch' => 'git branch -a',
+            'checkout' => 'git checkout',
+            'commit' => 'git commit',
+            'add' => 'git add',
+            'push' => 'git push',
+            'pull' => 'git pull',
+            'stash' => 'git stash',
+            'fetch' => 'git fetch',
+        ];
+        foreach ($gitAliases as $alias => $cmd) {
+            if (str_starts_with($args, $alias)) {
+                $gitArgs = substr($args, strlen($alias));
+                return shell_exec(trim($cmd . ' ' . $gitArgs));
+            }
+        }
+return "Available: " . implode(', ', array_keys($gitAliases)) . "\n";
+    }
+
     private function countTokens(): int { $total = 0; foreach ($this->messages as $msg) $total += strlen($msg['content'] ?? '') / 4; return (int)$total; }
     private function renderStatus(): void { echo "\n[Model: {$this->model} | Tokens: ~" . $this->countTokens() . " | Messages: " . count($this->messages) . "]\n"; }
     private function showContext(): void {
@@ -2849,26 +2953,11 @@ $GLOBALS['currentSessionModel'] = null;
     public function runSingle(string $prompt): string {
         Permission::autoAllow();
 
-        $parts = preg_split('/\s+/', trim($prompt), 2);
-        $cmd = strtolower($parts[0]);
-        if (str_starts_with($cmd, '/')) $cmd = substr($cmd, 1);
-        $args = $parts[1] ?? '';
-
-        if ($cmd === 'help') { $this->renderBanner(); return ''; }
-        if ($cmd === 'models' && empty($args)) {
-            $models = $this->agent->listModelsDetailed();
-            echo "\nAvailable Models:\n" . str_repeat('-', 45) . "\n";
-            foreach ($models as $m) {
-                $name = $m['name'] ?? 'unknown';
-                $size = isset($m['size']) ? $this->formatBytes($m['size']) : 'unknown';
-                $marker = $name === $this->model ? ' *' : '';
-                echo sprintf("  %-20s %s%s\n", $name, $size, $marker);
-            }
-            echo str_repeat('-', 45) . "\n";
-            echo "Current: {$this->model}\n";
+        $cmdResult = $this->handleSlashCommand($prompt);
+        if ($cmdResult !== false) {
+            echo $cmdResult;
             return '';
         }
-        if ($cmd === 'exit' || $cmd === 'quit') { echo "Goodbye!\n"; exit(0); }
 
         $this->addMessage('user', $prompt);
         $thinkingMsgs = ['Thinking...', 'Working on it...', 'Analyzing...', 'Processing...'];
