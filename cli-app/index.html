@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CLI Tools - Calculator & Time</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <div class="cli-container">
+        <header class="cli-header">
+            <div class="logo">$ CLI Tools</div>
+            <nav>
+                <button class="tab-btn active" data-tab="calculator">calc</button>
+                <button class="tab-btn" data-tab="timer">timer</button>
+                <button class="tab-btn" data-tab="stopwatch">stopwatch</button>
+            </nav>
+        </header>
+
+        <main class="cli-main">
+            <section id="calculator" class="tab-content active">
+                <div class="display" id="calc-display">0</div>
+                <div class="calc-buttons">
+                    <button class="btn fn" data-action="clear">C</button>
+                    <button class="btn fn" data-action="negate">±</button>
+                    <button class="btn fn" data-action="percent">%</button>
+                    <button class="btn op" data-action="divide">÷</button>
+                    <button class="btn num" data-value="7">7</button>
+                    <button class="btn num" data-value="8">8</button>
+                    <button class="btn num" data-value="9">9</button>
+                    <button class="btn op" data-action="multiply">×</button>
+                    <button class="btn num" data-value="4">4</button>
+                    <button class="btn num" data-value="5">5</button>
+                    <button class="btn num" data-value="6">6</button>
+                    <button class="btn op" data-action="subtract">−</button>
+                    <button class="btn num" data-value="1">1</button>
+                    <button class="btn num" data-value="2">2</button>
+                    <button class="btn num" data-value="3">3</button>
+                    <button class="btn op" data-action="add">+</button>
+                    <button class="btn num" data-value="0">0</button>
+                    <button class="btn" data-action="decimal">.</button>
+                    <button class="btn equals" data-action="equals">=</button>
+                </div>
+            </section>
+
+            <section id="timer" class="tab-content">
+                <div class="time-display" id="timer-display">00:00:00</div>
+                <div class="time-controls">
+                    <button class="btn time-btn" id="timer-start">start</button>
+                    <button class="btn time-btn" id="timer-pause">pause</button>
+                    <button class="btn time-btn" id="timer-reset">reset</button>
+                </div>
+                <div class="preset-times">
+                    <button class="preset" data-minutes="1">1m</button>
+                    <button class="preset" data-minutes="5">5m</button>
+                    <button class="preset" data-minutes="15">15m</button>
+                    <button class="preset" data-minutes="30">30m</button>
+                    <button class="preset" data-minutes="60">1h</button>
+                </div>
+            </section>
+
+            <section id="stopwatch" class="tab-content">
+                <div class="time-display" id="stopwatch-display">00:00:00</div>
+                <div class="time-controls">
+                    <button class="btn time-btn" id="sw-start">start</button>
+                    <button class="btn time-btn" id="sw-pause">pause</button>
+                    <button class="btn time-btn" id="sw-reset">reset</button>
+                </div>
+                <div class="laps" id="laps"></div>
+            </section>
+        </main>
+
+        <footer class="cli-footer">
+            <span>type: calc | timer | stopwatch to switch</span>
+        </footer>
+    </div>
+
+    <script src="js/calculator.js"></script>
+    <script src="js/timer.js"></script>
+    <script src="js/stopwatch.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

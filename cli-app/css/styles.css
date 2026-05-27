@@ -1,0 +1,235 @@
+:root {
+    --bg: #1a1a2e;
+    --panel: #16213e;
+    --text: #eaeaea;
+    --accent: #0f3460;
+    --green: #00ff88;
+    --orange: #ff6b35;
+    --dim: #666;
+    --font: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.cli-container {
+    width: 100%;
+    max-width: 400px;
+    background: var(--panel);
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.cli-header {
+    background: var(--accent);
+    padding: 12px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.logo {
+    color: var(--green);
+    font-weight: bold;
+}
+
+.cli-header nav {
+    display: flex;
+    gap: 8px;
+}
+
+.tab-btn {
+    background: transparent;
+    border: 1px solid var(--dim);
+    color: var(--dim);
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: var(--font);
+    font-size: 12px;
+    transition: all 0.2s;
+}
+
+.tab-btn:hover, .tab-btn.active {
+    border-color: var(--green);
+    color: var(--green);
+}
+
+.cli-main {
+    padding: 20px;
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+.display {
+    background: var(--bg);
+    color: var(--green);
+    font-size: 48px;
+    text-align: right;
+    padding: 20px;
+    border-radius: 4px;
+    margin-bottom: 16px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.calc-buttons {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+}
+
+.btn {
+    background: var(--bg);
+    border: 1px solid var(--dim);
+    color: var(--text);
+    padding: 20px;
+    font-size: 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: var(--font);
+    transition: all 0.15s;
+}
+
+.btn:hover {
+    background: var(--accent);
+}
+
+.btn:active {
+    transform: scale(0.95);
+}
+
+.btn.fn { color: var(--orange); }
+.btn.op { color: var(--green); }
+.btn.equals {
+    background: var(--green);
+    color: var(--bg);
+    border-color: var(--green);
+}
+.btn.equals:hover {
+    background: #00cc6e;
+}
+
+.time-display {
+    background: var(--bg);
+    color: var(--green);
+    font-size: 56px;
+    text-align: center;
+    padding: 30px;
+    border-radius: 4px;
+    margin-bottom: 16px;
+    letter-spacing: 4px;
+}
+
+.time-controls {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.time-btn {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--dim);
+    color: var(--text);
+    padding: 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: var(--font);
+    font-size: 14px;
+    transition: all 0.2s;
+}
+
+.time-btn:hover {
+    border-color: var(--green);
+    color: var(--green);
+}
+
+.time-btn.running {
+    background: var(--orange);
+    border-color: var(--orange);
+    color: var(--bg);
+}
+
+.preset-times {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+}
+
+.preset {
+    background: var(--bg);
+    border: 1px solid var(--dim);
+    color: var(--dim);
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: var(--font);
+    font-size: 12px;
+    transition: all 0.2s;
+}
+
+.preset:hover {
+    border-color: var(--green);
+    color: var(--green);
+}
+
+.laps {
+    max-height: 200px;
+    overflow-y: auto;
+    margin-top: 16px;
+}
+
+.lap-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: var(--bg);
+    border-radius: 4px;
+    margin-bottom: 4px;
+    font-size: 14px;
+}
+
+.lap-item span:first-child {
+    color: var(--dim);
+}
+
+.lap-item span:last-child {
+    color: var(--green);
+}
+
+.cli-footer {
+    background: var(--accent);
+    padding: 8px 16px;
+    font-size: 12px;
+    color: var(--dim);
+    text-align: center;
+}
+
+@media (max-width: 420px) {
+    .display { font-size: 36px; }
+    .time-display { font-size: 40px; }
+    .btn { padding: 16px; font-size: 18px; }
+}
