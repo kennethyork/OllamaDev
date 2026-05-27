@@ -2755,6 +2755,7 @@ return "Available: " . implode(', ', array_keys($gitAliases)) . "\n";
 
     private function countTokens(): int { $total = 0; foreach ($this->messages as $msg) $total += strlen($msg['content'] ?? '') / 4; return (int)$total; }
     private function renderStatus(): void { echo "\n[Model: {$this->model} | Tokens: ~" . $this->countTokens() . " | Messages: " . count($this->messages) . "]\n"; }
+    private function renderPrompt(): void { $cwd = basename(getcwd()); echo "[$cwd] [{$this->model}] > "; }
     private function showContext(): void {
         $pwd = getcwd();
         $edited = $GLOBALS['editedFiles'] ?? [];
