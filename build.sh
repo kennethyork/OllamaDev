@@ -2887,6 +2887,7 @@ $GLOBALS['currentSessionModel'] = null;
             echo "(no tools called)\n";
         }
         $this->showContext();
+        $response = preg_replace('/<tool_call>[\s\S]*?<\/tool_call>/', '', $response);
         $this->addMessage('assistant', $response);
         $this->save();
         return $response;
