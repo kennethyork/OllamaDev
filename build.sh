@@ -2673,7 +2673,7 @@ $GLOBALS['currentSessionModel'] = null;
             case 'new': $this->save(); (new Session($this->config))->start(); return true;
             case 'mode': echo "Mode set to: " . ($args ?: 'auto') . "\n"; return false;
             case 'verbose': $GLOBALS['verbose'] = trim($args) === 'on'; echo "Verbose: " . ($GLOBALS['verbose'] ? 'on' : 'off') . "\n"; return false;
-            case 'model':
+            case 'models':
                 if (!empty($args)) { $this->agent->setModel($args); $this->model = $args; $GLOBALS['currentSessionModel'] = $args; echo "Model: $args\n"; }
                 else {
                     $models = $this->agent->listModelsDetailed();
@@ -2855,7 +2855,7 @@ $GLOBALS['currentSessionModel'] = null;
         $args = $parts[1] ?? '';
 
         if ($cmd === 'help') { $this->renderBanner(); return ''; }
-        if ($cmd === 'model' && empty($args)) {
+        if ($cmd === 'models' && empty($args)) {
             $models = $this->agent->listModelsDetailed();
             echo "\nAvailable Models:\n" . str_repeat('-', 45) . "\n";
             foreach ($models as $m) {

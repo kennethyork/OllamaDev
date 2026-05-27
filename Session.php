@@ -306,7 +306,7 @@ class Session {
             case 'new': $this->save(); (new Session($this->config))->start(); return true;
             case 'mode': echo "Mode set to: " . ($args ?: 'auto') . "\n"; return false;
             case 'verbose': $GLOBALS['verbose'] = trim($args) === 'on'; echo "Verbose: " . ($GLOBALS['verbose'] ? 'on' : 'off') . "\n"; return false;
-            case 'model':
+            case 'models':
                 if (!empty($args)) { $this->agent->setModel($args); $this->model = $args; echo "Model: $args\n"; }
                 else {
                     $models = $this->agent->listModelsDetailed();
