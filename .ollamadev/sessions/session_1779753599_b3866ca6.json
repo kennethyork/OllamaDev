@@ -1,0 +1,33 @@
+{
+    "id": "session_1779753599_b3866ca6",
+    "title": "Session 2026-05-25 23:59",
+    "model": "aya:35b",
+    "messages": [
+        {
+            "id": "msg_1779753599_14a1f8",
+            "role": "user",
+            "content": "use agent tool to list files",
+            "created_at": "2026-05-25T23:59:59+00:00"
+        },
+        {
+            "id": "msg_1779753599_a9d1e0",
+            "role": "user",
+            "content": "use agent tool to list files",
+            "created_at": "2026-05-25T23:59:59+00:00"
+        },
+        {
+            "id": "msg_1779753600_6dc5ec",
+            "role": "tool",
+            "content": "missing prompt (need 'prompt' or 'task' parameter)",
+            "created_at": "2026-05-26T00:00:00+00:00"
+        },
+        {
+            "id": "msg_1779753600_188dcf",
+            "role": "assistant",
+            "content": "<tool_call>\nname: agent\nparams: {task: \"list_files\"}\n<\/tool_call>",
+            "created_at": "2026-05-26T00:00:00+00:00"
+        }
+    ],
+    "created_at": "2026-05-26T00:00:00+00:00",
+    "updated_at": "2026-05-26T00:00:00+00:00"
+}

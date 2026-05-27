@@ -1,0 +1,33 @@
+{
+    "id": "session_1779753051_af7883ea",
+    "title": "Session 2026-05-25 23:50",
+    "model": "aya:35b",
+    "messages": [
+        {
+            "id": "msg_1779753051_85e532",
+            "role": "user",
+            "content": "list files in current directory",
+            "created_at": "2026-05-25T23:50:51+00:00"
+        },
+        {
+            "id": "msg_1779753051_58f33e",
+            "role": "user",
+            "content": "list files in current directory",
+            "created_at": "2026-05-25T23:50:51+00:00"
+        },
+        {
+            "id": "msg_1779753051_91668c",
+            "role": "tool",
+            "content": "drwxr-xr-x 2  4096 Mar 31 09:00 sbin.usr-is-merged\ndrwxr-xr-x 2 274432 May 25 23:47 tmp\ndrwxr-xr-x 2  4096 Jan 17 02:05 cdrom\ndrwxr-xr-x 2  4096 Apr 24 18:10 opt\ndrwxr-xr-x 2  4096 Feb 17 01:23 lib32\ndrwxr-xr-x 2  1240 May 25 21:57 run\ndrwxr-xr-x 2 12288 May 17 18:10 lib\ndrwxr-xr-x 2 110592 May 25 22:06 bin\ndrwxr-xr-x 2  4096 May 05 01:49 root\ndrwxr-xr-x 2  4096 Feb 03 18:50 var\ndrwxr-xr-x 2 20480 May 22 23:12 sbin\ndrwxr-xr-x 2  4096 Aug 28 10:50 media\ndrwxr-xr-x 2  4096 May 19 23:06 boot\ndrwxr-xr-x 2 12288 May 25 22:06 etc\ndrwxr-xr-x 2     0 May 25 21:14 sys\ndrwxr-xr-x 2  4096 Apr 08 14:37 lib.usr-is-merged\ndrwxr-xr-x 2  4660 May 25 21:14 dev\ndrwxr-xr-x 2  4096 Feb 26 12:58 bin.usr-is-merged\ndrwxr-xr-x 2  4096 Aug 28 10:50 mnt\ndrwxr-xr-x 2  4096 Aug 28 10:50 srv\ndrwxr-xr-x 2 16384 Jan 17 02:00 lost+found\ndrwxr-xr-x 2  4096 May 05 01:28 home\ndrwxr-xr-x 2  4096 Feb 03 19:16 lib64\ndrwxr-xr-x 2  4096 Jan 28 20:56 usr\ndrwxr-xr-x 2     0 May 25 21:14 proc",
+            "created_at": "2026-05-25T23:50:51+00:00"
+        },
+        {
+            "id": "msg_1779753051_71799f",
+            "role": "assistant",
+            "content": "<tool_call>\nname: ls\nparams: path=\/.\n<\/tool_call>",
+            "created_at": "2026-05-25T23:50:51+00:00"
+        }
+    ],
+    "created_at": "2026-05-25T23:50:51+00:00",
+    "updated_at": "2026-05-25T23:50:51+00:00"
+}

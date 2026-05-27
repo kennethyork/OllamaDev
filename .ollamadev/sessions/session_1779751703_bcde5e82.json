@@ -1,0 +1,33 @@
+{
+    "id": "session_1779751703_bcde5e82",
+    "title": "Session 2026-05-25 23:28",
+    "model": "aya:35b",
+    "messages": [
+        {
+            "id": "msg_1779751703_67a013",
+            "role": "user",
+            "content": "show me the first 20 lines of build.sh",
+            "created_at": "2026-05-25T23:28:23+00:00"
+        },
+        {
+            "id": "msg_1779751703_7ae5fe",
+            "role": "user",
+            "content": "show me the first 20 lines of build.sh",
+            "created_at": "2026-05-25T23:28:23+00:00"
+        },
+        {
+            "id": "msg_1779751716_84da16",
+            "role": "tool",
+            "content": "ollamadev: missing required parameter 'file_path' in 'view'\nUsage: ollamadev help view",
+            "created_at": "2026-05-25T23:28:36+00:00"
+        },
+        {
+            "id": "msg_1779751716_2e3e16",
+            "role": "assistant",
+            "content": "<view build.sh> lines=20<\/view>",
+            "created_at": "2026-05-25T23:28:36+00:00"
+        }
+    ],
+    "created_at": "2026-05-25T23:28:36+00:00",
+    "updated_at": "2026-05-25T23:28:36+00:00"
+}

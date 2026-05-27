@@ -1,0 +1,227 @@
+{
+  "name": "ollamadev-lsp",
+  "displayName": "OllamaDev AI",
+  "description": "Local AI coding assistant - Copilot alternative using Ollama",
+  "version": "1.2.0",
+  "publisher": "ollamadev",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": ["Programming Languages", "Machine Learning", "AI"],
+  "activationEvents": ["onLanguage"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "OllamaDev",
+      "properties": {
+        "ollamadev.port": {
+          "type": "number",
+          "default": 4389,
+          "description": "Port for OllamaDev LSP server"
+        },
+        "ollamadev.hostname": {
+          "type": "string",
+          "default": "127.0.0.1",
+          "description": "Hostname for OllamaDev LSP server"
+        },
+        "ollamadev.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start 'ollamadev lsp' when extension activates"
+        },
+        "ollamadev.model": {
+          "type": "string",
+          "default": "llama3.2:latest",
+          "description": "Default model for completions"
+        },
+        "ollamadev.inlineCompletionEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable inline AI completions"
+        },
+        "ollamadev.statusBarEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show connection status in status bar"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "ollamadev-lsp.start",
+        "title": "OllamaDev: Start LSP Server",
+        "category": "OllamaDev"
+      },
+      {
+        "command": "ollamadev-lsp.stop",
+        "title": "OllamaDev: Stop LSP Server",
+        "category": "OllamaDev"
+      },
+      {
+        "command": "ollamadev-lsp.restart",
+        "title": "OllamaDev: Restart LSP Server",
+        "category": "OllamaDev"
+      },
+      {
+        "command": "ollamadev-lsp.status",
+        "title": "OllamaDev: LSP Status",
+        "category": "OllamaDev"
+      },
+      {
+        "command": "ollamadev.generate",
+        "title": "OllamaDev: Generate Code",
+        "category": "OllamaDev"
+      },
+      {
+        "command": "ollamadev.review",
+        "title": "OllamaDev: Review Code",
+        "category": "OllamaDev"
+      },
+      {
+        "command": "ollamadev.ask",
+        "title": "OllamaDev: Ask AI",
+        "category": "OllamaDev"
+      },
+      {
+        "command": "ollamadev.inlineComplete",
+        "title": "OllamaDev: Toggle Inline Completion",
+        "category": "OllamaDev"
+      },
+      {
+        "command": "ollamadev.chat",
+        "title": "OllamaDev: Open Chat Panel",
+        "category": "OllamaDev"
+      },
+      {
+        "command": "ollamadev.complete",
+        "title": "OllamaDev: Get Completion",
+        "category": "OllamaDev"
+      },
+      {
+        "command": "ollamadev.format",
+        "title": "OllamaDev: Format Document",
+        "category": "OllamaDev"
+      },
+      {
+        "command": "ollamadev.quickfix",
+        "title": "OllamaDev: Quick Fix",
+        "category": "OllamaDev"
+      },
+      {
+        "command": "ollamadev.terminalAttach",
+        "title": "OllamaDev: Attach to Terminal Session",
+        "category": "OllamaDev"
+      },
+      {
+        "command": "ollamadev.terminalList",
+        "title": "OllamaDev: List Terminal Sessions",
+        "category": "OllamaDev"
+      },
+      {
+        "command": "ollamadev.modelSelect",
+        "title": "OllamaDev: Select Model",
+        "category": "OllamaDev"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "ollamadev.generate",
+        "key": "ctrl+shift+g",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "ollamadev.review",
+        "key": "ctrl+shift+r",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "ollamadev.ask",
+        "key": "ctrl+shift+a",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "ollamadev.chat",
+        "key": "ctrl+shift+l",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "ollamadev.inlineComplete",
+        "key": "ctrl+space",
+        "when": "editorTextFocus && !editorHasSelection"
+      },
+      {
+        "command": "ollamadev.format",
+        "key": "ctrl+shift+f",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "ollamadev.quickfix",
+        "key": "ctrl+.",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "ollamadev.terminalAttach",
+        "key": "ctrl+shift+t",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "ollamadev.terminalList",
+        "key": "ctrl+shift+t",
+        "when": "editorTextFocus && ollamadev.terminalActive"
+      },
+      {
+        "command": "ollamadev.modelSelect",
+        "key": "ctrl+shift+m",
+        "when": "editorTextFocus"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "ollamadev.generate",
+          "when": "editorTextFocus",
+          "group": "ollamadev@1"
+        },
+        {
+          "command": "ollamadev.review",
+          "when": "editorTextFocus",
+          "group": "ollamadev@2"
+        },
+        {
+          "command": "ollamadev.ask",
+          "when": "editorTextFocus",
+          "group": "ollamadev@3"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "ollamadev.generate",
+          "when": "false"
+        },
+        {
+          "command": "ollamadev.review",
+          "when": "false"
+        }
+      ]
+    },
+    "statusBar": {
+      "alignment": "right"
+    },
+    "languages": [
+      {
+        "id": "*",
+        "extensions": [".php", ".js", ".ts", ".jsx", ".tsx", ".py", ".go", ".rs", ".java", ".c", ".cpp", ".h", ".hpp", ".cs", ".rb", ".swift", ".kt", ".lua", ".sh", ".bash", ".zsh", ".vue", ".svelte"]
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.75.0",
+    "typescript": "^5.0.0"
+  }
+}

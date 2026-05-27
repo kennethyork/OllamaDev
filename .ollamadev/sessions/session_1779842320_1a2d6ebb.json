@@ -1,0 +1,33 @@
+{
+    "id": "session_1779842320_1a2d6ebb",
+    "title": "Session 2026-05-27 00:38",
+    "model": "wizardlm:30b-q5_K_S",
+    "messages": [
+        {
+            "id": "msg_1779842320_a0b551",
+            "role": "user",
+            "content": "\/help\n\/exit",
+            "created_at": "2026-05-27T00:38:40+00:00"
+        },
+        {
+            "id": "msg_1779842320_8432cd",
+            "role": "user",
+            "content": "\/help\n\/exit",
+            "created_at": "2026-05-27T00:38:40+00:00"
+        },
+        {
+            "id": "msg_1779842320_f88a01",
+            "role": "tool",
+            "content": "Error: tool 'help' not found",
+            "created_at": "2026-05-27T00:38:40+00:00"
+        },
+        {
+            "id": "msg_1779842320_9bc809",
+            "role": "assistant",
+            "content": "<tool_call>\nname: help\nparams: \n<\/tool_call>\n\n<tool_call>\nname: exit\nparams: \n<\/tool_call>",
+            "created_at": "2026-05-27T00:38:40+00:00"
+        }
+    ],
+    "created_at": "2026-05-27T00:38:40+00:00",
+    "updated_at": "2026-05-27T00:38:40+00:00"
+}

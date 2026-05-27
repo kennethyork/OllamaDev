@@ -1,0 +1,33 @@
+{
+    "id": "session_1779752838_4cb2ffa1",
+    "title": "Session 2026-05-25 23:47",
+    "model": "aya:35b",
+    "messages": [
+        {
+            "id": "msg_1779752838_b625dc",
+            "role": "user",
+            "content": "\/status",
+            "created_at": "2026-05-25T23:47:18+00:00"
+        },
+        {
+            "id": "msg_1779752838_19f5d9",
+            "role": "user",
+            "content": "\/status",
+            "created_at": "2026-05-25T23:47:18+00:00"
+        },
+        {
+            "id": "msg_1779752860_f89b0d",
+            "role": "tool",
+            "content": " D ..\/ChartLens\/.gitignore\n D ..\/ChartLens\/README.md\n D ..\/ChartLens\/SPEC.md\n D ..\/ChartLens\/config\/database.php\n D ..\/ChartLens\/includes\/auth.php\n D ..\/ChartLens\/includes\/ccda-parser.php\n D ..\/ChartLens\/includes\/document-converter.php\n D ..\/ChartLens\/includes\/document-extractor.php\n D ..\/ChartLens\/includes\/document-uploader.php\n D ..\/ChartLens\/includes\/functions.php\n D ..\/ChartLens\/patient\/document.php\n D ..\/ChartLens\/patient\/documents.php\n D ..\/ChartLens\/patient\/index.php\n D ..\/ChartLens\/provider\/index.php\n D ..\/ChartLens\/provider\/labs.php\n D ..\/ChartLens\/provider\/messages.php\n D ..\/ChartLens\/provider\/notes.php\n D ..\/ChartLens\/provider\/patient.php\n D ..\/ChartLens\/provider\/patients.php\n D ..\/ChartLens\/public\/api\/document-search.php\n D ..\/ChartLens\/public\/api\/patient\/document-upload.php\n D ..\/ChartLens\/public\/api\/patient\/documents-url-download.php\n D ..\/ChartLens\/public\/api\/patient\/documents.php\n D ..\/ChartLens\/public\/api\/patient\/ehr.php\n D ..\/ChartLens\/public\/css\/auth.css\n D ..\/ChartLens\/public\/css\/base.css\n D ..\/ChartLens\/public\/css\/components.css\n D ..\/ChartLens\/public\/css\/document-viewer.css\n D ..\/ChartLens\/public\/css\/layouts.css\n D ..\/ChartLens\/public\/css\/marketing.css\n D ..\/ChartLens\/public\/css\/variables.css\n D ..\/ChartLens\/public\/index.php\n D ..\/ChartLens\/public\/js\/app.js\n D ..\/ChartLens\/public\/js\/patient-view.js\n D ..\/ChartLens\/public\/login.php\n D ..\/ChartLens\/public\/logout.php\n D ..\/ChartLens\/public\/password-reset.php\n D ..\/ChartLens\/public\/register.php\n D ..\/ChartLens\/router.php\n D ..\/ChartLens\/sql\/schema.sql\n?? ..\/.gitignore\n?? ..\/Aethelgard\/\n?? ..\/Art\/\n?? ..\/Blazeycc-main\/\n?? ..\/Books\/\n?? ..\/Dev-Radar\/\n?? ..\/Emacs-like-gui-editor\/\n?? ..\/Everything.txt\n?? ..\/FitFlow.worktrees\/\n?? ..\/FitFlow\/\n?? ..\/FounderPulse\/\n?? ..\/Games\/\n?? ..\/Gaomon-PD1161\/\n?? ..\/Git.Kennethyork.com\/\n?? \"..\/Kenneth's Original Songs \/\"\n?? \"..\/Kenneth's Stuff\/\"\n?? ..\/KennethYork-main\/\n?? ..\/Kenneths-docs\/\n?? \"..\/Krita ABR BRUSH PLUGIN\/\"\n?? ..\/LibertySprite\/\n?? ..\/LibreSprite-x86_64.AppImage\n?? ..\/Marketing-Videos\/\n?? ..\/MndMesh\/\n?? ..\/Music\/\n?? ..\/New_Bundle.bundle\n?? .\/\n?? ..\/PolyLiscense\/\n?? \"..\/Public domain music lyrics\/\"\n?? ..\/Publii\/\n?? ..\/README.md\n?? ..\/SingleRSC-Website-main\/\n?? ..\/UOP\/\n?? ..\/Wolf2-Kenneth.JPG\n?? ..\/World-of-Emblems\/\n?? ..\/android-sdk\/\n?? ..\/easy-diffusion\/\n?? ..\/logism.jar\n?? ..\/momsStuff\/\n?? ..\/mozilla.pdf\n?? ..\/phpMyAdmin\/\n?? ..\/platform-tools\/\n?? ..\/pyraflow-ai\/\n?? ..\/rpgedit-backup\/\n?? ..\/rpgedit\/\n?? ..\/stable-diffusion-webui-forge\/\n?? ..\/stable-diffusion-webui\/\n?? ..\/swapsweep\/\n?? ..\/url-video-electron\/\n",
+            "created_at": "2026-05-25T23:47:40+00:00"
+        },
+        {
+            "id": "msg_1779752860_29075f",
+            "role": "assistant",
+            "content": "{git_status}",
+            "created_at": "2026-05-25T23:47:40+00:00"
+        }
+    ],
+    "created_at": "2026-05-25T23:47:40+00:00",
+    "updated_at": "2026-05-25T23:47:40+00:00"
+}

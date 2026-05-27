@@ -1,0 +1,27 @@
+{
+    "id": "session_1779753037_8c1ec076",
+    "title": "Session 2026-05-25 23:50",
+    "model": "aya:35b",
+    "messages": [
+        {
+            "id": "msg_1779753037_042126",
+            "role": "user",
+            "content": "say hello",
+            "created_at": "2026-05-25T23:50:37+00:00"
+        },
+        {
+            "id": "msg_1779753037_aa3709",
+            "role": "user",
+            "content": "say hello",
+            "created_at": "2026-05-25T23:50:37+00:00"
+        },
+        {
+            "id": "msg_1779753037_1fcd74",
+            "role": "assistant",
+            "content": "hello\nhello",
+            "created_at": "2026-05-25T23:50:37+00:00"
+        }
+    ],
+    "created_at": "2026-05-25T23:50:37+00:00",
+    "updated_at": "2026-05-25T23:50:37+00:00"
+}

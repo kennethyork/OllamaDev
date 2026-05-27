@@ -1,0 +1,39 @@
+{
+    "id": "session_1779752821_368fc846",
+    "title": "Session 2026-05-25 23:47",
+    "model": "aya:35b",
+    "messages": [
+        {
+            "id": "msg_1779752821_2996d1",
+            "role": "user",
+            "content": "\/help",
+            "created_at": "2026-05-25T23:47:01+00:00"
+        },
+        {
+            "id": "msg_1779752821_c87710",
+            "role": "user",
+            "content": "\/help",
+            "created_at": "2026-05-25T23:47:01+00:00"
+        },
+        {
+            "id": "msg_1779752825_37229e",
+            "role": "tool",
+            "content": "missing file1 or file2",
+            "created_at": "2026-05-25T23:47:05+00:00"
+        },
+        {
+            "id": "msg_1779752825_68ee8b",
+            "role": "tool",
+            "content": "missing file_path",
+            "created_at": "2026-05-25T23:47:05+00:00"
+        },
+        {
+            "id": "msg_1779752825_48a024",
+            "role": "assistant",
+            "content": "```\nHELP MENU\n\n1. THOUGHT: Analyze what needs to be done\n2. PLAN: Break down into steps\n3. SHOW DIFF: For edits, show exact changes before applying\n4. EXECUTE: Only after confirmation (or in auto mode)\n\nPLAN-BEFORE-ACT MODE:\n- When user asks to modify files, show your plan first\n- Display the exact diff\/replacement that will be made\n- Ask for confirmation: \"Apply this change? (yes\/no\/edit)\"\n- In auto mode (\/auto), execute immediately after showing plan\n\nDIFF FORMAT:\nWhen planning edits, show:\n```\n\n```\n\\`\\`\\`diff\n--- a\/file\n+++ b\/file\n@@ -old +new @@\n-old line\n+new line\n\\`\\`\\`\n```",
+            "created_at": "2026-05-25T23:47:05+00:00"
+        }
+    ],
+    "created_at": "2026-05-25T23:47:05+00:00",
+    "updated_at": "2026-05-25T23:47:05+00:00"
+}
