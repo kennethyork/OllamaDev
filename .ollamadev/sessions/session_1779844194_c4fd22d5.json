@@ -1,0 +1,33 @@
+{
+    "id": "session_1779844194_c4fd22d5",
+    "title": "Session 2026-05-27 01:09",
+    "model": "wizardlm:30b-q5_K_S",
+    "messages": [
+        {
+            "id": "msg_1779844194_4f318e",
+            "role": "user",
+            "content": "Write a hello world text file to \/tmp\/test.txt",
+            "created_at": "2026-05-27T01:09:54+00:00"
+        },
+        {
+            "id": "msg_1779844194_b6da4a",
+            "role": "user",
+            "content": "Write a hello world text file to \/tmp\/test.txt",
+            "created_at": "2026-05-27T01:09:54+00:00"
+        },
+        {
+            "id": "msg_1779844195_7cd374",
+            "role": "tool",
+            "content": "FILE_WRITE:\/tmp\/test.txt",
+            "created_at": "2026-05-27T01:09:55+00:00"
+        },
+        {
+            "id": "msg_1779844195_71ab30",
+            "role": "assistant",
+            "content": "<tool_code>{\"name\": \"write\", \"arguments\": {\"file_path\": \"\/tmp\/test.txt\", \"content\": \"Hello World\"}}<\/tool_code>",
+            "created_at": "2026-05-27T01:09:55+00:00"
+        }
+    ],
+    "created_at": "2026-05-27T01:09:55+00:00",
+    "updated_at": "2026-05-27T01:09:55+00:00"
+}
