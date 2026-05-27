@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '3.9.1');
+define('OLLAMADEV_VERSION', '3.9.2');
 $GLOBALS['editedFiles'] = [];
 
 function isWindows(): bool { return stripos(PHP_OS, 'WIN') === 0; }
@@ -78,8 +78,11 @@ class Config {
 
     public static function load(): array {
         if (self::$config) return self::$config;
+        $envOverrides = [];
+        if (getenv('OLLAMA_HOST')) $envOverrides['ollama']['host'] = getenv('OLLAMA_HOST');
+        if (getenv('OLLAMA_MODEL')) $envOverrides['ollama']['defaultModel'] = getenv('OLLAMA_MODEL');
         $defaults = [
-            'ollama' => ['host' => 'http://localhost:11434', 'defaultModel' => 'llama3.2:latest'],
+            'ollama' => ['host' => getenv('OLLAMA_HOST') ?: 'http://localhost:11434', 'defaultModel' => getenv('OLLAMA_MODEL') ?: 'llama3.2:latest'],
             'agents' => ['coder' => ['temperature' => 0.7, 'maxTokens' => 4096]],
             'data' => ['directory' => '.ollamadev']
         ];
@@ -108,10 +111,16 @@ class Config {
         return str_starts_with($dir, '/') ? $dir : getcwd() . '/' . $dir;
     }
 
+    public static function binaryPath(): string {
+        return $_SERVER['argv'][0] ?? 'ollamadev';
+    }
+
     public static function sessionsDir(): string { return self::dataDir() . '/sessions'; }
+    public static function checkpointsDir(): string { return self::dataDir() . '/checkpoints'; }
+    public static function costsDir(): string { return self::dataDir() . '/costs'; }
 }
 
-class MCPClient {
+class Git {
     private ?string $command;
     private string $type;
     private string $url;
@@ -514,6 +523,51 @@ class OllamaClient {
         return [];
     }
 
+    public function completion(string $prompt, string $model = null, int $maxTokens = 200): string {
+        $model = $model ?: Config::get('ollama.defaultModel', 'llama3.2:latest');
+        $params = ['model' => $model, 'prompt' => $prompt, 'stream' => false, 'options' => ['num_predict' => $maxTokens]];
+        $ch = curl_init($this->host . '/api/generate');
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 120
+        ]);
+        $resp = curl_exec($ch);
+        curl_close($ch);
+        if ($resp) {
+            $j = json_decode($resp, true);
+            $content = $j['response'] ?? '';
+            $thinking = $j['thinking'] ?? '';
+            if (!empty($thinking) && empty($content)) $content = $thinking;
+            return $content;
+        }
+        return '';
+    }
+
+    public function codeComplete(string $code, string $cursor, string $model = null): string {
+        $prompt = "Complete the following code. Only return the completion, no explanation. No markdown, just code:\n\n" . $code . "\n\nCursor position: " . strlen($code) . "\n=> ";
+        $params = ['model' => $model ?: Config::get('ollama.defaultModel', 'llama3.2:latest'), 'prompt' => $prompt, 'stream' => true, 'options' => ['num_predict' => 150]];
+        $ch = curl_init($this->host . '/api/generate');
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 30
+        ]);
+        $resp = curl_exec($ch);
+        curl_close($ch);
+        if ($resp) {
+            $j = json_decode($resp, true);
+            return trim($j['response'] ?? '');
+        }
+        return '';
+    }
+
+    public function codeReview(string $code): string {
+        $prompt = "Review this code and provide suggestions for improvements, bugs, and best practices. Be concise:\n\n" . substr($code, 0, 4000) . "\n\nReview:";
+        $messages = [['role' => 'user', 'content' => $prompt]];
+        return $this->chatWithModel($model ?? Config::get('ollama.defaultModel', 'llama3.2:latest'), $messages) ?: $this->completion($prompt, $model);
+    }
+
     public function chat(array $messages, callable $handler = null): string {
         $model = Config::get('ollama.defaultModel', 'llama3.2:latest');
         return $this->chatWithModel($model, $messages, $handler);
@@ -526,7 +580,7 @@ class OllamaClient {
             CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => $this->timeout
+            CURLOPT_TIMEOUT => 120
         ]);
         $resp = curl_exec($ch);
         curl_close($ch);
@@ -535,8 +589,11 @@ class OllamaClient {
             if ($j && isset($j['message'])) {
                 $content = $j['message']['content'] ?? '';
                 $thinking = $j['message']['thinking'] ?? '';
-                if (empty($content) && !empty($thinking)) $content = $thinking;
-                if (!empty($content) && $handler) $handler($content);
+                if (!empty($thinking) && empty($content)) $content = $thinking;
+                if (!empty($content)) {
+                    if ($handler) $handler($content);
+                    return $content;
+                }
             }
         }
         return '';
@@ -550,19 +607,63 @@ class Tools {
     public static function find(string $name): ?callable { return self::$tools[$name] ?? null; }
     public static function run(string $name, array $params): string {
         $fn = self::find($name);
-        if (!$fn) return "Error: tool '$name' not found";
-        if (!Permission::isAllowed($name)) return "PERMISSION_DENIED:$name";
-        try { return $fn($params); } catch (Exception $e) { return "Error: " . $e->getMessage(); }
+        if (!$fn) return CmdError::toolNotFound($name);
+        if (!Permission::isAllowed($name)) return CmdError::permissionDenied($name);
+        try { return $fn($params); } catch (Exception $e) { return CmdError::toolFailed($name, $e->getMessage()); }
     }
     public static function all(): array { return array_keys(self::$tools); }
 }
 
+class CmdError {
+    public static function toolNotFound(string $tool): string {
+        $suggestions = self::suggestSimilar($tool, Tools::all());
+        $suggest = $suggestions ? " Did you mean: $suggestions?" : "";
+        return "ollamadev: '$tool' is not a valid tool.$suggest\nRun 'ollamadev help tools' for available tools.";
+    }
+
+    public static function permissionDenied(string $tool): string {
+        return "ollamadev: permission denied for tool '$tool'\nUse 'ollamadev permission allow $tool' to grant access.";
+    }
+
+    public static function toolFailed(string $tool, string $reason): string {
+        return "ollamadev: tool '$tool' failed\n  Reason: $reason\nRun 'ollamadev help tools' for usage examples.";
+    }
+
+    public static function fileNotFound(string $path, string $tool = ''): string {
+        $extra = $tool ? " for '$tool'" : '';
+        return "ollamadev: file not found'$extra': $path\nHint: Use absolute paths or paths relative to current directory.";
+    }
+
+    public static function missingParam(string $param, string $tool = ''): string {
+        $extra = $tool ? " in '$tool'" : '';
+        return "ollamadev: missing required parameter '$param'$extra\nUsage: ollamadev help $tool";
+    }
+
+    public static function invalidArg(string $arg, string $reason, string $tool = ''): string {
+        $extra = $tool ? " for '$tool'" : '';
+        return "ollamadev: invalid argument '$arg'$extra\n  $reason";
+    }
+
+    private static function suggestSimilar(string $input, array $candidates): string {
+        $closest = '';
+        $minDist = PHP_INT_MAX;
+        foreach ($candidates as $c) {
+            $dist = levenshtein($input, $c);
+            if ($dist < $minDist && $dist <= 3) {
+                $minDist = $dist;
+                $closest = $c;
+            }
+        }
+        return $closest ? "'$closest'" : '';
+    }
+}
+
 Tools::register('view', function($p) {
     $path = $p['file_path'] ?? $p['file'] ?? $p['path'] ?? '';
-    if (empty($path)) return "missing file_path";
-    if (!file_exists($path)) return "File not found: $path";
+    if (empty($path)) return CmdError::missingParam('file_path', 'view');
+    if (!file_exists($path)) return CmdError::fileNotFound($path, 'view');
     $lines = file($path);
-    if ($lines === false) return "Error reading file: $path";
+    if ($lines === false) return CmdError::invalidArg($path, 'Unable to read file. Check permissions.', 'view');
     $offset = isset($p['offset']) ? (int)$p['offset'] : 0;
     $limit = isset($p['limit']) ? (int)$p['limit'] : count($lines);
     $out = '';
@@ -575,6 +676,12 @@ Tools::register('read', function($p) {
     return Tools::run('view', $p);
 });
 
+// Aliases for common tools
+Tools::register('read', function($p) {
+    $p['file_path'] = $p['file_path'] ?? $p['path'] ?? '';
+    return Tools::run('view', $p);
+});
+
 Tools::register('cat', function($p) {
     $p['file_path'] = $p['file_path'] ?? $p['file'] ?? $p['path'] ?? '';
     return Tools::run('view', $p);
@@ -596,40 +703,6 @@ Tools::register('tail', function($p) {
     $path = $p['file_path'] ?? $p['file'] ?? $p['path'] ?? '';
     if (empty($path)) return "missing file_path";
     if (!file_exists($path)) return "File not found: $path";
-    $lines = file($path);
-    if ($lines === false) return "Error reading file: $path";
-    $n = $p['n'] ?? 10;
-    $start = max(0, count($lines) - $n);
-    $out = '';
-    for ($i = $start; $i < count($lines); $i++) $out .= $lines[$i];
-    return $out;
-});
-
-// Aliases for common tools
-Tools::register('read', function($p) {
-    $p['file_path'] = $p['file_path'] ?? $p['path'] ?? '';
-    return Tools::run('view', $p);
-});
-
-Tools::register('cat', function($p) {
-    $p['file_path'] = $p['file_path'] ?? $p['path'] ?? '';
-    return Tools::run('view', $p);
-});
-
-Tools::register('head', function($p) {
-    $path = $p['file_path'] ?? $p['path'] ?? '';
-    if (empty($path)) return "missing file_path";
-    $lines = file($path);
-    if ($lines === false) return "Error reading file: $path";
-    $n = $p['n'] ?? 10;
-    $out = '';
-    for ($i = 0; $i < min($n, count($lines)); $i++) $out .= $lines[$i];
-    return $out;
-});
-
-Tools::register('tail', function($p) {
-    $path = $p['file_path'] ?? $p['path'] ?? '';
-    if (empty($path)) return "missing file_path";
     $lines = file($path);
     if ($lines === false) return "Error reading file: $path";
     $n = $p['n'] ?? 10;
@@ -799,7 +872,19 @@ Tools::register('diff', function($p) {
     $file1 = $p['file1'] ?? $p['file_path'] ?? $p['file'] ?? $p['source'] ?? '';
     $file2 = $p['file2'] ?? $p['dest'] ?? '';
     if (empty($file1) || empty($file2)) return "missing file1 or file2";
-    return shell_exec("diff " . escapeshellarg($file1) . " " . escapeshellarg($file2) . " 2>&1") ?: "No differences";
+    if (!file_exists($file1) || !file_exists($file2)) return "File not found";
+    $isGitDir = is_dir(dirname($file1) . '/.git') || is_dir($file1);
+    if ($isGitDir || preg_match('/\.git[\/\\\]?$/', dirname($file1))) {
+        $output = shell_exec("cd " . escapeshellarg(dirname($file1)) . " && git diff " . escapeshellarg(basename($file1)) . " 2>&1") ?: "No differences";
+    } else {
+        $output = shell_exec("diff -u " . escapeshellarg($file1) . " " . escapeshellarg($file2) . " 2>&1") ?: "No differences";
+    }
+    if (empty(trim($output))) return "No differences";
+    $tmp = tempnam('/tmp', 'ollamadev_diff_') . '.txt';
+    file_put_contents($tmp, $output);
+    passthru("less -R " . escapeshellarg($tmp) . " 2>/dev/null");
+    @unlink($tmp);
+    return '';
 });
 
 Tools::register('wc', function($p) {
@@ -813,7 +898,7 @@ Tools::register('wc', function($p) {
 });
 
 Tools::register('sort', function($p) {
-    $path = $p['file_path'] ?? $p['file'] ?? $p['path'] ?? '';
+    $path = $p['file_path'] ?? $p['path'] ?? '';
     if (empty($path)) return "missing file_path";
     if (!file_exists($path)) return "File not found: $path";
     $lines = file($path);
@@ -881,12 +966,15 @@ Tools::register('cp', function($p) {
 Tools::register('rm', function($p) {
     $path = $p['path'] ?? $p['file_path'] ?? '';
     $recursive = $p['recursive'] ?? $p['r'] ?? false;
-    if (empty($path)) return "missing path";
-    if (str_contains($path, 'node_modules') || str_contains($path, '.git')) return "Cannot remove system directories";
-    if ($recursive) {
-        return shell_exec("rm -rf " . escapeshellarg($path) . " 2>&1") ?: "Removed: $path";
+    $dryRun = $p['dry_run'] ?? $p['dry-run'] ?? false;
+    if (empty($path)) return CmdError::missingParam('path', 'rm');
+    if (str_contains($path, 'node_modules') || str_contains($path, '.git')) return CmdError::invalidArg('path', 'Cannot remove system directories (node_modules, .git)', 'rm');
+    $cmd = ($recursive ? 'rm -rf' : 'rm') . ' ' . escapeshellarg($path);
+    if ($dryRun) {
+        return "[DRY RUN] Would execute: $cmd\n[DRY RUN] Target: $path\n[DRY RUN] Recursive: " . ($recursive ? 'yes' : 'no');
     }
-    return shell_exec("rm " . escapeshellarg($path) . " 2>&1") ?: "Removed: $path";
+    $result = shell_exec("$cmd 2>&1") ?: "Removed: $path";
+    return $result;
 });
 
 Tools::register('mv', function($p) {
@@ -907,13 +995,78 @@ Tools::register('editor', function($p) {
 });
 
 Tools::register('bash', function($p) {
-    $cmd = $p['command'] ?? '';
+    $cmd = '';
+    if (is_array($p)) {
+        if (isset($p['command']) && is_string($p['command'])) $cmd = $p['command'];
+        elseif (isset($p['cmd']) && is_string($p['cmd'])) $cmd = $p['cmd'];
+        elseif (isset($p[0]) && is_string($p[0])) {
+            if (count($p) >= 2 && $p[0] === 'echo' && is_string($p[1])) $cmd = 'echo ' . $p[1];
+            else $cmd = $p[0];
+        }
+    } else { $cmd = (string)$p; }
+    $cmd = trim($cmd, '"\'');
     if (empty($cmd)) return "missing command";
+    $cmd = preg_replace('/^command=/', '', $cmd);
+    $cmd = preg_replace('/^cmd=/', '', $cmd);
+    $cmd = preg_replace('/"\s*$/', '', $cmd);
     $readonly = ['ls', 'pwd', 'cat', 'head', 'tail', 'grep', 'find', 'git', 'echo', 'wc', 'sort', 'uniq', 'awk', 'sed', 'cut', 'tr', 'file', 'stat', 'diff', 'tree'];
     $first = strtok($cmd, ' ');
     if (!in_array($first, $readonly)) return "Command not allowed (readonly only): $first";
     foreach (['curl', 'wget', 'chmod', 'sudo', 'rm -rf', 'mkfs'] as $b) { if (str_contains($cmd, $b)) return "Dangerous command blocked: $b"; }
+    if (preg_match('/echo\s+\$?\(\s*\([^)]+\)\s*\)/', $cmd)) {
+        if (preg_match_all('/(\d+)\s*([+\-*\/])\s*(\d+)/', $cmd, $m, PREG_SET_ORDER)) {
+            if ($m && isset($m[0][0])) { $result = eval('return ' . str_replace(' ', '', $m[0][0]) . ';'); return (string)$result; }
+        }
+    }
     return shell_exec($cmd . ' 2>&1') ?: "(no output)";
+});
+
+Tools::register('calc', function($p) {
+    $expr = '';
+    if (is_array($p)) {
+        $expr = $p['expr'] ?? $p['expression'] ?? $p['calculation'] ?? $p['equation'] ?? $p['value'] ?? ($p[0] ?? '');
+    } else { $expr = (string)$p; }
+    if (empty($expr)) return "missing expression";
+    $expr = preg_replace('/[^0-9+\-*\/(). ]/', '', $expr);
+    $expr = str_replace(' ', '', $expr);
+    if (strpos($expr, 'scale=') !== false) $expr = preg_replace('/scale=\d+;/', '', $expr);
+    try { return (string)@eval("return $expr;"); } catch (Exception $e) { return "Invalid expression"; }
+});
+
+Tools::register('print', function($p) {
+    return $p['text'] ?? $p['message'] ?? $p['content'] ?? ($p[0] ?? '');
+});
+
+Tools::register('say', function($p) {
+    $text = is_array($p) ? ($p['text'] ?? $p['message'] ?? $p['content'] ?? $p['t'] ?? $p['s'] ?? ($p[0] ?? '')) : (string)$p;
+    return (string)$text;
+});
+
+Tools::register('echo', function($p) {
+    $text = is_array($p) ? ($p['text'] ?? $p['message'] ?? $p['content'] ?? $p['s'] ?? $p['t'] ?? $p[0] ?? '') : (string)$p;
+    return (string)$text;
+});
+
+Tools::register('reply', function($p) {
+    return $p['text'] ?? $p['message'] ?? $p['content'] ?? ($p[0] ?? '');
+});
+
+Tools::register('ok', function($p) {
+    return 'ok';
+});
+
+Tools::register('OK', function($p) {
+    return 'ok';
+});
+
+Tools::register('error', function($p) {
+    return $p['message'] ?? $p['text'] ?? ($p[0] ?? 'error');
+});
+
+Tools::register('git', function($p) {
+    $cmd = $p['cmd'] ?? $p['command'] ?? '';
+    if (empty($cmd)) return "missing cmd";
+    return shell_exec("git $cmd 2>&1") ?: "(no output)";
 });
 
 Tools::register('bg', function($p) {
@@ -1123,15 +1276,72 @@ Tools::register('patch', function($p) {
 });
 
 Tools::register('agent', function($p) {
-    $prompt = $p['prompt'] ?? '';
-    if (empty($prompt)) return "missing prompt";
+    $prompt = $p['prompt'] ?? $p['task'] ?? '';
     $context = $p['context'] ?? '';
-    $session = new Session(Config::load());
-    $session->setAgentContext($context);
-    ob_start();
-    $session->startAgentLoop($prompt);
-    $output = ob_get_clean();
-    return $output ?: "Agent completed";
+    $maxIterations = (int)($p['max_iterations'] ?? 5);
+    $model = $GLOBALS['currentSessionModel'] ?? Config::get('ollama.defaultModel', 'llama3.2:latest');
+
+    $blocked = ['mistral', 'smollm', 'starcoder', 'qwen', 'phi', 'firefunction', 'tinyllama', 'phi-2', 'llava', 'nanollm', 'mixtral', 'codellama', 'code-llama'];
+    foreach ($blocked as $b) { if (stripos($model, $b) !== false) return "Model $model does not support tool calling. Try: gpt-oss, llama3.2, codestral, or deepseek-r1."; }
+
+    if (empty($prompt)) return "missing prompt (need 'prompt' or 'task' parameter)";
+
+    $subAgent = new Agent();
+    $subAgent->setModel($model);
+    $isGptOss = str_contains($model, 'gpt-oss');
+
+    $systemPrompt = $subAgent->buildSystemPrompt();
+    if (!empty($context)) {
+        $systemPrompt['content'] .= "\n\nCONTEXT: $context";
+    }
+    
+    $messages = [['role' => 'system', 'content' => $systemPrompt['content']], ['role' => 'user', 'content' => "Task: $prompt\n\nWork through this step by step. Use tools as needed and report results."]];
+    
+    $output = [];
+    $iteration = 0;
+    
+    while ($iteration < $maxIterations) {
+        $iteration++;
+        $response = $subAgent->run($messages);
+        $output[] = "=== Iteration $iteration ===\n$response\n";
+
+        $toolCalls = $subAgent->parseToolCalls($response);
+        if ($isGptOss && empty($toolCalls)) {
+            $toolCalls = $subAgent->parseGptOssToolCalls($response);
+        }
+        if (empty($toolCalls) && (str_contains($model, 'command') || str_contains($model, 'gemma'))) {
+            $toolCalls = $subAgent->parseGptOssToolCalls($response);
+        }
+        $messages[] = ['role' => 'assistant', 'content' => $response];
+
+        if (empty($toolCalls)) {
+            $lastMsg = end($messages);
+            if (strpos(strtolower($lastMsg['content']), 'task complete') !== false || 
+                strpos(strtolower($response), 'task complete') !== false ||
+                strpos(strtolower($response), 'done') !== false) {
+                break;
+            }
+            $messages[] = ['role' => 'user', 'content' => 'Continue or finish? If done, say "TASK_COMPLETE".'];
+            continue;
+        }
+        
+        foreach ($toolCalls as $call) {
+            $toolName = $call['name'];
+            $params = $call['params'] ?? [];
+            $tool = Tools::find($toolName);
+            
+            if (!$tool) {
+                $result = "Error: tool '$toolName' not found";
+            } else {
+                $result = $tool($params);
+            }
+            
+            $messages[] = ['role' => 'tool', 'content' => "[$toolName] result: $result"];
+            $output[] = "[$toolName] → " . substr($result, 0, 200) . (strlen($result) > 200 ? '...' : '') . "\n";
+        }
+    }
+    
+    return implode("\n", $output);
 });
 
 Tools::register('git_status', function($p) {
@@ -1278,9 +1488,98 @@ Tools::register('git_show', function($p) {
     return shell_exec($cmd . " 2>&1") ?: "Show failed";
 });
 
+Tools::register('update', function($p) {
+    $install = $p['install'] ?? false;
+    $current = '3.9.5';
+    $ctx = stream_context_create(['http' => ['timeout' => 10, 'ignore_errors' => true]]);
+    $json = @file_get_contents('https://api.github.com/repos/kennethyork/OllamaDev/releases/latest', false, $ctx);
+    if (!$json) return "Error: Could not check for updates. Check your internet connection.";
+    $data = json_decode($json, true);
+    $tag = $data['tag_name'] ?? '';
+    if (!$tag) return "Error: Could not parse release info.";
+    if (version_compare($tag, $current, '<=')) {
+        return "You're up to date (v$current)";
+    }
+    echo "Update available: $tag (current: $current)\n\n";
+    $assets = $data['assets'] ?? [];
+    $binary = null;
+    foreach ($assets as $a) {
+        if ($a['name'] === 'ollamadev') $binary = $a;
+    }
+    if (!$binary && count($assets) > 0) $binary = $assets[0];
+    if ($binary) {
+        echo "Download: {$binary['browser_download_url']}\n";
+        echo "\nTo install:\n";
+        if ($install) {
+            $tmp = sys_get_temp_dir() . '/ollamadev_new';
+            $url = $binary['browser_download_url'];
+            echo "Downloading...\n";
+            $downloaded = @file_put_contents($tmp, fopen($url, 'rb', false, $ctx));
+            if ($downloaded) {
+                chmod($tmp, 0755);
+                $binPath = Config::binaryPath();
+                rename($tmp, $binPath);
+                echo "Updated to $tag. Restart to use new version.\n";
+            } else {
+                echo "Download failed. Try manually: curl -fsSL {$binary['browser_download_url']} -o /usr/local/bin/ollamadev\n";
+            }
+        } else {
+            echo "  curl -fsSL {$binary['browser_download_url']} -o /usr/local/bin/ollamadev\n";
+            echo "\nOr run: ollamadev update --install to auto-download\n";
+        }
+    }
+    return "Run 'ollamadev update' to check again.";
+});
+
+Tools::register('git_cherry_pick', function($p) {
+    $path = $p['path'] ?? '.';
+    $ref = $p['ref'] ?? '';
+    $no_commit = $p['no_commit'] ?? false;
+    if (empty($ref)) return "missing ref (commit hash or branch)";
+    $cmd = "cd " . escapeshellarg($path) . " && git cherry-pick";
+    if ($no_commit) $cmd .= " --no-commit";
+    $cmd .= " " . escapeshellarg($ref);
+    return shell_exec($cmd . " 2>&1") ?: "Cherry-pick failed";
+});
+
+Tools::register('git_revert', function($p) {
+    $path = $p['path'] ?? '.';
+    $ref = $p['ref'] ?? '';
+    $no_commit = $p['no_commit'] ?? false;
+    if (empty($ref)) return "missing ref (commit hash or branch)";
+    $cmd = "cd " . escapeshellarg($path) . " && git revert";
+    if ($no_commit) $cmd .= " --no-commit";
+    $cmd .= " " . escapeshellarg($ref);
+    return shell_exec($cmd . " 2>&1") ?: "Revert failed";
+});
+
+Tools::register('git_merge', function($p) {
+    $path = $p['path'] ?? '.';
+    $branch = $p['branch'] ?? '';
+    $no_ff = $p['no_ff'] ?? false;
+    $squash = $p['squash'] ?? false;
+    if (empty($branch)) return "missing branch";
+    $cmd = "cd " . escapeshellarg($path) . " && git merge";
+    if ($no_ff) $cmd .= " --no-ff";
+    if ($squash) $cmd .= " --squash";
+    $cmd .= " " . escapeshellarg($branch);
+    return shell_exec($cmd . " 2>&1") ?: "Merge failed";
+});
+
 class SystemPrompts {
     private static array $prompts = [
-        'llama' => 'You are a helpful AI assistant running locally via Ollama. Be precise and explicit in your responses.',
+        'llama' => "You are a CLI assistant. When user says 'say ok' or 'say hello' or any 'say X' - output ONLY the word or phrase X, nothing else. No tool calls, no explanation, just the word.
+
+When asked to list files, read files, or run commands - use tools.
+
+Tool format: <tool_code>{\"name\": \"TOOL\", \"arguments\": {\"PARAM\": \"VALUE\"}}</tool_code>
+
+Tools: ls, view, write, edit, glob, grep, bash, fetch, patch, diagnostics, symbols, refs
+
+Examples:
+- User: say hello → hello
+- User: say ok → ok
+- User: list files → <tool_code>{\"name\": \"ls\", \"arguments\": {\"path\": \".\"}}</tool_code>",
 
         'mistral' => 'You are Mistral, a helpful AI assistant running locally via Ollama. Be concise and accurate.',
 
@@ -1304,27 +1603,38 @@ Response: <tool_code>\n{\"name\": \"glob\", \"arguments\": {\"pattern\": \"*.php
 
 Available tools: ls, view, write, edit, glob, grep, bash, fetch, patch, diagnostics",
 
-'phi' => "You are Phi, a CLI coding assistant. Extract parameters from user request and call tools. NEVER explain, NEVER ask permission.
+        'gemma' => "You are Gemma. For 'say X' commands, output ONLY X with no formatting or tools.
 
-Tool format: <tool_code>{\"name\": \"TOOL\", \"arguments\": {\"PARAM\": \"VALUE\"}}</tool_code>
+Examples:
+- User: say hello → hello
+- User: say ok → ok
+- User: what is 2+2? → 4
 
-Tools: ls, view, write, edit, glob, grep pattern=REGEX path=PATH, bash command=CMD, diagnostics path=PATH, goto path=PATH symbol=NAME, symbols path=PATH, refs path=PATH symbol=NAME",
+For other tasks, use tools with this format: <tool_code>{\"name\": \"TOOL\", \"arguments\": {\"PARAM\": \"VALUE\"}}</tool_code>
 
-        'wizard' => "You are WizardCoder. When user asks you to list files, read files, or run commands - you MUST actually call the tool now, not explain how to do it. Tools execute directly - do NOT ask for permission.",
+Available tools: ls, view, write, edit, glob, grep, bash, fetch, patch, diagnostics, symbols, refs",
 
-        'starcoder' => "You are StarCoder. When user asks you to list files, read files, or run commands - you MUST actually call the tool now, not explain how to do it. Tools execute directly - do NOT ask for permission.",
-        'smollm' => "You are a compact AI assistant. When asked to list files, you MUST call the ls tool. Execute: <tool_code>{\"name\": \"ls\", \"arguments\": {\"path\": \".\"}}</tool_code> Tools execute directly - do NOT ask for permission.",
+        'glm' => "You are GLM. For 'say X' commands, output ONLY X with no formatting or tools.
 
-        'gpt-oss' => 'You are a CLI tool with file access. When user asks to view, list, read, write, edit, search, or run commands - ALWAYS call the appropriate tool.
+Examples:
+- User: say hello → hello
+- User: say ok → ok
+- User: what is 2+2? → 4
 
-For file operations:
-- "view FILE" → <tool_code>{"name": "view", "arguments": {"file_path": "FILE"}}</tool_code>
-- "ls DIR" → <tool_code>{"name": "ls", "arguments": {"path": "DIR"}}</tool_code>
-- "write FILE CONTENT" → <tool_code>{"name": "write", "arguments": {"file_path": "FILE", "content": "CONTENT"}}</tool_code>
-- "grep PATTERN FILE" → <tool_code>{"name": "grep", "arguments": {"pattern": "PATTERN", "path": "FILE"}}</tool_code>
-- "glob PATTERN" → <tool_code>{"name": "glob", "arguments": {"pattern": "PATTERN"}}</tool_code>
+For other tasks, use tools with this format: <tool_code>{\"name\": \"TOOL\", \"arguments\": {\"PARAM\": \"VALUE\"}}</tool_code>
 
-DO NOT explain. DO NOT ask questions. Just call the tool.',
+Available tools: ls, view, write, edit, glob, grep, bash, fetch, patch, diagnostics",
+
+        'aya' => "You are Aya, a CLI assistant. For 'say X' commands, output ONLY X with no formatting or tools.
+
+Examples:
+- User: say hello → hello
+- User: say ok → ok
+- User: what is 2+2? → 4
+
+For other tasks, use tools with this format: <tool_code>{\"name\": \"TOOL\", \"arguments\": {\"PARAM\": \"VALUE\"}}</tool_code>
+
+Available tools: ls, view, write, edit, glob, grep, bash, fetch, patch, diagnostics",
 
         'default' => 'You are an AI coding assistant. When user asks you to do something, call the appropriate tool.
 
@@ -1361,6 +1671,10 @@ You: <tool_code>{"name": "ls", "arguments": {"path": "/tmp"}}</tool_code>',
         'starcoder' => ['/starcoder/i', '/star-coder/i'],
         'smollm' => ['/smollm/i'],
         'gpt-oss' => ['/gpt-oss/i', '/gpt_oss/i'],
+        'olmo' => ['/olmo/i'],
+        'aya' => ['/aya/i'],
+        'gemma' => ['/gemma/i'],
+        'glm' => ['/glm/i'],
     ];
 
     public static function detectForModel(string $model): string {
@@ -1368,7 +1682,7 @@ You: <tool_code>{"name": "ls", "arguments": {"path": "/tmp"}}</tool_code>',
         foreach (self::$modelPatterns as $family => $patterns) {
             foreach ($patterns as $pattern) {
                 if (preg_match($pattern, $model)) {
-                    return self::$prompts[$family];
+                    return self::$prompts[$family] ?? self::$prompts['default'];
                 }
             }
         }
@@ -1396,9 +1710,18 @@ class Agent {
         $this->systemPrompt = $this->buildSystemPrompt();
     }
 
-    private function buildSystemPrompt(): array {
+    public function buildSystemPrompt(): array {
         $manualPrompt = Config::get('agents.systemPrompt', '');
         $prompt = !empty($manualPrompt) ? $manualPrompt : SystemPrompts::detectForModel($this->model);
+        
+        $projectMemory = '';
+        $memoryFiles = ['OLLAMADEV.md', '.ollamadev.md', '.ollamadev'];
+        foreach ($memoryFiles as $mf) {
+            if (file_exists($mf)) {
+                $projectMemory = "\n\nPROJECT CONTEXT (from $mf):\n" . file_get_contents($mf);
+                break;
+            }
+        }
 
 $tools = 'TOOLS AVAILABLE:
 
@@ -1508,7 +1831,7 @@ TOOL PERMISSIONS:
 COMPACT/SUMMARIZE:
 - When conversation exceeds ~20 messages, call summarize tool';
 
-        return ['role' => 'system', 'content' => $prompt . "\n\n" . $tools];
+        return ['role' => 'system', 'content' => $prompt . $projectMemory . "\n\n" . $tools];
     }
 
     public function setModel(string $model): void { $this->model = $model; }
@@ -1541,10 +1864,10 @@ public function run(array $messages, callable $handler = null): string {
         return $results;
     }
 
-private function parseToolCalls(string $content): array {
+public function parseToolCalls(string $content): array {
         $calls = [];
 
-        if (preg_match_all('/<tool_code>\s*(\{.*?\})\s*<\/tool_code>/s', $content, $matches, PREG_SET_ORDER)) {
+if (preg_match_all('/<tool_code>\s*(\{.*?\})\s*<\/tool_code>/s', $content, $matches, PREG_SET_ORDER)) {
             foreach ($matches as $m) {
                 $json = json_decode($m[1], true);
                 if ($json && isset($json['name'])) {
@@ -1553,20 +1876,38 @@ private function parseToolCalls(string $content): array {
             }
             if (!empty($calls)) return $calls;
         }
-
-        if (preg_match_all('/call:(\w+):(\w+)\s*(\{[^}]*\})?/', $content, $matches, PREG_SET_ORDER)) {
+        
+if (preg_match_all('/<tool_call>\s*(\{.*?\})\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
             foreach ($matches as $m) {
-                $args = json_decode($m[3] ?? '{}', true) ?: [];
-                $calls[] = ['name' => $m[2], 'params' => $args];
+                $json = json_decode($m[1], true);
+                if ($json && isset($json['name'])) {
+                    $args = $json['arguments'] ?? $json['params'] ?? [];
+                    $calls[] = ['name' => $json['name'], 'params' => $args];
+                }
             }
             if (!empty($calls)) return $calls;
         }
 
-        if (preg_match_all('/tool_call_code:\s*(\w+)/', $content, $matches, PREG_SET_ORDER)) {
-            foreach ($matches[1] as $name) { $calls[] = ['name' => $name, 'params' => []]; }
+        if (preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*(\{[\s\S]*?\})\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $m) {
+                $json = json_decode($m[2], true);
+                if ($json) {
+                    $calls[] = ['name' => $m[1], 'params' => $json];
+                }
+            }
             if (!empty($calls)) return $calls;
         }
 
+        if (preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*(\{.*?\})\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $m) {
+                $json = json_decode($m[2], true);
+                if ($json) {
+                    $calls[] = ['name' => $m[1], 'params' => $json];
+                }
+            }
+            if (!empty($calls)) return $calls;
+        }
+        
         if (preg_match_all('/<tool_call>\s*(\{.*?\})\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
             foreach ($matches as $m) {
                 $json = json_decode($m[1], true);
@@ -1582,17 +1923,51 @@ private function parseToolCalls(string $content): array {
             if (!empty($calls)) return $calls;
         }
 
-        if (preg_match_all('/<tool_code>\s*(\{.*?\})\s*<\/tool_code>/s', $content, $matches, PREG_SET_ORDER)) {
+if (preg_match_all('/<tool_code>\s*(\{[\s\S]*?\})\s*<\/tool_code>/', $content, $matches, PREG_SET_ORDER)) {
             foreach ($matches as $m) {
                 $json = json_decode($m[1], true);
                 if ($json && isset($json['name'])) {
-                    $calls[] = ['name' => $json['name'], 'params' => $json['arguments'] ?? []];
+                    $args = $json['arguments'] ?? $json['params'] ?? [];
+                    $calls[] = ['name' => $json['name'], 'params' => is_array($args) ? $args : []];
                 }
             }
             if (!empty($calls)) return $calls;
         }
 
-        if (preg_match_all('/<tool_code>\s*(\{[^}]+\})\s*<\/tool_code>/s', $content, $matches, PREG_SET_ORDER)) {
+        if (preg_match_all('/<tool_call>\s*"server":\s*"([^"]+)",\s*"tool":\s*"([^"]+)"[^}]*\}/s', $content, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $m) {
+                $server = $m[1];
+                $tool = $m[2];
+                $args = [];
+                if (preg_match('/"args":\s*(\{[^}]+\}|"[^"]*")/', $m[0], $argMatch)) {
+                    $args = json_decode($argMatch[1], true) ?? [];
+                }
+                $calls[] = ['name' => 'mcp', 'params' => ['server' => $server, 'tool' => $tool, 'args' => $args]];
+            }
+            if (!empty($calls)) return $calls;
+        }
+
+        if (preg_match_all('/<\/tool_call>\s*(\{[\s\S]*?\})\s*$/m', $content, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $m) {
+                $json = json_decode(trim($m[1]), true);
+                if ($json && isset($json['name'])) {
+                    $args = $json['arguments'] ?? $json['params'] ?? [];
+                    $calls[] = ['name' => $json['name'], 'params' => is_array($args) ? $args : []];
+                }
+            }
+            if (!empty($calls)) return $calls;
+        }
+
+        if (empty($calls) && preg_match_all('/\{"name":\s*"(\w+)",\s*"arguments":\s*(\{[^}]+\})\}/', $content, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $m) {
+                $args = json_decode($m[2], true) ?? [];
+                $calls[] = ['name' => $m[1], 'params' => $args];
+            }
+            if (!empty($calls)) return $calls;
+        }
+
+        if (empty($calls)) {
+            preg_match_all('/<tool_code>\s*(\{[^}]+\})\s*<\/tool_code>/s', $content, $matches, PREG_SET_ORDER);
             foreach ($matches as $m) {
                 $json = json_decode($m[1], true);
                 if ($json && isset($json['name'])) {
@@ -1606,10 +1981,22 @@ private function parseToolCalls(string $content): array {
             if (!empty($calls)) return $calls;
         }
 
-if (preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*(?:params|arguments):\s*\n(.+?)\n\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
+if (preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*arguments:\s*\{[^}]*\}[\s\n]*/', $content, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $m) {
+                if (preg_match('/arguments:\s*(\{[^}]*\})/', $m[0], $j)) {
+                    $json = json_decode($j[1], true);
+                    if ($json) {
+                        $calls[] = ['name' => trim($m[1]), 'params' => $json];
+                    }
+                }
+            }
+            if (!empty($calls)) return $calls;
+        }
+
+        if (preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*(?:params|arguments):\s*([^\n]+)\n\s*(.+?)\n\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
             foreach ($matches as $m) {
                 $params = [];
-                $paramStr = trim($m[2]);
+                $paramStr = trim($m[3]);
                 preg_match_all('/([a-zA-Z_][a-zA-Z0-9_]*)=("[^"]*"|\'[^\']*\'|[^,\n]+)/', $paramStr, $kvMatches);
                 foreach ($kvMatches[1] as $i => $key) {
                     $val = trim($kvMatches[2][$i], "\"' ");
@@ -1618,18 +2005,6 @@ if (preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*(?:params|arguments):\s*\n(.+
                 $toolName = trim($m[1]);
                 if (!empty($params) || !empty($toolName)) {
                     $calls[] = ['name' => $toolName, 'params' => $params];
-                }
-            }
-            if (!empty($calls)) return $calls;
-        }
-
-        if (preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*arguments:\s*\{[^}]*\}[\s\n]*/', $content, $matches, PREG_SET_ORDER)) {
-            foreach ($matches as $m) {
-                if (preg_match('/arguments:\s*(\{[^}]*\})/', $m[0], $j)) {
-                    $json = json_decode($j[1], true);
-                    if ($json) {
-                        $calls[] = ['name' => trim($m[1]), 'params' => $json];
-                    }
                 }
             }
             if (!empty($calls)) return $calls;
@@ -1695,7 +2070,141 @@ if (preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*(?:params|arguments):\s*\n(.+
             }
         }
 
-return $calls;
+if (empty($calls)) {
+            preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*([^\n<]+)\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $toolName = trim($m[1]);
+                $rawParams = trim($m[2]);
+                if (!empty($toolName) && !empty($rawParams)) {
+                    $tool = Tools::find($toolName);
+                    $paramName = $tool ? ($tool->params[0] ?? 'command') : 'command';
+                    $calls[] = ['name' => $toolName, 'params' => [$paramName => $rawParams]];
+                }
+            }
+        }
+
+        return $calls;
+    }
+
+    public function parseGptOssToolCalls(string $content): array {
+        $calls = [];
+
+        preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*\n?\s*(\{[\s\S]*?\})\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
+        foreach ($matches as $m) {
+            $toolName = trim($m[1]);
+            $rawJson = trim($m[2]);
+            $rawJson = preg_replace('/\s+/', ' ', $rawJson);
+            $jsonParams = json_decode($rawJson, true);
+            if ($jsonParams && isset($jsonParams['task'])) {
+                $calls[] = ['name' => $toolName, 'params' => $jsonParams];
+            }
+        }
+
+        if (empty($calls)) {
+            preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*\n\s*(\w+):\s*"([^"]*)"/s', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $calls[] = ['name' => $m[1], 'params' => [$m[2] => $m[3]]];
+            }
+        }
+
+        if (empty($calls)) {
+            preg_match_all('/<tool_call>\s*<name>(\w+)<\/name>\s*<params>\s*<(\w+)>([^<]*)<\/\2>\s*<\/params>\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $calls[] = ['name' => $m[1], 'params' => [$m[2] => $m[3]]];
+            }
+        }
+
+if (empty($calls)) {
+            preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*\{([^}]+)\}\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $toolName = trim($m[1]);
+                $rawParams = trim($m[2]);
+                if (preg_match_all('/(\w+)\s*:\s*"([^"]*)"/', $rawParams, $kvMatches, PREG_SET_ORDER)) {
+                    $params = [];
+                    foreach ($kvMatches[1] as $i => $key) {
+                        $params[$key] = $kvMatches[2][$i];
+                    }
+                    if (!empty($params)) {
+                        $calls[] = ['name' => $toolName, 'params' => $params];
+                    }
+                }
+            }
+        }
+
+        if (empty($calls)) {
+            preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*(\w+):\s*(\S+)\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $calls[] = ['name' => $m[1], 'params' => [$m[2] => $m[3]]];
+            }
+        }
+
+        if (empty($calls)) {
+            preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*\{([^}]+)\}\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $toolName = trim($m[1]);
+                $rawParams = trim($m[2]);
+                if (preg_match_all('/(\w+)\s*:\s*([^\s,}]+)/', $rawParams, $kvMatches, PREG_SET_ORDER)) {
+                    $params = [];
+                    foreach ($kvMatches[1] as $i => $key) {
+                        $params[$key] = trim($kvMatches[2][$i], "\"'\"");
+                    }
+                    if (!empty($params)) {
+                        $calls[] = ['name' => $toolName, 'params' => $params];
+                    }
+                }
+            }
+        }
+
+        if (empty($calls)) {
+            preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*\{([^}]+)\}\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $toolName = trim($m[1]);
+                $rawParams = trim($m[2]);
+                if (preg_match('/(\w+)\s*:\s*"([^"]*)"/', $rawParams, $kvMatch)) {
+                    $calls[] = ['name' => $toolName, 'params' => [$kvMatch[1] => $kvMatch[2]]];
+                }
+            }
+        }
+
+        if (empty($calls)) {
+            preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*([^\n<]+)\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $toolName = trim($m[1]);
+                $rawParams = trim($m[2]);
+                if (!empty($toolName) && !empty($rawParams)) {
+                    $tool = Tools::find($toolName);
+                    $paramName = $tool ? ($tool->params[0] ?? 'command') : 'command';
+                    $calls[] = ['name' => $toolName, 'params' => [$paramName => $rawParams]];
+                }
+            }
+        }
+
+        if (empty($calls)) {
+            preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*(\w+)\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $toolName = trim($m[1]);
+                $tool = Tools::find($toolName);
+                if ($tool) {
+                    $paramName = $tool->params[0] ?? 'command';
+                    $calls[] = ['name' => $toolName, 'params' => [$paramName => trim($m[2])]];
+                }
+            }
+        }
+
+        if (empty($calls)) {
+            preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*(.+?)\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $m) {
+                $toolName = trim($m[1]);
+                $rawParams = trim($m[2]);
+                $tool = Tools::find($toolName);
+                if ($tool && !empty($rawParams)) {
+                    $paramName = $tool->params[0] ?? 'command';
+                    $calls[] = ['name' => $toolName, 'params' => [$paramName => $rawParams]];
+                }
+            }
+        }
+
+        return $calls;
     }
 
     private function parseParams(string $argsStr): array {
@@ -1908,6 +2417,134 @@ class TUI {
     }
 }
 
+class TerminalManager
+{
+    public string $baseDir;
+
+    public function __construct()
+    {
+        $home = getenv('HOME') ?: (getenv('USERPROFILE') ?: '/tmp');
+        $this->baseDir = $home . '/.ollamadev/terminals';
+        if (!is_dir($this->baseDir)) {
+            mkdir($this->baseDir, 0755, true);
+        }
+    }
+
+    public function list(): array
+    {
+        $terminals = [];
+        if (is_dir($this->baseDir)) {
+            foreach (scandir($this->baseDir) as $name) {
+                if ($name === '.' || $name === '..') continue;
+                $dir = $this->baseDir . '/' . $name;
+                if (is_dir($dir)) {
+                    $terminals[] = $this->loadTerminal($name);
+                }
+            }
+        }
+        return $terminals;
+    }
+
+    public function create(string $name, string $model, ?string $cwd = null): array
+    {
+        if ($this->exists($name)) {
+            return ['error' => "Terminal '$name' already exists"];
+        }
+        $dir = $this->baseDir . '/' . $name;
+        mkdir($dir, 0755, true);
+        mkdir($dir . '/history', 0755, true);
+        $terminal = [
+            'name' => $name,
+            'model' => $model,
+            'created' => date('Y-m-d H:i:s'),
+            'last_used' => date('Y-m-d H:i:s'),
+            'cwd' => $cwd ?? getcwd(),
+            'pid' => null,
+            'status' => 'stopped'
+        ];
+        $this->saveTerminal($name, $terminal);
+        return $terminal;
+    }
+
+    public function start(string $name): array
+    {
+        $terminal = $this->loadTerminal($name);
+        if (!$terminal) return ['error' => "Terminal '$name' not found"];
+        $terminal['status'] = 'running';
+        $terminal['last_used'] = date('Y-m-d H:i:s');
+        $this->saveTerminal($name, $terminal);
+        return ['name' => $name, 'status' => 'running'];
+    }
+
+    public function stop(string $name): bool
+    {
+        $terminal = $this->loadTerminal($name);
+        if (!$terminal) return false;
+        if ($terminal['pid']) { shell_exec("kill " . (int)$terminal['pid'] . " 2>/dev/null"); }
+        $terminal['status'] = 'stopped';
+        $this->saveTerminal($name, $terminal);
+        return true;
+    }
+
+    public function pause(string $name): array
+    {
+        $terminal = $this->loadTerminal($name);
+        if (!$terminal) return ['error' => "Terminal '$name' not found"];
+        if ($terminal['status'] !== 'running') return ['error' => "Terminal '$name' is not running"];
+        $terminal['status'] = 'paused';
+        $this->saveTerminal($name, $terminal);
+        return ['success' => true, 'name' => $name, 'status' => 'paused'];
+    }
+
+    public function resume(string $name): array
+    {
+        $terminal = $this->loadTerminal($name);
+        if (!$terminal) return ['error' => "Terminal '$name' not found"];
+        if ($terminal['status'] !== 'paused') return ['error' => "Terminal '$name' is not paused"];
+        $terminal['status'] = 'running';
+        $this->saveTerminal($name, $terminal);
+        return ['success' => true, 'name' => $name, 'status' => 'running'];
+    }
+
+    public function delete(string $name): bool
+    {
+        $dir = $this->baseDir . '/' . $name;
+        if (!is_dir($dir)) return false;
+        $this->stop($name);
+        shell_exec("rm -rf " . escapeshellarg($dir));
+        return true;
+    }
+
+    public function exists(string $name): bool { return is_dir($this->baseDir . '/' . $name); }
+
+    public function loadTerminal(string $name): ?array
+    {
+        $file = $this->baseDir . '/' . $name . '/session.json';
+        return file_exists($file) ? json_decode(file_get_contents($file), true) : null;
+    }
+
+    public function saveTerminal(string $name, array $terminal): void
+    {
+        file_put_contents($this->baseDir . '/' . $name . '/session.json', json_encode($terminal, JSON_PRETTY_PRINT));
+    }
+
+    public function getLog(string $name, int $lines = 100): string
+    {
+        $logFile = $this->baseDir . '/' . $name . '/session.log';
+        return file_exists($logFile) ? shell_exec("tail -n " . (int)$lines . " " . escapeshellarg($logFile)) : '';
+    }
+
+    public function status(): array
+    {
+        $terminals = $this->list();
+        $running = $stopped = 0;
+        foreach ($terminals as $t) {
+            if ($t['status'] === 'running') $running++; else $stopped++;
+        }
+        return ['total' => count($terminals), 'running' => $running, 'stopped' => $stopped, 'terminals' => $terminals];
+    }
+}
+
 class Session {
     private array $config;
     private string $id;
@@ -1983,23 +2620,127 @@ class Session {
         return $bytes . ' B';
     }
 
-    private function renderBanner(): void {
-        $models = $this->agent->listModelsDetailed();
-        $modelCount = count($models);
-        echo "\n╔══════════════════════════════════════════════════════════════╗\n";
-        echo "║                     OllamaDev                                ║\n";
-        echo "║  Local AI coding agent powered by Ollama                     ║\n";
-        echo "╠══════════════════════════════════════════════════════════════╣\n";
-        echo "║  Current Model: {$this->model}                              ║\n";
-        echo "║  {$modelCount} model(s) available                                ║\n";
-        echo "╠══════════════════════════════════════════════════════════════╣\n";
-        echo "║  Tools: view, write, edit, glob, grep, ls, bash, fetch, mcp, permission ║\n";
-        echo "║  Auto-compact: enabled (at 20+ messages)                             ║\n";
-        echo "║  Commands: exit, new, mode, verbose, model, clear, help      ║\n";
-        echo "╚══════════════════════════════════════════════════════════════╝\n\n";
+    private function handleSlashCommand(string $input): string|false {
+        if (!str_starts_with($input, '/')) return false;
+
+        $parts = preg_split('/\s+/', trim($input), 2);
+        $cmd = strtolower($parts[0]);
+        $cmd = substr($cmd, 1);
+        $args = $parts[1] ?? '';
+
+        return match($cmd) {
+            'help' => $this->renderBanner(),
+            'models' => $this->listModels($args),
+            'model' => $this->switchModel($args),
+            'new' => $this->newSession(),
+            'exit', 'quit' => $this->exitCli(),
+            'clear' => $this->clearScreen(),
+            'verbose' => $this->toggleVerbose($args),
+            'compact' => $this->compactSession(),
+            'save' => $this->saveSession(),
+            'session' => $this->showSession(),
+            'git' => $this->runGit($args),
+            default => false
+        };
     }
 
-    private function renderPrompt(): void { echo "[{$this->model}] > "; }
+    private function renderBanner(): string {
+        $models = $this->agent->listModelsDetailed();
+        $modelCount = count($models);
+        $out = "\n╔══════════════════════════════════════════════════════════════╗\n";
+        $out .= "║                     OllamaDev                                ║\n";
+        $out .= "║  Local AI coding agent powered by Ollama                     ║\n";
+        $out .= "╠══════════════════════════════════════════════════════════════╣\n";
+        $out .= "║  Current Model: {$this->model}                              ║\n";
+        $out .= "║  {$modelCount} model(s) available                                ║\n";
+        $out .= "╠══════════════════════════════════════════════════════════════╣\n";
+        $out .= "║  Commands: /help /models /model /new /clear /exit            ║\n";
+        $out .= "║            /verbose /compact /save /session /git             ║\n";
+        $out .= "╚══════════════════════════════════════════════════════════════╝\n\n";
+        return $out;
+    }
+
+    private function listModels(string $args = ''): string {
+        if (!empty($args)) return $this->switchModel($args);
+        $models = $this->agent->listModelsDetailed();
+        $out = "\nAvailable Models:\n" . str_repeat('-', 45) . "\n";
+        foreach ($models as $m) {
+            $name = $m['name'] ?? 'unknown';
+            $size = isset($m['size']) ? $this->formatBytes($m['size']) : 'unknown';
+            $marker = $name === $this->model ? ' *' : '';
+            $out .= sprintf("  %-20s %s%s\n", $name, $size, $marker);
+        }
+        $out .= str_repeat('-', 45) . "\n";
+        $out .= "Current: {$this->model}\n";
+        return $out;
+    }
+
+    private function switchModel(string $name): string {
+        if (empty($name)) return "Usage: /model <name>\n";
+        $this->agent->setModel($name);
+        $this->model = $name;
+        $GLOBALS['currentSessionModel'] = $name;
+        return "Model: $name\n";
+    }
+
+    private function newSession(): string {
+        $this->save();
+        (new Session($this->config))->start();
+        return '';
+    }
+
+    private function exitCli(): string {
+        echo "Goodbye!\n";
+        exit(0);
+    }
+
+    private function clearScreen(): string {
+        return "\033[2J\033[H";
+    }
+
+    private function toggleVerbose(string $arg): string {
+        $GLOBALS['verbose'] = trim($arg) === 'on';
+        return "Verbose: " . ($GLOBALS['verbose'] ? 'on' : 'off') . "\n";
+    }
+
+    private function compactSession(): string {
+        $this->compactMessages();
+        return '';
+    }
+
+    private function saveSession(): string {
+        $this->save();
+        return "Session saved.\n";
+    }
+
+    private function showSession(): string {
+        return "Session: {$this->id} | Model: {$this->model} | Messages: " . count($this->messages) . "\n";
+    }
+
+    private function runGit(string $args): string {
+        if (empty($args)) return "Usage: /git <command>\n";
+        $gitAliases = [
+            'status' => 'git status',
+            'diff' => 'git diff',
+            'log' => 'git log --oneline -n 10',
+            'branch' => 'git branch -a',
+            'checkout' => 'git checkout',
+            'commit' => 'git commit',
+            'add' => 'git add',
+            'push' => 'git push',
+            'pull' => 'git pull',
+            'stash' => 'git stash',
+            'fetch' => 'git fetch',
+        ];
+        foreach ($gitAliases as $alias => $cmd) {
+            if (str_starts_with($args, $alias)) {
+                $gitArgs = substr($args, strlen($alias));
+                return shell_exec(trim($cmd . ' ' . $gitArgs));
+            }
+        }
+return "Available: " . implode(', ', array_keys($gitAliases)) . "\n";
+    }
+
     private function countTokens(): int { $total = 0; foreach ($this->messages as $msg) $total += strlen($msg['content'] ?? '') / 4; return (int)$total; }
     private function renderStatus(): void { echo "\n[Model: {$this->model} | Tokens: ~" . $this->countTokens() . " | Messages: " . count($this->messages) . "]\n"; }
     private function showContext(): void {
@@ -2008,13 +2749,15 @@ class Session {
         echo "\n📁 $pwd";
         if (!empty($edited)) {
             echo "\n✏️  Edited: " . implode(', ', $edited);
-            $GLOBALS['editedFiles'] = [];
+$GLOBALS['editedFiles'] = [];
+$GLOBALS['currentSessionModel'] = null;
         }
     }
 
     private function handleCommand(string $input): bool {
         $parts = preg_split('/\s+/', trim($input), 2);
         $cmd = strtolower($parts[0]);
+        if (str_starts_with($cmd, '/')) $cmd = substr($cmd, 1);
         $args = $parts[1] ?? '';
 
         switch ($cmd) {
@@ -2022,8 +2765,8 @@ class Session {
             case 'new': $this->save(); (new Session($this->config))->start(); return true;
             case 'mode': echo "Mode set to: " . ($args ?: 'auto') . "\n"; return false;
             case 'verbose': $GLOBALS['verbose'] = trim($args) === 'on'; echo "Verbose: " . ($GLOBALS['verbose'] ? 'on' : 'off') . "\n"; return false;
-            case 'model':
-                if (!empty($args)) { $this->agent->setModel($args); $this->model = $args; echo "Model: $args\n"; }
+            case 'models':
+                if (!empty($args)) { $this->agent->setModel($args); $this->model = $args; $GLOBALS['currentSessionModel'] = $args; echo "Model: $args\n"; }
                 else {
                     $models = $this->agent->listModelsDetailed();
                     echo "\nAvailable Models:\n";
@@ -2042,7 +2785,6 @@ class Session {
             case 'help': $this->renderBanner(); return false;
             case '': return false;
             default:
-                if (str_starts_with($cmd, '/')) { echo "Unknown command: $cmd\n"; return false; }
                 return false;
         }
     }
@@ -2067,6 +2809,54 @@ class Session {
         while (true) {
             $this->renderPrompt();
             if (function_exists('readline')) {
+                readline_completion_function(function($string, $position) {
+                    $baseCommands = ['help', 'exit', 'quit', 'clear', 'model', 'session', 'tools', 'git', 'status', 'compact', 'context', 'new', 'cd', 'ls'];
+                    $line = readline_info()['line_buffer'] ?? '';
+                    $parts = preg_split('/\s+/', $line, -1, PREG_SPLIT_NO_EMPTY);
+                    $matches = [];
+
+                    if (count($parts) === 1) {
+                        foreach ($baseCommands as $cmd) {
+                            if (strpos($cmd, $string) === 0) $matches[] = $cmd;
+                        }
+                        return $matches;
+                    }
+
+                    $first = $parts[0];
+                    if ($first === 'cd' && count($parts) === 2) {
+                        $partial = $parts[1];
+                        $parent = dirname($partial);
+                        if (is_dir($parent)) {
+                            $prefix = $parent === '/' ? '' : $parent . '/';
+                            foreach (scandir($parent) as $f) {
+                                if ($f !== '.' && strpos($f, basename($partial)) === 0) {
+                                    $full = $prefix . $f;
+                                    if (is_dir($full)) $matches[] = $full . '/';
+                                    else $matches[] = $full;
+                                }
+                            }
+                        }
+                    } elseif ($first === 'git' && count($parts) === 2) {
+                        $gitCmds = ['status', 'diff', 'log', 'branch', 'commit', 'push', 'pull', 'stash', 'checkout', 'add', 'fetch', 'merge', 'rebase'];
+                        foreach ($gitCmds as $gc) { if (strpos($gc, $string) === 0) $matches[] = $gc; }
+                    } elseif (in_array($first, ['view', 'cat', 'edit', 'write', 'grep', 'find', 'ls', 'diff', 'rm', 'cp', 'mv']) && count($parts) === 2) {
+                        $partial = $parts[1];
+                        if (strpos($partial, '/') !== false) {
+                            $parent = dirname($partial);
+                            if (is_dir($parent)) {
+                                $prefix = $parent === '/' ? '' : $parent . '/';
+                                foreach (scandir($parent) as $f) {
+                                    if ($f !== '.' && strpos($f, basename($partial)) === 0) {
+                                        $full = $prefix . $f;
+                                        if (is_dir($full)) $matches[] = $full . '/';
+                                        else $matches[] = $full;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    return array_slice($matches, 0, 50);
+                });
                 $input = readline('');
                 if ($input === false) break;
                 $input = trim($input);
@@ -2150,6 +2940,13 @@ class Session {
 
     public function runSingle(string $prompt): string {
         Permission::autoAllow();
+
+        $cmdResult = $this->handleSlashCommand($prompt);
+        if ($cmdResult !== false) {
+            echo $cmdResult;
+            return '';
+        }
+
         $this->addMessage('user', $prompt);
         $thinkingMsgs = ['Thinking...', 'Working on it...', 'Analyzing...', 'Processing...'];
         echo $thinkingMsgs[array_rand($thinkingMsgs)] . "\n";
@@ -2167,6 +2964,7 @@ class Session {
             echo "(no tools called)\n";
         }
         $this->showContext();
+        $response = preg_replace('/<tool_call>[\s\S]*?<\/tool_call>/', '', $response);
         $this->addMessage('assistant', $response);
         $this->save();
         return $response;
@@ -2381,11 +3179,86 @@ if (empty($flags['model']) && getenv('MODEL')) $flags['model'] = getenv('MODEL')
 // Completion Command
 if ($argc >= 2 && $argv[1] === 'completion') {
     $shell = $argv[2] ?? 'bash';
-    echo "# ollamadev shell completion ($shell)\n";
+    echo "# OllamaDev shell completion ($shell) - Generated by ollamadev\n";
+    echo "# Install: ollamadev completion bash >> ~/.bashrc\n\n";
     if ($shell === 'bash') {
-        echo "complete -C 'ollamadev' ollamadev\n";
+        echo <<<'BASH'
+_ollamadev() {
+    local cur prev cword
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+    case "${prev}" in
+        help)
+            COMPREPLY=($(compgen -W 'topics usage options commands tools git terminal session examples tips' -- "${cur}"))
+            return 0
+            ;;
+        terminal)
+            COMPREPLY=($(compgen -W 'create spawn list attach start stop pause resume broadcast delete log help' -- "${cur}"))
+            return 0
+            ;;
+        git)
+            COMPREPLY=($(compgen -W 'status diff log branch commit push pull stash checkout add fetch merge rebase' -- "${cur}"))
+            return 0
+            ;;
+        lsp)
+            COMPREPLY=($(compgen -W '--port --hostname --help' -- "${cur}"))
+            return 0
+            ;;
+        -m|--model)
+            COMPREPLY=($(compgen -W 'llama3.2:latest deepseek-r1:32b gemma4:26b qwen3.6:27b' -- "${cur}"))
+            return 0
+            ;;
+        *)
+            COMPREPLY=($(compgen -W 'chat new list load terminal git lsp models help --help --version --model --prompt --continue --dry-run -h -v' -- "${cur}"))
+            ;;
+    esac
+    return 0
+}
+complete -F _ollamadev ollamadev
+BASH;
     } elseif ($shell === 'zsh') {
-        echo "compdef _ollamadev ollamadev\n";
+        echo <<<'ZSH'
+#compdef ollamadev
+
+_ollamadev() {
+    local -a commands
+    commands=(
+        'chat:Start chat session'
+        'new:Create new session'
+        'list:List sessions'
+        'load:Load session'
+        'terminal:Terminal multiplexer'
+        'git:Git commands'
+        'lsp:LSP server for IDEs'
+        'models:List available models'
+        'help:Show help'
+    )
+    _describe 'command' commands
+}
+
+_ollamadev "$@"
+ZSH;
+    } elseif ($shell === 'fish') {
+        echo <<<'FISH'
+# OllamaDev Fish Shell Completion
+
+complete -c ollamadev -n '__fish_use_subcommand' -a 'chat new list load terminal git lsp models help' -d 'Command'
+complete -c ollamadev -n '__fish_seen_subcommand_from terminal' -a 'create spawn list attach start stop pause resume broadcast delete log' -d 'Terminal command'
+complete -c ollamadev -n '__fish_seen_subcommand_from git' -a 'status diff log branch commit push pull stash checkout add' -d 'Git command'
+complete -c ollamadev -s h -l help -d 'Show help'
+complete -c ollamadev -s v -l version -d 'Show version'
+complete -c ollamadev -s m -l model -d 'Use specific model' -r
+FISH;
+    } else {
+        echo "Usage: ollamadev completion [bash|zsh|fish]\n";
+        echo "Generate shell completion script\n";
+        echo "\nExamples:\n";
+        echo "  ollamadev completion bash >> ~/.bashrc\n";
+        echo "  ollamadev completion zsh >> ~/.zshrc\n";
+        echo "  ollamadev completion fish > ~/.config/fish/completions/ollamadev.fish\n";
+        exit(1);
     }
     exit(0);
 }
@@ -2515,43 +3388,209 @@ $arg2 = $positional[2] ?? '';
 
 // Built-in single-word commands
 if ($cmd === 'help' || $flags['help']) {
-    echo "OllamaDev CLI v" . OLLAMADEV_VERSION . " - Local AI coding agent using Ollama\n\n";
-    echo "Usage: ollamadev [command] [options]\n\n";
-    echo "Commands:\n";
-    echo "  ollamadev            Start interactive chat\n";
-    echo "  ollamadev chat       Start chat session\n";
-    echo "  ollamadev new        Create new session\n";
-    echo "  ollamadev list       List sessions\n";
-    echo "  ollamadev load <id>  Load session\n";
-    echo "  ollamadev git        Git commands (status, diff, commit, etc.)\n";
-    echo "  ollamadev github pr  Fetch and checkout GitHub PR\n";
-    echo "  ollamadev mcp        Manage MCP servers\n";
-    echo "  ollamadev serve      Start web interface\n";
-    echo "  ollamadev plugin     Manage plugins\n";
-    echo "  ollamadev export     Export session to JSON\n";
-    echo "  ollamadev import     Import session from JSON\n";
-    echo "  ollamadev stats      Show usage statistics\n";
-    echo "  ollamadev models     List available models\n";
-    echo "  ollamadev providers  Show provider config\n";
-    echo "  ollamadev compact    Compact session history\n";
-    echo "  ollamadev upgrade    Check for updates\n";
-    echo "  ollamadev completion Generate shell completion\n";
-    echo "  ollamadev debug      Debug info\n";
-    echo "  ollamadev db         Database tools\n";
-    echo "  ollamadev uninstall  Uninstall OllamaDev\n";
-    echo "  ollamadev help       Show this help\n";
-    echo "\nOptions:\n";
-    echo "  -m, --model <name>      Use specific model\n";
-    echo "  -c, --continue          Continue last session\n";
-    echo "  -s, --session <id>      Use specific session\n";
-    echo "  --fork                  Fork session when continuing\n";
-    echo "  --prompt <text>         Prompt to use\n";
-    echo "  --agent <name>          Agent to use\n";
-    echo "  --port <num>            Port for server\n";
-    echo "  --hostname <host>       Hostname for server\n";
-    echo "  --mdns                  Enable mDNS discovery\n";
-    echo "  -h, --help              Show help\n";
-    echo "  -v, --version           Show version\n";
+    $topic = $arg1 ?: 'topics';
+    $topics = [
+        'topics' => [
+            'description' => 'Available help topics',
+            'commands' => ['usage', 'options', 'commands', 'tools', 'git', 'terminal', 'session', 'examples', 'tips']
+        ],
+        'usage' => [
+            'description' => 'Basic usage',
+            'text' => <<<'USAGE'
+Usage: ollamadev [command] [options]
+
+Quick Start:
+  ollamadev                    # Interactive chat
+  ollamadev chat "your prompt" # Single prompt
+  ollamadev terminal attach dev # Attach to terminal
+
+Flags:
+  --model <name>    Use specific model
+  --prompt <text>   Run single prompt
+  --continue        Continue last session
+USAGE
+        ],
+        'options' => [
+            'description' => 'Global options',
+            'text' => <<<'OPTIONS'
+Options:
+  -m, --model <name>      Use specific model
+  -c, --continue          Continue last session
+  -s, --session <id>      Use specific session
+  --fork                   Fork session when continuing
+  --prompt <text>          Prompt to use
+  --agent <name>           Agent to use
+  --port <num>             Port for server
+  --hostname <host>        Hostname for server
+  --dry-run                Show what would be done
+  -h, --help               Show help
+  -v, --version           Show version
+OPTIONS
+        ],
+        'commands' => [
+            'description' => 'All commands',
+            'text' => <<<'COMMANDS'
+Commands:
+  ollamadev            Start interactive chat
+  ollamadev chat       Start chat session
+  ollamadev new        Create new session
+  ollamadev list       List sessions
+  ollamadev load <id>  Load session
+  ollamadev git        Git commands (status, diff, commit, etc.)
+  ollamadev terminal   Terminal multiplexer
+  ollamadev lsp        LSP server for IDEs
+  ollamadev help [topic] Show help
+
+See 'ollamadev help <topic>' for detailed help.
+COMMANDS
+        ],
+        'tools' => [
+            'description' => 'Available AI tools (66 total)',
+            'text' => <<<'TOOLS'
+Tools - Use in chat or directly:
+  File: view, cat, head, tail, read, write, edit, patch, touch, mkdir, rm, cp, mv
+  Search: grep, find, tree, glob, wc, stat, diff, sort, uniq
+  Git: git_status, git_diff, git_log, git_branch, git_checkout, git_commit
+  Code: goto, goto_definition, find_refs, symbols, hover, diagnostics, format, lsp
+  System: bash, execute_command, editor, watch, fetch, bg, wait_bg, agent
+
+Examples:
+  view file_path=src/main.php
+  write file_path=src/test.php content="<php code>"
+  grep pattern="function foo" path=src/
+  bash command="ls -la"
+
+Use without parameters to see tool-specific help.
+TOOLS
+        ],
+        'git' => [
+            'description' => 'Git commands',
+            'text' => <<<'GIT'
+Git Commands:
+  ollamadev git status      Show working tree status
+  ollamadev git diff         Show changes
+  ollamadev git log          Show commit history
+  ollamadev git branch       List branches
+  ollamadev git commit <msg> Commit changes
+  ollamadev git push         Push to remote
+  ollamadev git pull         Pull from remote
+  ollamadev git stash        Stash changes
+
+Examples:
+  ollamadev git status
+  ollamadev git commit "Fix bug"
+GIT
+        ],
+        'terminal' => [
+            'description' => 'Terminal multiplexer',
+            'text' => <<<'TERM'
+Terminal Commands:
+  ollamadev terminal create <name> [--model <model>] [--cwd <path>]
+  ollamadev terminal spawn <n> [--model <model>] [--prefix <name>]
+  ollamadev terminal list
+  ollamadev terminal attach <name>   (Ctrl+C to detach, stays running)
+  ollamadev terminal start <name>
+  ollamadev terminal stop <name>
+  ollamadev terminal pause <name>
+  ollamadev terminal resume <name>
+  ollamadev terminal broadcast <msg>
+  ollamadev terminal delete <name>
+  ollamadev terminal log <name> [lines]
+
+Examples:
+  ollamadev terminal create dev --model llama3.2:latest
+  ollamadev terminal spawn 4 --model gemma4:26b --prefix worker
+  ollamadev terminal attach dev
+TERM
+        ],
+        'session' => [
+            'description' => 'Session management',
+            'text' => <<<'SESSION'
+Session Commands:
+  ollamadev new            Create new session
+  ollamadev list           List all sessions
+  ollamadev load <id>       Load session by ID
+  ollamadev compact         Compact session history
+
+Sessions are stored in ~/.ollamadev/sessions/
+SESSION
+        ],
+        'examples' => [
+            'description' => 'Usage examples',
+            'text' => <<<'EXAMPLES'
+Examples:
+
+  Interactive chat:
+    ollamadev
+
+  Single prompt:
+    ollamadev "explain this function"
+    echo "fix the bug" | ollamadev
+
+  Use specific model:
+    ollamadev --model deepseek-r1:32b "hello"
+
+  Terminal multiplexer:
+    ollamadev terminal create dev --model llama3.2:latest
+    ollamadev terminal attach dev
+
+  LSP for IDE:
+    ollamadev lsp --port 4389
+
+  Git operations:
+    ollamadev git status
+    ollamadev git commit "fix: resolve issue"
+EXAMPLES
+        ],
+        'tips' => [
+            'description' => 'Tips and tricks',
+            'text' => <<<'TIPS'
+Tips:
+
+  Tab Completion - Press Tab for completions in interactive mode
+  Ctrl+C - Detach from terminal (keeps it running)
+  Ctrl+D - Exit chat (with confirmation)
+
+  Model Switching:
+    model                    # List models
+    model llama3.2:latest   # Switch model
+
+  Tools can be called directly:
+    view file_path=README.md
+    grep pattern="TODO" path=src/
+
+  Config file: ~/.ollamadev/config.json
+
+  Dry run for destructive commands:
+    rm --dry-run file.txt   # Shows what would happen
+TIPS
+        ]
+    ];
+    if (isset($topics[$topic])) {
+        $t = $topics[$topic];
+        echo "OllamaDev Help: $topic\n";
+        echo str_repeat('=', 50) . "\n\n";
+        if (isset($t['text'])) {
+            echo $t['text'] . "\n";
+        } else {
+            echo $t['description'] . "\n\n";
+            if (isset($t['commands'])) {
+                foreach ($t['commands'] as $c) {
+                    if (isset($topics[$c])) {
+                        echo "  $c - " . $topics[$c]['description'] . "\n";
+                    }
+                }
+                echo "\nRun 'ollamadev help <topic>' for details.\n";
+            }
+        }
+    } else {
+        echo "OllamaDev Help: $topic\n";
+        echo str_repeat('=', 50) . "\n\n";
+        echo "Unknown help topic: $topic\n";
+        echo "Available topics: " . implode(', ', array_keys($topics)) . "\n";
+        echo "Run 'ollamadev help' for general help.\n";
+        exit(1);
+    }
     exit(0);
 }
 
@@ -2595,6 +3634,55 @@ if ($cmd === 'chat') {
     echo "New session created.\n";
 } elseif ($cmd === 'list') {
     foreach (Session::listAll($config) as $s) echo "{$s['id']} | {$s['title']} | {$s['model']} | {$s['updated_at']}\n";
+} elseif ($cmd === 'update') {
+    $install = isset($flags['install']);
+    $current = '3.9.5';
+    $ctx = stream_context_create(['http' => ['timeout' => 10, 'ignore_errors' => true, 'header' => "User-Agent: OllamaDev/3.9.5\r\n"]]);
+    $json = @file_get_contents('https://api.github.com/repos/kennethyork/OllamaDev/releases/latest', false, $ctx);
+    if (!$json || strpos($json, 'Request forbidden') !== false) { echo "Error: Could not check for updates (GitHub rate limit). Try again later.\n"; exit(1); }
+    $data = json_decode($json, true);
+    $tag = ltrim($data['tag_name'] ?? '', 'v');
+    if (!$tag) { echo "Error: Could not parse release info.\n"; exit(1); }
+    if (version_compare($tag, $current, '<=')) {
+        echo "You're up to date (v$current)\n"; exit(0);
+    }
+    echo "Update available: v$tag (current: v$current)\n\n";
+    $assets = $data['assets'] ?? [];
+    $binary = null;
+    foreach ($assets as $a) { if ($a['name'] === 'ollamadev') $binary = $a; }
+    if (!$binary && count($assets) > 0) $binary = $assets[0];
+    if ($binary) {
+        echo "Download: {$binary['browser_download_url']}\n";
+        if ($install) {
+            $tmp = sys_get_temp_dir() . '/ollamadev_new';
+            $url = $binary['browser_download_url'];
+            echo "Downloading...\n";
+            $downloaded = @file_put_contents($tmp, fopen($url, 'rb', false, $ctx));
+            if ($downloaded) {
+                chmod($tmp, 0755);
+                $binPath = Config::binaryPath();
+                rename($tmp, $binPath);
+                echo "Updated to v$tag. Restart to use new version.\n";
+            } else {
+                echo "Download failed. Try manually:\n  curl -fsSL {$binary['browser_download_url']} -o /usr/local/bin/ollamadev\n";
+            }
+        } else {
+            echo "\nTo install:\n  curl -fsSL {$binary['browser_download_url']} -o /usr/local/bin/ollamadev\n\nOr run: ollamadev update --install\n";
+        }
+    }
+} elseif ($cmd === 'git') {
+    $sub = $arg1 ?: 'status';
+    $path = $flags['cwd'] ?? getcwd();
+    if ($sub === 'status') { echo shell_exec("cd " . escapeshellarg($path) . " && git status 2>&1"); }
+    elseif ($sub === 'diff') { echo shell_exec("cd " . escapeshellarg($path) . " && git diff 2>&1"); }
+    elseif ($sub === 'log') { echo shell_exec("cd " . escapeshellarg($path) . " && git log --oneline -20 2>&1"); }
+    elseif ($sub === 'branch') { echo shell_exec("cd " . escapeshellarg($path) . " && git branch -a 2>&1"); }
+    elseif ($sub === 'commit' && $arg2) { echo shell_exec("cd " . escapeshellarg($path) . " && git add -A && git commit -m " . escapeshellarg($arg2) . " 2>&1"); }
+    elseif ($sub === 'push') { echo shell_exec("cd " . escapeshellarg($path) . " && git push 2>&1"); }
+    elseif ($sub === 'pull') { echo shell_exec("cd " . escapeshellarg($path) . " && git pull 2>&1"); }
+    elseif ($sub === 'stash') { echo shell_exec("cd " . escapeshellarg($path) . " && git stash 2>&1"); }
+    elseif ($sub === 'stash' && $arg2 === 'pop') { echo shell_exec("cd " . escapeshellarg($path) . " && git stash pop 2>&1"); }
+    else { echo "Git commands: status, diff, log, branch, commit <msg>, push, pull, stash\n"; }
 } elseif ($cmd === 'load' && $arg1) {
     $session = new Session($config, $arg1);
     if (!file_exists(Config::sessionsDir() . '/' . $arg1 . '.json')) { echo "Session not found: $arg1\n"; exit(1); }
@@ -2603,10 +3691,377 @@ if ($cmd === 'chat') {
     $session = new Session($config);
     $session->addMessage('user', $arg1);
     echo $session->runSingle($arg1) . "\n";
+} elseif ($cmd === 'terminal' || $cmd === 'term') {
+    $sub = $arg1 ?: 'help';
+    $tm = new TerminalManager();
+    if ($sub === 'help' || $sub === '--help') {
+        echo "OllamaDev Terminal Manager\n";
+        echo "Usage: ollamadev terminal <command> [options]\n\n";
+        echo "Commands:\n";
+        echo "  terminal list              List all terminals\n";
+        echo "  terminal create <name> [--model <model>] [--cwd <path>]\n";
+        echo "  terminal start <name>     Mark terminal as running\n";
+        echo "  terminal stop <name>      Mark terminal as stopped\n";
+        echo "  terminal delete <name>    Delete a terminal\n";
+        echo "  terminal attach <name>     Attach to terminal interactively\n";
+        echo "  terminal detach           Detach from terminal (background)\n";
+        echo "  terminal log <name> [n]    View last n lines of log\n";
+        echo "  terminal broadcast <msg>  Send message to all terminals\n";
+        echo "  terminal spawn <n> [--model <model>] [--cwd <path>] [--prefix <name>]  Spawn n terminals\n\n";
+        echo "Examples:\n";
+        echo "  ollamadev terminal create dev --model llama3.2:latest\n";
+        echo "  ollamadev terminal spawn 4 --model deepseek-r1:32b\n";
+        echo "  ollamadev terminal attach dev   (Ctrl+C = detach, stays running)\n";
+        echo "  ollamadev terminal broadcast \"update available\"\n";
+    } elseif ($sub === 'list' || $sub === 'ls') {
+        $status = $tm->status();
+        echo "Terminals: {$status['total']} | Running: {$status['running']} | Stopped: {$status['stopped']}\n\n";
+        foreach ($status['terminals'] as $t) {
+            $icon = $t['status'] === 'running' ? '🟢' : ($t['status'] === 'paused' ? '⏸️' : '⚫');
+            echo "$icon {$t['name']} | {$t['model']} | {$t['status']} | cwd: {$t['cwd']}\n";
+        }
+    } elseif ($sub === 'create' || $sub === 'new') {
+        $name = $arg2 ?: 'terminal-' . time();
+        $model = $flags['model'] ?? 'llama3.2:latest';
+        $cwd = $flags['cwd'] ?? getcwd();
+        $result = $tm->create($name, $model, $cwd);
+        if (isset($result['error'])) { echo "Error: {$result['error']}\n"; exit(1); }
+        echo "Created terminal '$name' with model {$model}\n";
+        echo "\nUse 'ollamadev terminal attach $name' to start chatting\n";
+    } elseif ($sub === 'spawn') {
+        $count = max(1, min(10, (int)($arg2 ?: 1)));
+        $model = $flags['model'] ?? 'llama3.2:latest';
+        $prefix = $flags['prefix'] ?? 'term';
+        $cwd = $flags['cwd'] ?? getcwd();
+        echo "Spawning $count terminals with model $model...\n";
+        for ($i = 1; $i <= $count; $i++) {
+            $name = $prefix . '-' . $i;
+            $tm->create($name, $model, $cwd);
+            echo "  Created $name\n";
+        }
+        echo "\nUse 'ollamadev terminal attach <name>' to interact\n";
+    } elseif ($sub === 'start') {
+        $name = $arg2;
+        if (!$name) { echo "Usage: terminal start <name>\n"; exit(1); }
+        $result = $tm->start($name);
+        if (isset($result['error'])) { echo "Error: {$result['error']}\n"; exit(1); }
+        echo "Started terminal '$name'\n";
+    } elseif ($sub === 'stop') {
+        $name = $arg2;
+        if (!$name) { echo "Usage: terminal stop <name>\n"; exit(1); }
+        $result = $tm->stop($name);
+        if (isset($result['error'])) { echo "Error: {$result['error']}\n"; exit(1); }
+        echo "Stopped terminal '$name' (state saved)\n";
+    } elseif ($sub === 'pause') {
+        $name = $arg2;
+        if (!$name) { echo "Usage: terminal pause <name>\n"; exit(1); }
+        $result = $tm->pause($name);
+        if (isset($result['error'])) { echo "Error: {$result['error']}\n"; exit(1); }
+        echo "Paused terminal '$name'\n";
+    } elseif ($sub === 'resume') {
+        $name = $arg2;
+        if (!$name) { echo "Usage: terminal resume <name>\n"; exit(1); }
+        $result = $tm->resume($name);
+        if (isset($result['error'])) { echo "Error: {$result['error']}\n"; exit(1); }
+        echo "Resumed terminal '$name'\n";
+    } elseif ($sub === 'broadcast') {
+        $msg = $arg2;
+        if (!$msg) { echo "Usage: terminal broadcast <message>\n"; exit(1); }
+        $status = $tm->status();
+        $count = 0;
+        foreach ($status['terminals'] as $t) {
+            if ($t['status'] === 'running') {
+                file_put_contents($tm->baseDir . "/{$t['name']}/broadcast.txt", $msg);
+                $count++;
+            }
+        }
+        echo "Broadcast to $count running terminals: $msg\n";
+    } elseif ($sub === 'delete' || $sub === 'rm') {
+        $name = $arg2;
+        if (!$name) { echo "Usage: terminal delete <name>\n"; exit(1); }
+        $tm->delete($name);
+        echo "Deleted terminal '$name'\n";
+    } elseif ($sub === 'attach') {
+        $name = $arg2;
+        if (!$name) { echo "Usage: terminal attach <name>\n"; exit(1); }
+        if (!$tm->exists($name)) { echo "Terminal '$name' not found\n"; exit(1); }
+        $terminal = $tm->loadTerminal($name);
+        echo "Attaching to terminal '$name'...\n";
+        echo "Model: {$terminal['model']}\n";
+        echo "Working directory: {$terminal['cwd']}\n";
+        echo "Log:\n" . str_repeat('-', 40) . "\n";
+        echo $tm->getLog($name, 20);
+        echo str_repeat('-', 40) . "\n";
+        echo "\nType your message and press Enter.\n";
+        echo "Press Ctrl+C to detach (terminal stays running in background).\n";
+        echo "Type 'exit' or 'quit' to stop the terminal completely.\n\n";
+        pcntl_signal(SIGINT, function() { echo "\nDetached from terminal (still running in background)\n"; exit(0); });
+        while (true) {
+            if (file_exists($tm->baseDir . "/$name/broadcast.txt")) {
+                $bc = trim(file_get_contents($tm->baseDir . "/$name/broadcast.txt"));
+                if ($bc) { echo "\n[BROADCAST]: $bc\n"; file_put_contents($tm->baseDir . "/$name/broadcast.txt", ''); }
+            }
+            echo "\n[{$name}]> ";
+            $input = trim(fgets(STDIN));
+            if ($input === 'exit' || $input === 'quit') {
+                $tm->stop($name);
+                echo "Stopped terminal '$name'\n";
+                break;
+            }
+            if (empty($input)) continue;
+            file_put_contents($tm->baseDir . "/$name/input.txt", $input);
+            $responseFile = $tm->baseDir . "/$name/response.txt";
+            $timeout = 60;
+            $start = time();
+            while (!file_exists($responseFile) && (time() - $start) < $timeout) { usleep(100000); }
+            if (file_exists($responseFile)) {
+                echo "\n" . file_get_contents($responseFile) . "\n";
+                unlink($responseFile);
+            } else {
+                echo "\n[Timeout waiting for response - terminal may need restart]\n";
+            }
+        }
+        echo "Detached from terminal '$name'\n";
+    } elseif ($sub === 'detach') {
+        echo "Detached (terminal continues running in background)\n";
+    } elseif ($sub === 'log') {
+        $name = $arg2;
+        if (!$name) { echo "Usage: terminal log <name> [lines]\n"; exit(1); }
+        $lines = $arg3 ?: 50;
+        echo $tm->getLog($name, $lines);
+    } else {
+        echo "Unknown terminal command: $sub\n";
+        echo "Run 'ollamadev terminal help' for usage\n";
+        exit(1);
+    }
+} elseif ($cmd === 'lsp') {
+    $port = $flags['port'] ?: 4389;
+    $host = $flags['hostname'] ?: '127.0.0.1';
+    echo "OllamaDev LSP server starting on $host:$port\n";
+    echo "Connect your IDE to localhost:$port\n";
+    echo "Press Ctrl+C to stop\n\n";
+
+    $server = @stream_socket_server("tcp://$host:$port", $errno, $errstr);
+    if (!$server) { echo "Failed: $errstr\n"; exit(1); }
+    echo "LSP server listening on $host:$port\n";
+
+    $ollama = new OllamaClient();
+    $watchedFiles = [];
+    $watcherRunning = true;
+
+    if (function_exists('pcntl_signal')) {
+        pcntl_signal(SIGTERM, function() use (&$watcherRunning) { $watcherRunning = false; });
+        pcntl_signal(SIGINT, function() use (&$watcherRunning) { $watcherRunning = false; });
+    }
+
+    while ($conn = @stream_socket_accept($server, 60)) {
+        $data = '';
+        $len = 0;
+        while (($line = fgets($conn)) !== false) {
+            if (trim($line) === '') break;
+            if (strpos($line, 'Content-Length:') === 0) {
+                $len = (int)trim(substr($line, 15));
+            }
+            $data .= $line;
+        }
+        if ($len > 0) {
+            $body = '';
+            while (strlen($body) < $len && ($line = fgets($conn)) !== false) { $body .= $line; }
+            $data .= $body;
+        }
+        $json = json_decode(trim($data), true);
+        $id = $json['id'] ?? null;
+        $method = $json['method'] ?? '';
+        $params = $json['params'] ?? [];
+
+        $response = ['jsonrpc' => '2.0', 'id' => $id];
+        if ($method === 'initialize') {
+            $response['result'] = [
+                'capabilities' => [
+                    'textDocumentSync' => 1,
+                    'hoverProvider' => true,
+                    'definitionProvider' => true,
+                    'referencesProvider' => true,
+                    'renameProvider' => ['prepareProvider' => true],
+                    'documentSymbolProvider' => true,
+                    'codeActionProvider' => ['codeActionKinds' => ['quickfix', 'refactor', 'source']],
+                    'documentFormattingProvider' => true,
+                    'documentRangeFormattingProvider' => true,
+                    'completionProvider' => ['resolveProvider' => true, 'triggerCharacters' => ['.', '>', ':']]
+                ],
+                'serverInfo' => ['name' => 'ollamadev-lsp', 'version' => '1.0']
+            ];
+        } elseif ($method === 'textDocument/hover') {
+            $response['result'] = ['contents' => 'OllamaDev LSP - Ask questions about code via ollamadev terminal'];
+        } elseif ($method === 'textDocument/completion') {
+            $text = $params['textDocument']['uri'] ?? '';
+            $pos = $params['position'] ?? ['line' => 0, 'character' => 0];
+            $context = $params['context'] ?? [];
+            $trigger = $context['triggerCharacter'] ?? '';
+            $model = Config::get('ollama.defaultModel', 'llama3.2:latest');
+            $code = '// ' . $trigger . ' autocomplete';
+            $completion = $ollama->codeComplete($code, $trigger, $model);
+            $items = [];
+            if (!empty(trim($completion))) {
+                $items[] = ['label' => 'ollamadev: ' . substr(trim($completion), 0, 30), 'kind' => 1, 'detail' => 'AI completion', 'insertText' => trim($completion)];
+            }
+            $items[] = ['label' => '// TODO: ', 'kind' => 2, 'detail' => 'Add comment', 'insertText' => '// TODO: '];
+            if ($trigger === '.') {
+                $items[] = ['label' => 'ask AI for method', 'kind' => 1, 'detail' => 'Get AI completion', 'insertText' => ''];
+            }
+            $response['result'] = ['isIncomplete' => true, 'items' => $items];
+        } elseif ($method === 'textDocument/didOpen' || $method === 'textDocument/didChange') {
+            $uri = $params['textDocument']['uri'] ?? '';
+            if ($uri) {
+                $watchedFiles[$uri] = ['uri' => $uri, 'version' => time()];
+            }
+            $response['result'] = null;
+        } elseif ($method === 'textDocument/didSave') {
+            $uri = $params['textDocument']['uri'] ?? '';
+            if ($uri && isset($watchedFiles[$uri])) {
+                $watchedFiles[$uri]['saved'] = date('Y-m-d H:i:s');
+            }
+            $response['result'] = null;
+        } elseif ($method === 'textDocument/documentSymbol') {
+            $uri = $params['textDocument']['uri'] ?? '';
+            $symbols = [];
+            if ($uri && file_exists($uri)) {
+                $content = file_get_contents($uri);
+                $ext = pathinfo($uri, PATHINFO_EXTENSION);
+                $lang = match($ext) { 'php' => 'PHP', 'js' => 'JavaScript', 'ts' => 'TypeScript', 'py' => 'Python', 'go' => 'Go', 'rs' => 'Rust', default => 'plain' };
+                if (preg_match_all('/^(class|interface|trait|function|const|enum|struct)\s+(\w+)/m', $content, $matches, PREG_SET_ORDER)) {
+                    foreach ($matches as $m) {
+                        $kind = match($m[1]) { 'class' => 5, 'interface' => 11, 'trait' => 22, 'function' => 12, 'const' => 14, 'enum' => 24, 'struct' => 23 } ?: 12;
+                        $symbols[] = ['name' => $m[2], 'kind' => $kind, 'location' => ['uri' => $uri, 'range' => ['start' => ['line' => 0, 'character' => 0], 'end' => ['line' => 0, 'character' => 0]]]];
+                    }
+                }
+                if (preg_match_all('/^\s*(public|private|protected)?\s*(static)?\s*\$(\w+)/m', $content, $matches, PREG_SET_ORDER)) {
+                    foreach ($matches as $m) {
+                        $symbols[] = ['name' => '$' . $m[3], 'kind' => 7, 'containerName' => 'properties', 'location' => ['uri' => $uri, 'range' => ['start' => ['line' => 0, 'character' => 0], 'end' => ['line' => 0, 'character' => 0]]]];
+                    }
+                }
+            }
+            $response['result'] = $symbols;
+        } elseif ($method === 'textDocument/references') {
+            $uri = $params['textDocument']['uri'] ?? '';
+            $pos = $params['position'] ?? ['line' => 0, 'character' => 0];
+            $word = 'symbol';
+            if ($uri && file_exists($uri)) {
+                $content = file_get_contents($uri);
+                if (preg_match('/\b(\w+)\b/', substr($content, 0, 500), $m)) $word = $m[1];
+            }
+            $response['result'] = [['uri' => $uri, 'range' => ['start' => ['line' => $pos['line'] ?? 0, 'character' => 0], 'end' => ['line' => $pos['line'] ?? 0, 'character' => strlen($word)]]]];
+        } elseif ($method === 'textDocument/rename') {
+            $uri = $params['textDocument']['uri'] ?? '';
+            $newName = $params['newName'] ?? 'newName';
+            $response['result'] = ['changes' => [$uri => [['range' => ['start' => ['line' => 0, 'character' => 0], 'end' => ['line' => 0, 'character' => 100]], 'newText' => $newName]]]];
+        } elseif ($method === 'textDocument/codeAction') {
+            $uri = $params['textDocument']['uri'] ?? '';
+            $range = $params['range'] ?? ['start' => ['line' => 0, 'character' => 0], 'end' => ['line' => 0, 'character' => 0]];
+            $context = $params['context'] ?? [];
+            $code = $uri && file_exists($uri) ? file_get_contents($uri) : '';
+            $actions = [];
+            if (!empty($code)) {
+                $prompt = "Analyze this code and suggest code actions (quick fixes, refactors):\n" . substr($code, 0, 2000) . "\n\nReturn a JSON array of {title, kind, command} where kinds are 'quickfix', 'refactor', or 'source'. Example: [{\"title\": \"Add null check\", \"kind\": \"quickfix\", \"command\": \"ollamadev.fix\"}]";
+                $result = $ollama->chat([['role' => 'user', 'content' => $prompt]]);
+                if ($result && preg_match_all('/\{[^}]+\}/', $result, $matches)) {
+                    foreach ($matches[0] as $m) {
+                        $action = json_decode($m, true);
+                        if ($action && isset($action['title'])) {
+                            $actions[] = [
+                                'title' => $action['title'],
+                                'kind' => $action['kind'] ?? 'quickfix',
+                                'command' => ['title' => $action['title'], 'command' => 'ollamadev.action', 'arguments' => [$action]]
+                            ];
+                        }
+                    }
+                }
+            }
+            if (empty($actions)) {
+                $actions[] = ['title' => 'Ask OllamaDev for suggestions', 'kind' => 'source', 'command' => ['title' => 'AI Assist', 'command' => 'ollamadev.ai', 'arguments' => []]];
+            }
+            $response['result'] = $actions;
+        } elseif ($method === 'textDocument/formatting') {
+            $uri = $params['textDocument']['uri'] ?? '';
+            if ($uri && file_exists($uri)) {
+                $content = file_get_contents($uri);
+                $ext = pathinfo($uri, PATHINFO_EXTENSION);
+                $cmd = match($ext) {
+                    'php' => 'php -l -f',
+                    'js' => 'npx prettier --stdin-filepath',
+                    'ts' => 'npx prettier --stdin-filepath',
+                    'py' => 'python3 -m black -',
+                    'go' => 'gofmt',
+                    'rs' => 'rustfmt',
+                    'json' => 'jq .',
+                    default => null
+                };
+                if ($cmd) {
+                    $tmpIn = tempnam('/tmp', 'fmt_in_');
+                    $tmpOut = tempnam('/tmp', 'fmt_out_');
+                    file_put_contents($tmpIn, $content);
+                    $formatted = shell_exec("$cmd < " . escapeshellarg($tmpIn) . " > " . escapeshellarg($tmpOut) . " 2>&1");
+                    if (file_exists($tmpOut) && filesize($tmpOut) > 0) {
+                        $formatted = file_get_contents($tmpOut);
+                    }
+                    unlink($tmpIn);
+                    unlink($tmpOut);
+                    if ($formatted && $formatted !== $content) {
+                        $lines = explode("\n", $content);
+                        $fmtLines = explode("\n", $formatted);
+                        $edits = [];
+                        $startLine = 0;
+                        $endLine = count($lines) - 1;
+                        $response['result'] = [['range' => ['start' => ['line' => $startLine, 'character' => 0], 'end' => ['line' => $endLine, 'character' => strlen($lines[$endLine] ?? '')]], 'newText' => $formatted]];
+                    } else {
+                        $response['result'] = [];
+                    }
+                } else {
+                    $response['result'] = [];
+                }
+            } else {
+                $response['result'] = [];
+            }
+        } elseif ($method === 'textDocument/publishDiagnostics') {
+            $response['result'] = null;
+        } elseif ($method === 'completionItem/resolve') {
+            $item = $params;
+            $response['result'] = $item;
+        } elseif (strpos($method, 'ollamadev/') === 0) {
+            $action = substr($method, 10);
+            if ($action === 'chat') {
+                $msg = $params['message'] ?? '';
+                $result = $ollama->chat([['role' => 'user', 'content' => $msg]]);
+                $response['result'] = ['reply' => $result ?: 'Use ollamadev terminal for full chat'];
+            } elseif ($action === 'review') {
+                $code = $params['code'] ?? '';
+                $result = $ollama->codeReview($code);
+                $response['result'] = ['reply' => $result ?: 'Use ollamadev terminal for code review'];
+            } elseif ($action === 'generate') {
+                $code = $params['code'] ?? '';
+                $prompt = "Improve this code:\n" . $code . "\n\nReturn only the improved code:";
+                $result = $ollama->completion($prompt);
+                $response['result'] = ['reply' => $result ?: 'Use ollamadev terminal for code generation'];
+            } else {
+                $response['result'] = ['reply' => "OllamaDev: $action - use ollamadev terminal"];
+            }
+        } elseif ($method === 'shutdown') {
+            $response['result'] = null;
+        } elseif ($method === 'exit') {
+            fclose($conn);
+            exit(0);
+        } else {
+            $response['result'] = null;
+        }
+        $out = json_encode($response);
+        fwrite($conn, "Content-Length: " . strlen($out) . "\r\n\r\n" . $out);
+        fclose($conn);
+    }
 } elseif (empty($cmd)) {
     (new Session($config))->start();
 } else {
     echo "Unknown command: $cmd\n";
-    echo "Run 'ollamadev help' for usage.\n";
+    echo "Run 'ollamadev help <topic>' for available topics.\n";
+    echo "Run 'ollamadev help' for general usage.\n";
     exit(1);
 }
