@@ -1,0 +1,62 @@
+class Config {
+    private static $config;
+
+    public static function load(): array {
+        if (self::$config) return self::$config;
+        $envOverrides = [];
+        if (getenv('OLLAMA_HOST')) $envOverrides['ollama']['host'] = getenv('OLLAMA_HOST');
+        if (getenv('OLLAMA_MODEL')) $envOverrides['ollama']['defaultModel'] = getenv('OLLAMA_MODEL');
+        $defaults = [
+            'ollama' => ['host' => getenv('OLLAMA_HOST') ?: 'http://localhost:11434', 'defaultModel' => getenv('OLLAMA_MODEL') ?: 'llama3.2:latest'],
+            'agents' => ['coder' => ['temperature' => 0.7, 'maxTokens' => 4096]],
+            'data' => ['directory' => '.ollamadev']
+        ];
+        $home = getenv('HOME') ?: '/tmp';
+        $paths = [$home.'/.ollamadev/config.json', $home.'/.config/ollamadev/config.json', '.ollamadev.json'];
+        foreach ($paths as $path) {
+            if (file_exists($path)) {
+                $json = json_decode(file_get_contents($path), true);
+                if ($json) { self::$config = array_replace_recursive($defaults, $json); return self::$config; }
+            }
+        }
+        self::$config = $defaults;
+        return self::$config;
+    }
+
+    public static function get(string $key, $default = null) {
+        $config = self::load();
+        $keys = explode('.', $key);
+        $value = $config;
+        foreach ($keys as $k) { if (!isset($value[$k])) return $default; $value = $value[$k]; }
+        return $value;
+    }
+
+    // Set a dotted key on the cached config so Config::get() reflects it.
+    public static function set(string $key, $value): void {
+        self::load();
+        $keys = explode('.', $key);
+        $ref = &self::$config;
+        foreach ($keys as $k) {
+            if (!isset($ref[$k]) || !is_array($ref[$k])) $ref[$k] = [];
+            $ref = &$ref[$k];
+        }
+        $ref = $value;
+    }
+
+    public static function dataDir(): string {
+        $dir = self::get('data.directory', '.ollamadev');
+        return str_starts_with($dir, '/') ? $dir : getcwd() . '/' . $dir;
+    }
+
+    public static function binaryPath(): string {
+        return $_SERVER['argv'][0] ?? 'ollamadev';
+    }
+
+    public static function sessionsDir(): string { return self::dataDir() . '/sessions'; }
+    public static function checkpointsDir(): string { return self::dataDir() . '/checkpoints'; }
+    public static function costsDir(): string { return self::dataDir() . '/costs'; }
+}
+
+// Model Context Protocol client. Supports the standard stdio transport
+// (JSON-RPC 2.0 with LSP-style Content-Length framing) and an HTTP/SSE
+// fallback for remote servers.
