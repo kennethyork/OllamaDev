@@ -3,3 +3,6 @@
 .ollamadev/costs/
 .ollamadev/terminals/
 .ollamadev.json
+
+# Runtime data (sessions/terminals) wherever it appears, e.g. the desktop app
+**/.ollamadev/
