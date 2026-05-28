@@ -2812,8 +2812,28 @@ class Session {
             'save' => $this->saveSession(),
             'session' => $this->showSession(),
             'git' => $this->runGit($args),
+            'status' => "[Model: {$this->model} | Tokens: ~" . $this->countTokens() . " | Messages: " . count($this->messages) . "]\n",
+            'tools' => $this->listTools(),
+            'context' => "📁 " . getcwd() . "\nMessages: " . count($this->messages) . " | Model: {$this->model}\n",
+            'pwd' => getcwd() . "\n",
+            'cd' => $this->changeDir($args),
+            'ls' => crossPlatformLs($args ?: '.') . "\n",
             default => false
         };
+    }
+
+    private function listTools(): string {
+        $tools = Tools::all();
+        sort($tools);
+        return "\nAvailable tools (" . count($tools) . "):\n" . wordwrap(implode(', ', $tools), 70) . "\n";
+    }
+
+    private function changeDir(string $dir): string {
+        $dir = trim($dir);
+        if ($dir === '') return getcwd() . "\n";
+        if (!is_dir($dir)) return "Not a directory: $dir\n";
+        chdir($dir);
+        return "📁 " . getcwd() . "\n";
     }
 
     private function renderBanner(): string {
@@ -3044,8 +3064,20 @@ $GLOBALS['currentSessionModel'] = null;
                 $input = trim(fgets(STDIN));
             }
 
-            if ($this->handleCommand($input)) break;
             if (empty($input)) continue;
+
+            // Slash commands are handled here and never sent to the model.
+            if (str_starts_with($input, '/')) {
+                $result = $this->handleSlashCommand($input);
+                if ($result === false) {
+                    echo "Unknown command: {$input}\nType /help for available commands.\n";
+                } else {
+                    echo $result;
+                }
+                continue;
+            }
+
+            if ($this->handleCommand($input)) break;
 
             $this->addMessage('user', $input);
             $thinkingMsgs = [
