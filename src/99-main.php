@@ -38,11 +38,24 @@ if ($argc >= 2 && $argv[1] === '__terminal-daemon__') {
             if ($input === '__STOP__' || $input === 'exit' || $input === 'quit') break;
             if ($input !== '') {
                 @file_put_contents($logFile, "\n> $input\n", FILE_APPEND);
-                // Capture the agent's output instead of printing it.
+                // Capture the agent's console output instead of printing it.
                 ob_start();
                 $final = $session->runSingle($input);
                 $printed = ob_get_clean();
-                $out = trim($final) !== '' ? $final : trim($printed);
+                $out = trim($final);
+                if ($out === '') {
+                    // Fall back to printed output, stripped of console chatter
+                    // (spinner lines and the trailing cwd/context line).
+                    $lines = preg_split('/\R/', (string)$printed);
+                    $kept = [];
+                    foreach ($lines as $ln) {
+                        $t = trim($ln);
+                        if ($t === '' || str_starts_with($t, '📁') || str_ends_with($t, '...') || str_starts_with($t, '✏️')) continue;
+                        $kept[] = $ln;
+                    }
+                    $out = trim(implode("\n", $kept));
+                }
+                if ($out === '') $out = '(no response)';
                 file_put_contents($responseFile, $out);
                 @file_put_contents($logFile, $out . "\n", FILE_APPEND);
             }

@@ -81,7 +81,11 @@ class PtyManager
         $model = escapeshellarg($terminal['model'] ?? 'llama3.2:latest');
         $termName = escapeshellarg($id);
 
-        $cmd = "php " . escapeshellarg($binary) . " __terminal-daemon__ $termName $model >> " . escapeshellarg($logFile) . " 2>&1 &";
+        // The daemon writes the clean transcript to session.log itself; send
+        // its own stdout/stderr to a separate debug file so console chatter
+        // (spinners, prompts) never pollutes the transcript.
+        $debugFile = self::$baseDir . '/' . $id . '/daemon.log';
+        $cmd = "php " . escapeshellarg($binary) . " __terminal-daemon__ $termName $model > " . escapeshellarg($debugFile) . " 2>&1 &";
         shell_exec($cmd);
 
         usleep(500000);
@@ -150,24 +154,13 @@ class PtyManager
             return "";
         }
 
-        $responseFile = self::$baseDir . '/' . $id . '/response.txt';
-        if (file_exists($responseFile)) {
-            return file_get_contents($responseFile);
-        }
-
-        $responseFile = self::$baseDir . '/' . $id . '/response.txt';
-        if (file_exists($responseFile)) {
-            $response = file_get_contents($responseFile);
-            if ($response !== false && strlen($response) > 0) {
-                return $response;
-            }
-        }
-
+        // Return the cumulative transcript. The frontend appends the delta
+        // (output minus what it already has), so this must grow over time -
+        // returning only the last response would garble the terminal.
         $logFile = self::$baseDir . '/' . $id . '/session.log';
         if (!file_exists($logFile)) {
             return "";
         }
-
         return shell_exec("tail -n " . (int)$lines . " " . escapeshellarg($logFile)) ?? "";
     }
 
