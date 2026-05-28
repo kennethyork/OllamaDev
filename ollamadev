@@ -106,6 +106,18 @@ class Config {
         return $value;
     }
 
+    // Set a dotted key on the cached config so Config::get() reflects it.
+    public static function set(string $key, $value): void {
+        self::load();
+        $keys = explode('.', $key);
+        $ref = &self::$config;
+        foreach ($keys as $k) {
+            if (!isset($ref[$k]) || !is_array($ref[$k])) $ref[$k] = [];
+            $ref = &$ref[$k];
+        }
+        $ref = $value;
+    }
+
     public static function dataDir(): string {
         $dir = self::get('data.directory', '.ollamadev');
         return str_starts_with($dir, '/') ? $dir : getcwd() . '/' . $dir;
@@ -120,7 +132,7 @@ class Config {
     public static function costsDir(): string { return self::dataDir() . '/costs'; }
 }
 
-class Git {
+class MCPClient {
     private ?string $command;
     private string $type;
     private string $url;
@@ -199,55 +211,62 @@ class MCP {
 }
 
 class Permission {
-    private static array $allowed = [];
-    private static array $denied = [];
-    private static bool $promptMode = false;
+    private static array $allowed = [];   // tools approved for this session
+    private static array $denied = [];    // tools blocked for this session
+    private static string $mode = 'ask';  // auto | ask | readonly
+    private static bool $interactive = false;
 
-    public static function setPromptMode(bool $mode): void {
-        self::$promptMode = $mode;
+    // Tools that only read state - always safe to run without approval.
+    private static array $readonly = [
+        'view', 'read', 'cat', 'head', 'tail', 'ls', 'list_directory', 'list_files',
+        'glob', 'grep', 'find', 'tree', 'stat', 'wc', 'sort', 'uniq', 'diff', 'pwd',
+        'changes', 'watch', 'symbols', 'hover', 'goto', 'goto_definition', 'definition',
+        'refs', 'find_refs', 'diagnostics', 'git_status', 'git_diff', 'git_log',
+        'git_branch', 'git_show', 'git_remote', 'git_fetch', 'mcp_servers', 'calc',
+        'print', 'say', 'echo', 'reply', 'ok', 'OK', 'error', 'summarize',
+    ];
+
+    public static function setMode(string $mode): void {
+        if (in_array($mode, ['auto', 'ask', 'readonly'], true)) self::$mode = $mode;
     }
+    public static function getMode(): string { return self::$mode; }
+    public static function setInteractive(bool $v): void { self::$interactive = $v; }
 
-    public static function autoAllow(): void {
-        self::$promptMode = false;
-    }
+    // Legacy compatibility shims.
+    public static function autoAllow(): void { self::$mode = 'auto'; }
+    public static function setPromptMode(bool $mode): void { self::$mode = $mode ? 'ask' : 'auto'; }
 
-    public static function allow(string $tool): void {
-        unset(self::$denied[$tool]);
-        self::$allowed[$tool] = true;
-    }
+    public static function allow(string $tool): void { unset(self::$denied[$tool]); self::$allowed[$tool] = true; }
+    public static function deny(string $tool): void { unset(self::$allowed[$tool]); self::$denied[$tool] = true; }
+    public static function isReadonly(string $tool): bool { return in_array($tool, self::$readonly, true); }
+    public static function listAllowed(): array { return array_keys(self::$allowed); }
+    public static function listDenied(): array { return array_keys(self::$denied); }
+    public static function listReadonly(): array { return self::$readonly; }
 
-    public static function deny(string $tool): void {
-        unset(self::$allowed[$tool]);
-        self::$denied[$tool] = true;
-    }
-
-    public static function isAllowed(string $tool): bool {
+    // The gate enforced by Tools::run. Returns true if the tool may run.
+    public static function check(string $tool, array $params = []): bool {
         if (isset(self::$denied[$tool])) return false;
         if (isset(self::$allowed[$tool])) return true;
-        if (!self::$promptMode) return true;
-        return false;
+        if (self::$mode === 'auto') return true;
+        if (self::isReadonly($tool)) return true;     // read-only is always fine
+        if (self::$mode === 'readonly') return false;  // block all mutating tools
+        // mode 'ask': prompt when interactive, otherwise allow (one-shot = user-driven).
+        if (!self::$interactive) return true;
+        return self::prompt($tool, $params);
     }
 
-    public static function listAllowed(): array {
-        return array_keys(self::$allowed);
-    }
-
-    public static function listDenied(): array {
-        return array_keys(self::$denied);
-    }
-
-    public static function prompt(string $tool, string $command): bool {
-        if (self::isAllowed($tool)) return true;
-        echo "\n⚠️  Permission required for: $tool\n";
-        echo "   Command: $command\n";
-        echo "   Allow this? (yes/no/permanent): ";
-        $input = trim(fgets(STDIN));
-        if ($input === 'yes' || $input === 'y') {
-            return true;
-        } elseif ($input === 'permanent' || $input === 'p') {
-            self::allow($tool);
-            return true;
-        }
+    private static function prompt(string $tool, array $params): bool {
+        $desc = '';
+        if (isset($params['command'])) $desc = $params['command'];
+        elseif (isset($params['file_path'])) $desc = $params['file_path'];
+        elseif (!empty($params)) $desc = json_encode($params);
+        echo "\n⚠️  Allow mutating tool '$tool'?";
+        if ($desc !== '') echo "\n   → " . substr($desc, 0, 200);
+        echo "\n   [y]es once / [a]lways / [n]o: ";
+        $input = strtolower(trim((string)fgets(STDIN)));
+        if ($input === 'y' || $input === 'yes') return true;
+        if ($input === 'a' || $input === 'always') { self::allow($tool); return true; }
+        echo "   ✗ denied\n";
         return false;
     }
 }
@@ -641,7 +660,7 @@ class Tools {
     public static function run(string $name, array $params): string {
         $fn = self::find($name);
         if (!$fn) return CmdError::toolNotFound($name);
-        if (!Permission::isAllowed($name)) return CmdError::permissionDenied($name);
+        if (!Permission::check($name, $params)) return CmdError::permissionDenied($name);
         try { return $fn($params); } catch (Exception $e) { return CmdError::toolFailed($name, $e->getMessage()); }
     }
     public static function all(): array { return array_keys(self::$tools); }
@@ -2727,7 +2746,7 @@ class Session {
         $this->ensureDataDir();
         MCP::load($config);
         LSP::load($config);
-        Permission::autoAllow();
+        Permission::setMode(Config::get('permissions.mode', 'ask'));
         $this->agent = new Agent();
         if ($sessionId) { $this->load($sessionId); }
         else { $this->id = 'session_' . time() . '_' . substr(md5(mt_rand()), 0, 8); $this->title = "Session " . date('Y-m-d H:i'); $this->model = $this->agent->getModel(); }
@@ -2818,8 +2837,42 @@ class Session {
             'pwd' => getcwd() . "\n",
             'cd' => $this->changeDir($args),
             'ls' => crossPlatformLs($args ?: '.') . "\n",
+            'permission', 'permissions' => $this->managePermission($args),
             default => false
         };
+    }
+
+    private function managePermission(string $args): string {
+        $parts = preg_split('/\s+/', trim($args), 2);
+        $sub = strtolower($parts[0] ?? '');
+        $val = $parts[1] ?? '';
+        switch ($sub) {
+            case 'mode':
+                if ($val === '') return "Current mode: " . Permission::getMode() . "\nUsage: /permission mode <auto|ask|readonly>\n";
+                Permission::setMode(trim($val));
+                return "Permission mode: " . Permission::getMode() . "\n";
+            case 'allow':
+                if ($val === '') return "Usage: /permission allow <tool>\n";
+                Permission::allow(trim($val));
+                return "Allowed: " . trim($val) . "\n";
+            case 'deny':
+                if ($val === '') return "Usage: /permission deny <tool>\n";
+                Permission::deny(trim($val));
+                return "Denied: " . trim($val) . "\n";
+            case '':
+            case 'status':
+                $allowed = Permission::listAllowed();
+                $denied = Permission::listDenied();
+                $out = "Permission mode: " . Permission::getMode() . "\n";
+                $out .= "  auto     - run every tool without asking\n";
+                $out .= "  ask      - prompt before mutating tools (default)\n";
+                $out .= "  readonly - block all mutating tools\n";
+                $out .= "Session allowed: " . (empty($allowed) ? '(none)' : implode(', ', $allowed)) . "\n";
+                $out .= "Session denied:  " . (empty($denied) ? '(none)' : implode(', ', $denied)) . "\n";
+                return $out;
+            default:
+                return "Usage: /permission [mode <auto|ask|readonly> | allow <tool> | deny <tool> | status]\n";
+        }
     }
 
     private function listTools(): string {
@@ -2989,6 +3042,7 @@ $GLOBALS['currentSessionModel'] = null;
     }
 
     public function start(): void {
+        Permission::setInteractive(true); // enable approval prompts for mutating tools
         $this->renderBanner();
         if (!$this->agent->checkConnection()) {
             echo "⚠️  Cannot connect to Ollama at " . Config::get('ollama.host') . "\n";
@@ -3132,7 +3186,7 @@ $GLOBALS['currentSessionModel'] = null;
     }
 
     public function runSingle(string $prompt): string {
-        Permission::autoAllow();
+        Permission::setInteractive(false); // one-shot: can't prompt, so don't block
 
         $cmdResult = $this->handleSlashCommand($prompt);
         if ($cmdResult !== false) {
@@ -3366,7 +3420,7 @@ if ($argc >= 2 && $argv[1] === 'stats') {
 }
 
 // ===== FLAG PARSING (must be before config load) =====
-$flags = ['model' => null, 'continue' => false, 'session' => null, 'fork' => false, 'prompt' => null, 'agent' => null, 'pure' => false, 'port' => 0, 'hostname' => '127.0.0.1', 'mdns' => false, 'help' => false, 'version' => false, 'cwd' => null];
+$flags = ['model' => null, 'continue' => false, 'session' => null, 'fork' => false, 'prompt' => null, 'agent' => null, 'pure' => false, 'port' => 0, 'hostname' => '127.0.0.1', 'mdns' => false, 'help' => false, 'version' => false, 'cwd' => null, 'permission' => null];
 $positional = [];
 for ($i = 1; $i < $argc; $i++) {
     $a = $argv[$i];
@@ -3377,6 +3431,9 @@ for ($i = 1; $i < $argc; $i++) {
     elseif ($a === '-p' || $a === '--prompt') { $flags['prompt'] = $argv[++$i] ?? null; }
     elseif ($a === '--agent') { $flags['agent'] = $argv[++$i] ?? null; }
     elseif ($a === '--pure') { $flags['pure'] = true; }
+    elseif ($a === '--readonly' || $a === '--plan') { $flags['permission'] = 'readonly'; }
+    elseif ($a === '--auto' || $a === '--yolo') { $flags['permission'] = 'auto'; }
+    elseif ($a === '--ask') { $flags['permission'] = 'ask'; }
     elseif ($a === '--port') { $flags['port'] = (int)($argv[++$i] ?? 0); }
     elseif ($a === '--hostname') { $flags['hostname'] = $argv[++$i] ?? '127.0.0.1'; }
     elseif ($a === '--mdns') { $flags['mdns'] = true; }
@@ -3593,7 +3650,10 @@ if ($argc >= 2 && $argv[1] === 'compact') {
 $config = Config::load();
 
 // Apply model from flags
-if (!empty($flags['model'])) { $config['ollama']['defaultModel'] = $flags['model']; }
+if (!empty($flags['model'])) { $config['ollama']['defaultModel'] = $flags['model']; Config::set('ollama.defaultModel', $flags['model']); }
+
+// Apply permission mode from flags (--readonly/--auto/--ask)
+if (!empty($flags['permission'])) { $config['permissions']['mode'] = $flags['permission']; Config::set('permissions.mode', $flags['permission']); }
 
 // Handle positional commands
 $cmd = $positional[0] ?? '';
