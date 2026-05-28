@@ -98,6 +98,23 @@ if (preg_match('/\/\/ Model Context Protocol client.*?\n\}\n/s', $src, $mM)) {
     ok('MCPClient extractable', false, 'class not found in binary');
 }
 
+echo "\n== Terminal daemon lifecycle ==\n";
+$tid = 'smoke-' . getmypid();
+$tdir = (getenv('HOME') ?: '/tmp') . '/.ollamadev/terminals/' . $tid;
+@mkdir($tdir, 0755, true);
+$cmd = 'php ' . escapeshellarg($BIN) . ' __terminal-daemon__ ' . escapeshellarg($tid) . ' >/dev/null 2>&1 & echo $!';
+$dpid = (int)trim(shell_exec($cmd));
+usleep(700000);
+$alive = $dpid > 0 && posix_kill($dpid, 0);
+ok('daemon starts on __terminal-daemon__', $alive, "pid=$dpid");
+$log = is_file("$tdir/session.log") ? file_get_contents("$tdir/session.log") : '';
+ok('daemon writes ready marker', stripos($log, 'ready') !== false);
+file_put_contents("$tdir/input.txt", '__STOP__');
+usleep(700000);
+ok('daemon exits on __STOP__', !($dpid > 0 && posix_kill($dpid, 0)));
+if ($dpid > 0) @posix_kill($dpid, 9);
+shell_exec('rm -rf ' . escapeshellarg($tdir));
+
 echo "\n========================\n";
 echo "Results: $pass passed, $fail failed\n";
 if ($fail > 0) { echo "FAILED: " . implode(', ', $fails) . "\n"; exit(1); }

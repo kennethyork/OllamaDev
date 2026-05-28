@@ -18,6 +18,14 @@ class PtyManager
 
     public function create(string $id, string $model, ?string $cwd = null): array
     {
+        $terminals = $this->list();
+        $maxTerminals = 16;
+        while (count($terminals) >= $maxTerminals) {
+            usort($terminals, fn($a, $b) => ($a['last_used'] ?? '') <=> ($b['last_used'] ?? '') ?: ($a['id'] ?? '') <=> ($b['id'] ?? ''));
+            $toDelete = array_shift($terminals);
+            $this->delete($toDelete['id'] ?? '');
+        }
+
         $dir = self::$baseDir . '/' . $id;
         mkdir($dir, 0755, true);
         mkdir($dir . '/history', 0755, true);
@@ -40,6 +48,24 @@ class PtyManager
         return $terminal;
     }
 
+    // Locate the ollamadev CLI binary. Prefer an explicit OLLAMADEV_BINARY,
+    // then the installed copy on PATH / ~/.local/bin, then a repo checkout.
+    private static function resolveBinary(): string
+    {
+        if (defined('OLLAMADEV_BINARY') && OLLAMADEV_BINARY) return OLLAMADEV_BINARY;
+        if ($env = getenv('OLLAMADEV_BINARY')) return $env;
+        $home = getenv('HOME') ?: '';
+        $candidates = [
+            $home . '/.local/bin/ollamadev',
+            trim((string)@shell_exec('command -v ollamadev 2>/dev/null')),
+            dirname(__DIR__, 3) . '/ollamadev',
+        ];
+        foreach ($candidates as $c) {
+            if ($c && is_file($c)) return $c;
+        }
+        return 'ollamadev';
+    }
+
     public function start(string $id): array
     {
         $terminal = $this->loadTerminal($id);
@@ -48,30 +74,23 @@ class PtyManager
         }
 
         $logFile = self::$baseDir . '/' . $id . '/session.log';
-        $cwd = $terminal['cwd'];
+        touch($logFile);
+        $cwd = $terminal['cwd'] ?? getcwd();
 
-        $binary = defined('OLLAMADEV_BINARY') ? OLLAMADEV_BINARY : 'ollamadev';
+        $binary = self::resolveBinary();
+        $model = escapeshellarg($terminal['model'] ?? 'llama3.2:latest');
+        $termName = escapeshellarg($id);
 
-        $descriptors = [
-            0 => ['pipe', 'r'],
-            1 => ['file', $logFile, 'a'],
-            2 => ['file', $logFile, 'a'],
-        ];
+        $cmd = "php " . escapeshellarg($binary) . " __terminal-daemon__ $termName $model >> " . escapeshellarg($logFile) . " 2>&1 &";
+        shell_exec($cmd);
 
-        $process = proc_open(
-            "cd " . escapeshellarg($cwd) . " && " . $binary . " chat --model " . escapeshellarg($terminal['model']),
-            $descriptors,
-            $pipes,
-            $cwd
-        );
+        usleep(500000);
 
-        $pid = proc_get_status($process)['pid'];
+        $pid = shell_exec("pgrep -f \"ollamadev __terminal-daemon__ " . escapeshellarg($id) . "\" | head -1");
+        $pid = trim($pid);
 
-        $terminal['pid'] = $pid;
+        $terminal['pid'] = $pid ?: null;
         $terminal['status'] = 'running';
-        $terminal['process'] = $process;
-        $terminal['stdin'] = $pipes[0];
-        $terminal['stdout'] = $pipes[1];
         $terminal['logFile'] = $logFile;
 
         $this->saveTerminal($id, $terminal);
@@ -87,10 +106,15 @@ class PtyManager
             return ['error' => "Terminal $id not found"];
         }
 
+        $inputFile = self::$baseDir . '/' . $id . '/input.txt';
+        if (file_exists($inputFile)) {
+            file_put_contents($inputFile, '__STOP__');
+        }
+
         if ($terminal['pid']) {
             posix_kill((int)$terminal['pid'], SIGTERM);
-            usleep(100000);
-            posix_kill((int)$terminal['pid'], SIGKILL);
+            usleep(200000);
+            exec("kill -9 " . (int)$terminal['pid'] . " 2>/dev/null");
         }
 
         $terminal['pid'] = null;
@@ -104,11 +128,18 @@ class PtyManager
     public function write(string $id, string $input): bool
     {
         $terminal = self::$terminals[$id] ?? $this->loadTerminal($id);
-        if (!$terminal || !$terminal['stdin']) {
+        if (!$terminal) {
             return false;
         }
 
-        fwrite($terminal['stdin'], $input . "\n");
+        $inputFile = self::$baseDir . '/' . $id . '/input.txt';
+        file_put_contents($inputFile, $input);
+
+        $responseFile = self::$baseDir . '/' . $id . '/response.txt';
+        if (file_exists($responseFile)) {
+            unlink($responseFile);
+        }
+
         return true;
     }
 
@@ -119,12 +150,25 @@ class PtyManager
             return "";
         }
 
+        $responseFile = self::$baseDir . '/' . $id . '/response.txt';
+        if (file_exists($responseFile)) {
+            return file_get_contents($responseFile);
+        }
+
+        $responseFile = self::$baseDir . '/' . $id . '/response.txt';
+        if (file_exists($responseFile)) {
+            $response = file_get_contents($responseFile);
+            if ($response !== false && strlen($response) > 0) {
+                return $response;
+            }
+        }
+
         $logFile = self::$baseDir . '/' . $id . '/session.log';
         if (!file_exists($logFile)) {
             return "";
         }
 
-        return shell_exec("tail -n " . (int)$lines . " " . escapeshellarg($logFile));
+        return shell_exec("tail -n " . (int)$lines . " " . escapeshellarg($logFile)) ?? "";
     }
 
     public function resize(string $id, int $cols, int $rows): bool
@@ -152,6 +196,9 @@ class PtyManager
                 }
                 $term = $this->loadTerminal($name);
                 if ($term) {
+                    if (!isset($term['id']) && isset($term['name'])) {
+                        $term['id'] = $term['name'];
+                    }
                     $terminals[] = $term;
                 }
             }
@@ -177,12 +224,18 @@ class PtyManager
             return null;
         }
         $data = json_decode(file_get_contents($file), true);
+        if (!$data) {
+            return null;
+        }
         if (isset($data['pid']) && $data['pid']) {
-            $status = proc_get_status($data['process'] ?? null);
-            if ($status && !$status['running']) {
+            $pid = trim(shell_exec("pgrep -f \"ollamadev __terminal-daemon__ " . escapeshellarg($id) . "\" | head -1"));
+            if (empty($pid)) {
                 $data['status'] = 'stopped';
                 $data['pid'] = null;
             }
+        }
+        if (!isset($data['id']) && isset($data['name'])) {
+            $data['id'] = $data['name'];
         }
         return $data;
     }

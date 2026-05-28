@@ -3423,6 +3423,60 @@ $GLOBALS['currentSessionModel'] = null;
 }
 
 // CLI Entry Point
+// Terminal daemon: the backend worker for a single terminal. The desktop app
+// and `terminal attach` are clients that write input.txt and poll response.txt;
+// this process consumes input.txt, runs the agent, and writes response.txt.
+if ($argc >= 2 && $argv[1] === '__terminal-daemon__') {
+    $id = $argv[2] ?? '';
+    $model = $argv[3] ?? '';
+    if ($id === '') { fwrite(STDERR, "terminal daemon: missing terminal id\n"); exit(1); }
+
+    $config = Config::load();
+    if ($model !== '') { Config::set('ollama.defaultModel', $model); }
+
+    $home = getenv('HOME') ?: '/tmp';
+    $dir = $home . '/.ollamadev/terminals/' . $id;
+    if (!is_dir($dir)) mkdir($dir, 0755, true);
+    $inputFile = "$dir/input.txt";
+    $responseFile = "$dir/response.txt";
+    $logFile = "$dir/session.log";
+
+    // Daemon can't prompt for permission; run tools without blocking.
+    Permission::setMode('auto');
+    Permission::setInteractive(false);
+
+    $session = new Session($config);
+    @file_put_contents($logFile, "[terminal-daemon $id ready] model=" . $session->getModel() . "\n", FILE_APPEND);
+
+    $running = true;
+    if (function_exists('pcntl_async_signals')) {
+        pcntl_async_signals(true);
+        pcntl_signal(SIGTERM, function() use (&$running) { $running = false; });
+        pcntl_signal(SIGINT, function() use (&$running) { $running = false; });
+    }
+
+    while ($running) {
+        if (file_exists($inputFile)) {
+            $input = trim((string)file_get_contents($inputFile));
+            @unlink($inputFile);
+            if ($input === '__STOP__' || $input === 'exit' || $input === 'quit') break;
+            if ($input !== '') {
+                @file_put_contents($logFile, "\n> $input\n", FILE_APPEND);
+                // Capture the agent's output instead of printing it.
+                ob_start();
+                $final = $session->runSingle($input);
+                $printed = ob_get_clean();
+                $out = trim($final) !== '' ? $final : trim($printed);
+                file_put_contents($responseFile, $out);
+                @file_put_contents($logFile, $out . "\n", FILE_APPEND);
+            }
+        }
+        usleep(200000);
+    }
+    @file_put_contents($logFile, "[terminal-daemon $id stopped]\n", FILE_APPEND);
+    exit(0);
+}
+
 // Git CLI Command
 if ($argc >= 2 && $argv[1] === 'git') {
     $config = Config::load();
