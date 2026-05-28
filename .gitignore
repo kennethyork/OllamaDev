@@ -1,0 +1,5 @@
+.ollamadev/sessions/
+.ollamadev/checkpoints/
+.ollamadev/costs/
+.ollamadev/terminals/
+.ollamadev.json

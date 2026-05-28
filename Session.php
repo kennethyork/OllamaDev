@@ -269,22 +269,12 @@ class Session {
     private function renderBanner(): void {
         $models = $this->agent->listModelsDetailed();
         $modelCount = count($models);
-        echo "\n╔══════════════════════════════════════════════════════════════╗\n";
-        echo "║                     OllamaDev                                ║\n";
-        echo "║  Local AI coding agent powered by Ollama                     ║\n";
-        echo "╠══════════════════════════════════════════════════════════════╣\n";
-        echo "║  Current Model: {$this->model}                              ║\n";
-        echo "║  {$modelCount} model(s) available                                ║\n";
-        echo "╠══════════════════════════════════════════════════════════════╣\n";
-        echo "║  Tools: view, write, edit, glob, grep, ls, bash, fetch, mcp, permission ║\n";
-        echo "║  Auto-compact: enabled (at 20+ messages)                             ║\n";
-        echo "║  Commands: exit, new, mode, verbose, model, clear, help      ║\n";
-        echo "╚══════════════════════════════════════════════════════════════╝\n\n";
+        echo "\n OllamaDev v" . OLLAMADEV_VERSION . "\n\n";
     }
 
-    private function renderPrompt(): void { echo "[{$this->model}] > "; }
+    private function renderPrompt(): void { echo "ollamadev > "; }
     private function countTokens(): int { $total = 0; foreach ($this->messages as $msg) $total += strlen($msg['content'] ?? '') / 4; return (int)$total; }
-    private function renderStatus(): void { echo "\n[Model: {$this->model} | Tokens: ~" . $this->countTokens() . " | Messages: " . count($this->messages) . "]\n"; }
+    private function renderStatus(): void { echo "[Tokens: ~" . $this->countTokens() . "]\n"; }
     private function showContext(): void {
         $pwd = getcwd();
         $edited = $GLOBALS['editedFiles'] ?? [];
