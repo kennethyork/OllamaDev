@@ -598,6 +598,39 @@ class OllamaClient {
         }
         return '';
     }
+
+    // Native Ollama function-calling. Returns:
+    //   ['ok'=>true, 'content'=>string, 'calls'=>[['name'=>,'params'=>], ...]]
+    //   ['ok'=>false, 'unsupported'=>bool, 'error'=>string]
+    public function chatWithTools(string $model, array $messages, array $tools): array {
+        $params = ['model' => $model, 'messages' => $messages, 'tools' => $tools, 'stream' => false];
+        $ch = curl_init($this->host . '/api/chat');
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 300,
+        ]);
+        $resp = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        $j = json_decode((string)$resp, true);
+        if ($code !== 200) {
+            $err = is_array($j) ? ($j['error'] ?? '') : (string)$resp;
+            return ['ok' => false, 'unsupported' => stripos($err, 'tool') !== false || stripos($err, 'does not support') !== false, 'error' => $err];
+        }
+        $msg = is_array($j) ? ($j['message'] ?? []) : [];
+        $content = $msg['content'] ?? '';
+        if (empty($content) && !empty($msg['thinking'])) $content = $msg['thinking'];
+        $calls = [];
+        foreach (($msg['tool_calls'] ?? []) as $tc) {
+            $f = $tc['function'] ?? [];
+            $name = $f['name'] ?? '';
+            $args = $f['arguments'] ?? [];
+            if (is_string($args)) $args = json_decode($args, true) ?: [];
+            if ($name !== '') $calls[] = ['name' => $name, 'params' => is_array($args) ? $args : []];
+        }
+        return ['ok' => true, 'content' => (string)$content, 'calls' => $calls];
+    }
 }
 
 class Tools {
@@ -612,6 +645,53 @@ class Tools {
         try { return $fn($params); } catch (Exception $e) { return CmdError::toolFailed($name, $e->getMessage()); }
     }
     public static function all(): array { return array_keys(self::$tools); }
+
+    // Curated tool schemas for Ollama's native function-calling API.
+    // A small, high-value set keeps local models reliable; everything else
+    // remains reachable via the text-format fallback parser.
+    public static function schemas(): array {
+        $str = fn($d) => ['type' => 'string', 'description' => $d];
+        $int = fn($d) => ['type' => 'integer', 'description' => $d];
+        $fn = fn($name, $desc, $props, $required) => [
+            'type' => 'function',
+            'function' => [
+                'name' => $name,
+                'description' => $desc,
+                'parameters' => ['type' => 'object', 'properties' => $props, 'required' => $required],
+            ],
+        ];
+        return [
+            $fn('view', 'Read a file with line numbers.', [
+                'file_path' => $str('Path to the file to read'),
+                'offset' => $int('Start line (0-based, optional)'),
+                'limit' => $int('Maximum number of lines (optional)'),
+            ], ['file_path']),
+            $fn('write', 'Create a new file or overwrite an existing file with the given content.', [
+                'file_path' => $str('Path of the file to write'),
+                'content' => $str('Full content to write to the file'),
+            ], ['file_path', 'content']),
+            $fn('edit', 'Replace the first occurrence of old_string with new_string in a file.', [
+                'file_path' => $str('Path of the file to edit'),
+                'old_string' => $str('Exact existing text to replace'),
+                'new_string' => $str('Replacement text'),
+            ], ['file_path', 'old_string', 'new_string']),
+            $fn('ls', 'List the contents of a directory.', [
+                'path' => $str('Directory path (defaults to current directory)'),
+            ], []),
+            $fn('grep', 'Search file contents recursively for a regular-expression pattern.', [
+                'pattern' => $str('Regex pattern to search for'),
+                'path' => $str('Directory or file to search (defaults to .)'),
+                'include' => $str('Optional glob filter, e.g. *.php'),
+            ], ['pattern']),
+            $fn('glob', 'Find files matching a glob pattern.', [
+                'pattern' => $str('Glob pattern, e.g. **/*.php'),
+                'path' => $str('Base directory (defaults to .)'),
+            ], ['pattern']),
+            $fn('bash', 'Run a shell command and return its output.', [
+                'command' => $str('The shell command to execute'),
+            ], ['command']),
+        ];
+    }
 }
 
 class CmdError {
@@ -1706,7 +1786,14 @@ class Agent {
     public function __construct() {
         $this->client = new OllamaClient();
         $models = $this->client->listModels();
-        $this->model = !empty($models) ? $models[0] : 'llama3.2:latest';
+        $default = Config::get('ollama.defaultModel', '');
+        // Prefer the configured/-m model if it's actually installed; otherwise
+        // fall back to the first installed model so we never target a missing one.
+        if ($default && in_array($default, $models, true)) {
+            $this->model = $default;
+        } else {
+            $this->model = !empty($models) ? $models[0] : ($default ?: 'llama3.2:latest');
+        }
         $this->systemPrompt = $this->buildSystemPrompt();
     }
 
@@ -1717,7 +1804,7 @@ class Agent {
         $projectMemory = '';
         $memoryFiles = ['OLLAMADEV.md', '.ollamadev.md', '.ollamadev'];
         foreach ($memoryFiles as $mf) {
-            if (file_exists($mf)) {
+            if (is_file($mf)) {
                 $projectMemory = "\n\nPROJECT CONTEXT (from $mf):\n" . file_get_contents($mf);
                 break;
             }
@@ -1843,15 +1930,44 @@ COMPACT/SUMMARIZE:
 public function run(array $messages, callable $handler = null): string {
         $allMessages = array_merge([$this->systemPrompt], $messages);
         $response = '';
-        $this->client->chat($allMessages, function($chunk) use (&$response, $handler) {
+        $this->client->chatWithModel($this->model, $allMessages, function($chunk) use (&$response, $handler) {
             $response .= $chunk;
             if ($handler) $handler($chunk);
         });
         return $response;
     }
 
-    public function parseAndExecuteTools(string $content): array {
-        $calls = $this->parseToolCalls($content);
+    // One model turn. Uses Ollama's native function-calling when the model
+    // supports it (structured tool_calls, no parsing); otherwise falls back to
+    // text-format parsing. Returns ['content'=>string, 'calls'=>[...]].
+    public function chatTurn(array $messages): array {
+        $allMessages = array_merge([$this->systemPrompt], $messages);
+
+        // Try native tools unless we've already learned this model lacks support.
+        if (($GLOBALS['nativeTools'][$this->model] ?? null) !== false) {
+            $res = $this->client->chatWithTools($this->model, $allMessages, Tools::schemas());
+            if (!empty($res['ok'])) {
+                $GLOBALS['nativeTools'][$this->model] = true;
+                $calls = $res['calls'];
+                // Some models emit text-format calls even in native mode; catch them.
+                if (empty($calls)) $calls = $this->parseToolCalls($res['content']);
+                return ['content' => $res['content'], 'calls' => $calls];
+            }
+            if (!empty($res['unsupported'])) {
+                $GLOBALS['nativeTools'][$this->model] = false; // remember and stop retrying
+            } else {
+                // Transient/other error: surface as empty turn rather than looping.
+                return ['content' => $res['error'] ?? '', 'calls' => []];
+            }
+        }
+
+        // Text-format fallback.
+        $response = $this->run($messages);
+        return ['content' => $response, 'calls' => $this->parseToolCalls($response)];
+    }
+
+    // Execute a list of ['name'=>, 'params'=>] calls, returning tool-role results.
+    public function executeCalls(array $calls): array {
         $results = [];
         foreach ($calls as $call) {
             $tool = Tools::find($call['name']);
@@ -1859,13 +1975,66 @@ public function run(array $messages, callable $handler = null): string {
             $result = $tool ? Tools::run($call['name'], $params) : "Error: tool '{$call['name']}' not found";
             if (preg_match('/^FILE_WRITE:(.+)/', $result, $m)) { $GLOBALS['editedFiles'][] = $m[1]; }
             elseif (preg_match('/^FILE_EDIT:(.+)/', $result, $m)) { $GLOBALS['editedFiles'][] = $m[1]; }
-            $results[] = ['role' => 'tool', 'content' => $result];
+            $results[] = ['role' => 'tool', 'name' => $call['name'], 'content' => $result];
         }
         return $results;
     }
 
+    public function parseAndExecuteTools(string $content): array {
+        return $this->executeCalls($this->parseToolCalls($content));
+    }
+
+    // Scan for balanced JSON objects that look like tool calls. Robust to
+    // missing/garbled close tags, code fences, and nested argument objects -
+    // the common failure modes for small local models. Returns name/params/raw.
+    public static function extractJsonToolCalls(string $content): array {
+        $calls = [];
+        $len = strlen($content);
+        for ($i = 0; $i < $len; $i++) {
+            if ($content[$i] !== '{') continue;
+            $depth = 0; $inStr = false; $esc = false; $end = -1;
+            for ($j = $i; $j < $len; $j++) {
+                $c = $content[$j];
+                if ($inStr) {
+                    if ($esc) $esc = false;
+                    elseif ($c === '\\') $esc = true;
+                    elseif ($c === '"') $inStr = false;
+                    continue;
+                }
+                if ($c === '"') $inStr = true;
+                elseif ($c === '{') $depth++;
+                elseif ($c === '}') { $depth--; if ($depth === 0) { $end = $j; break; } }
+            }
+            if ($end < 0) break; // unbalanced from here on
+            $raw = substr($content, $i, $end - $i + 1);
+            $json = json_decode($raw, true);
+            if (is_array($json) && isset($json['name']) && is_string($json['name'])) {
+                $args = $json['arguments'] ?? $json['params'] ?? $json['input'] ?? [];
+                if (!is_array($args)) $args = [];
+                $calls[] = ['name' => $json['name'], 'params' => $args, 'raw' => $raw];
+                $i = $end; // skip consumed object
+            }
+        }
+        return $calls;
+    }
+
+    // Remove tool-call markup (tags + JSON objects) from text meant for display.
+    public function stripToolMarkup(string $content): string {
+        foreach (self::extractJsonToolCalls($content) as $c) {
+            $content = str_replace($c['raw'], '', $content);
+        }
+        $content = preg_replace('/<\/?tool_(code|call)>/', '', $content);
+        return trim($content);
+    }
+
 public function parseToolCalls(string $content): array {
         $calls = [];
+
+        // Primary: balanced-JSON extraction (most reliable for local models).
+        $jsonCalls = self::extractJsonToolCalls($content);
+        if (!empty($jsonCalls)) {
+            return array_map(fn($c) => ['name' => $c['name'], 'params' => $c['params']], $jsonCalls);
+        }
 
 if (preg_match_all('/<tool_code>\s*(\{.*?\})\s*<\/tool_code>/s', $content, $matches, PREG_SET_ORDER)) {
             foreach ($matches as $m) {
@@ -2561,7 +2730,10 @@ class Session {
         Permission::autoAllow();
         $this->agent = new Agent();
         if ($sessionId) { $this->load($sessionId); }
-        else { $this->id = 'session_' . time() . '_' . substr(md5(mt_rand()), 0, 8); $this->title = "Session " . date('Y-m-d H:i'); $this->model = $this->getLatestModel(); }
+        else { $this->id = 'session_' . time() . '_' . substr(md5(mt_rand()), 0, 8); $this->title = "Session " . date('Y-m-d H:i'); $this->model = $this->agent->getModel(); }
+        // Keep the agent and session pointed at the same model.
+        $this->agent->setModel($this->model);
+        $GLOBALS['currentSessionModel'] = $this->model;
     }
 
     private function ensureDataDir(): void { $dir = Config::sessionsDir(); if (!is_dir($dir)) mkdir($dir, 0755, true); }
@@ -2743,6 +2915,7 @@ return "Available: " . implode(', ', array_keys($gitAliases)) . "\n";
 
     private function countTokens(): int { $total = 0; foreach ($this->messages as $msg) $total += strlen($msg['content'] ?? '') / 4; return (int)$total; }
     private function renderStatus(): void { echo "\n[Model: {$this->model} | Tokens: ~" . $this->countTokens() . " | Messages: " . count($this->messages) . "]\n"; }
+    private function renderPrompt(): void { echo "\n› "; }
     private function showContext(): void {
         $pwd = getcwd();
         $edited = $GLOBALS['editedFiles'] ?? [];
@@ -2755,9 +2928,15 @@ $GLOBALS['currentSessionModel'] = null;
     }
 
     private function handleCommand(string $input): bool {
+        // Slash commands share one implementation with the -p path.
+        if (str_starts_with(trim($input), '/')) {
+            $result = $this->handleSlashCommand($input);
+            if ($result !== false) { echo $result; }
+            return false; // exit/quit terminate via exit(0) inside their handlers
+        }
+
         $parts = preg_split('/\s+/', trim($input), 2);
         $cmd = strtolower($parts[0]);
-        if (str_starts_with($cmd, '/')) $cmd = substr($cmd, 1);
         $args = $parts[1] ?? '';
 
         switch ($cmd) {
@@ -2882,26 +3061,8 @@ $GLOBALS['currentSessionModel'] = null;
             $thinkMsg = $thinkingMsgs[array_rand($thinkingMsgs)];
             echo "\n🤖 $thinkMsg\n\n";
 
-            $response = '';
-            $this->agent->run($this->getMessages(), function($chunk) use (&$response) {
-                echo $chunk;
-                $response .= $chunk;
-            });
-
+            $this->agenticLoop(function($chunk) { echo $chunk; });
             echo "\n";
-
-            $toolResults = $this->agent->parseAndExecuteTools($response);
-            foreach ($toolResults as $result) {
-                $this->addMessage($result['role'], $result['content']);
-                if (preg_match('/^(FILE_WRITE:|FILE_EDIT:)/', $result['content'])) continue;
-                echo "\n🔧 [tool]\n{$result['content']}\n";
-            }
-
-            if (empty($toolResults) && !empty(trim($response))) {
-                $this->addMessage('assistant', $response);
-            } elseif (!empty($toolResults)) {
-                $this->addMessage('assistant', $response);
-            }
 
             $this->showContext();
 
@@ -2948,26 +3109,47 @@ $GLOBALS['currentSessionModel'] = null;
         }
 
         $this->addMessage('user', $prompt);
-        $thinkingMsgs = ['Thinking...', 'Working on it...', 'Analyzing...', 'Processing...'];
-        echo $thinkingMsgs[array_rand($thinkingMsgs)] . "\n";
-        $response = '';
-        $this->agent->run($this->getMessages(), function($chunk) use (&$response) {
-            $response .= $chunk;
-        });
-        echo "\nTool Results:\n";
-        $toolResults = $this->agent->parseAndExecuteTools($response);
-        foreach ($toolResults as $result) {
-            $this->addMessage($result['role'], $result['content']);
-            echo "[{$result['role']}]\n{$result['content']}\n";
-        }
-        if (empty($toolResults)) {
-            echo "(no tools called)\n";
-        }
+        echo "Thinking...\n";
+        $final = $this->agenticLoop(null);
+        echo "\n" . $final . "\n";
         $this->showContext();
-        $response = preg_replace('/<tool_call>[\s\S]*?<\/tool_call>/', '', $response);
-        $this->addMessage('assistant', $response);
         $this->save();
-        return $response;
+        return $final;
+    }
+
+    // Run the model, execute any tool calls, feed results back, and repeat
+    // until the model produces an answer with no tool calls (or we hit the cap).
+    // $emit is an optional callback for streaming output to the terminal.
+    private function agenticLoop(?callable $emit): string {
+        $maxIter = (int)Config::get('agents.maxIterations', 8);
+        $final = '';
+        for ($i = 0; $i < $maxIter; $i++) {
+            $turn = $this->agent->chatTurn($this->getMessages());
+            $response = $turn['content'];
+            $calls = $turn['calls'];
+
+            $clean = $this->agent->stripToolMarkup($response);
+            // Store the assistant turn (cleaned, so markup doesn't pollute history).
+            $this->addMessage('assistant', $clean !== '' ? $clean : $response);
+
+            $toolResults = $this->agent->executeCalls($calls);
+            if (empty($toolResults)) {
+                if ($emit) $emit($clean !== '' ? $clean : trim($response));
+                return $clean !== '' ? $clean : trim($response);
+            }
+
+            // Show the model's reasoning text (without the tool markup) before results.
+            if ($clean !== '' && $emit) $emit($clean . "\n");
+            foreach ($toolResults as $result) {
+                $this->addMessage('tool', $result['content']);
+                if ($emit && !preg_match('/^(FILE_WRITE:|FILE_EDIT:)/', $result['content'])) {
+                    $emit("\n🔧 [tool]\n{$result['content']}\n");
+                }
+            }
+            $final = $clean;
+        }
+        if ($emit) $emit("\n(reached max tool iterations)\n");
+        return $final;
     }
 }
 
