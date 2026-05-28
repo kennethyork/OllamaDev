@@ -1,0 +1,144 @@
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/vendor/autoload.php';
+
+use Boson\Application;
+use Boson\ApplicationCreateInfo;
+use Boson\Window\WindowCreateInfo;
+use Boson\WebView\WebViewCreateInfo;
+use Boson\WebView\Api\Bindings\BindingsExtension;
+use Boson\WebView\Api\Scripts\ScriptsExtension;
+use Boson\WebView\Api\Data\DataExtension;
+use Boson\WebView\Api\Security\SecurityExtension;
+use Boson\WebView\Api\Schemes\SchemesExtension;
+use Boson\WebView\Api\LifecycleEvents\LifecycleEventsExtension;
+use OllamaDev\AssetInliner;
+use OllamaDev\Config;
+use OllamaDev\OllamaClient;
+use OllamaDev\SessionManager;
+use OllamaDev\MemoryStore;
+use OllamaDev\TaskStore;
+use OllamaDev\FileBrowser;
+
+Config::load();
+
+$html = file_get_contents(__DIR__ . '/public/index.html');
+
+$inliner = new AssetInliner(__DIR__);
+$html = $inliner->inlineAssets($html);
+
+$webviewCreateInfo = new WebViewCreateInfo(
+    extensions: [
+        new ScriptsExtension(),
+        new BindingsExtension(),
+        new DataExtension(),
+        new SecurityExtension(),
+        new SchemesExtension(),
+        new LifecycleEventsExtension(),
+    ],
+);
+
+$windowCreateInfo = new WindowCreateInfo(
+    title: 'OllamaDev ADE',
+    width: 1400,
+    height: 900,
+    visible: true,
+    resizable: true,
+    webview: $webviewCreateInfo,
+);
+
+$appInfo = new ApplicationCreateInfo(
+    name: 'OllamaDev ADE',
+    window: $windowCreateInfo,
+);
+
+$app = new Application($appInfo);
+
+$ollama = new OllamaClient();
+$sessions = new SessionManager();
+$memory = new MemoryStore();
+$tasks = new TaskStore();
+$files = new FileBrowser();
+
+$app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $ollama, $sessions, $memory, $tasks, $files) {
+    /** @var \Boson\WebView\WebView $webview */
+    $webview = $app->window->webview;
+
+    $webview->html = $html;
+
+    $bindings = $webview->get('bindings');
+
+    $bindings->bind('ollamaStatus', function () use ($ollama): array {
+        $connected = $ollama->checkConnection();
+        $models = $connected ? $ollama->listModelsDetailed() : [];
+        return ['connected' => $connected, 'models' => $models];
+    });
+
+    $bindings->bind('getTasks', function () use ($tasks): array {
+        return $tasks->all();
+    });
+
+    $bindings->bind('createTask', function (array $data) use ($tasks): string {
+        return $tasks->create($data);
+    });
+
+    $bindings->bind('updateTask', function (string $id, array $data) use ($tasks): bool {
+        return $tasks->update($id, $data);
+    });
+
+    $bindings->bind('deleteTask', function (string $id) use ($tasks): bool {
+        return $tasks->delete($id);
+    });
+
+    $bindings->bind('getNotes', function () use ($memory): array {
+        return $memory->listNotes();
+    });
+
+    $bindings->bind('getNote', function (string $id) use ($memory): ?array {
+        return $memory->get($id);
+    });
+
+    $bindings->bind('createNote', function (string $title, string $content = '') use ($memory): string {
+        return $memory->create($title, $content);
+    });
+
+    $bindings->bind('updateNote', function (string $id, array $data) use ($memory): bool {
+        return $memory->update($id, $data);
+    });
+
+    $bindings->bind('deleteNote', function (string $id) use ($memory): bool {
+        return $memory->delete($id);
+    });
+
+    $bindings->bind('getSessions', function () use ($sessions): array {
+        return $sessions->listTerminals();
+    });
+
+    $bindings->bind('createSession', function (string $model) use ($sessions): string {
+        return $sessions->createTerminal($model);
+    });
+
+    $bindings->bind('getSessionOutput', function (string $id, int $lines = 100) use ($sessions): string {
+        return $sessions->getTerminalOutput($id, $lines);
+    });
+
+    $bindings->bind('writeToSession', function (string $id, string $input) use ($sessions): bool {
+        return $sessions->writeToTerminal($id, $input);
+    });
+
+    $bindings->bind('killSession', function (string $id) use ($sessions): bool {
+        return $sessions->killTerminal($id);
+    });
+
+    $bindings->bind('listFiles', function (?string $path = null) use ($files): array {
+        return $files->listDir($path);
+    });
+
+    $bindings->bind('searchFiles', function (string $query, ?string $path = null) use ($files): array {
+        return $files->search($query, $path);
+    });
+});
+
+$app->run();

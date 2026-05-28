@@ -1,0 +1,132 @@
+.memory-header {
+    padding: 12px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.memory-container {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+}
+
+.notes-list {
+    width: 240px;
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border-color);
+    overflow-y: auto;
+}
+
+.note-item {
+    padding: 12px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border-color);
+    transition: all 0.15s;
+}
+
+.note-item:hover {
+    background: var(--bg-hover);
+}
+
+.note-item.active {
+    background: var(--bg-tertiary);
+    border-left: 3px solid var(--accent);
+}
+
+.note-item-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.note-item-meta {
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+.note-item-links {
+    font-size: 10px;
+    color: var(--accent);
+    margin-top: 4px;
+}
+
+.note-editor {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary);
+}
+
+.note-editor textarea {
+    flex: 1;
+    padding: 16px;
+    background: var(--bg-primary);
+    border: none;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.6;
+    resize: none;
+    outline: none;
+}
+
+.note-editor textarea::placeholder {
+    color: var(--text-muted);
+}
+
+.note-toolbar {
+    padding: 8px 16px;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.note-toolbar span {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.wikilink {
+    color: var(--accent);
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.wikilink:hover {
+    text-decoration: underline;
+}
+
+.backlinks-section {
+    padding: 12px;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-color);
+}
+
+.backlinks-header {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+}
+
+.backlink-item {
+    padding: 6px 8px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    margin-bottom: 4px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.backlink-item:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
