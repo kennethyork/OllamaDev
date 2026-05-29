@@ -308,3 +308,7 @@
 .prompt-add { display: flex; gap: 6px; }
 .prompt-add input { flex: 1; }
 .agent-prompts { background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-secondary); border-radius: var(--radius-md); font-size: 12px; max-width: 40px; cursor: pointer; }
+
+/* CodeMirror editor host */
+.editor-host { flex: 1; min-height: 0; overflow: hidden; }
+.editor-host .CodeMirror { height: 100%; font-family: var(--font-mono); font-size: 13px; }

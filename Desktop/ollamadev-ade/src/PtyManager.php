@@ -21,6 +21,11 @@ class PtyManager
 
     // Locate the ollamadev CLI binary: explicit override, then installed copy,
     // then PATH, then a repo checkout.
+    public static function cliBinary(): string
+    {
+        return self::resolveBinary();
+    }
+
     private static function resolveBinary(): string
     {
         if (defined('OLLAMADEV_BINARY') && OLLAMADEV_BINARY) return OLLAMADEV_BINARY;

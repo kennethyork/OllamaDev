@@ -600,6 +600,15 @@ if ($argc >= 2 && $argv[1] === 'upgrade') {
 if ($argc >= 2 && $argv[1] === 'models') {
     $config = Config::load();
     $client = new OllamaClient($config['ollama']['host'] ?? 'http://localhost:11434');
+    // Machine-readable status - single source for the desktop app.
+    if (in_array('--json', $argv, true)) {
+        $connected = $client->checkConnection();
+        echo json_encode([
+            'connected' => $connected,
+            'models' => $connected ? $client->listModelsDetailed() : [],
+        ]);
+        exit(0);
+    }
     $models = $client->listModels();
     echo "Available Models:\n";
     foreach ($models as $m) echo "  $m\n";
@@ -607,6 +616,7 @@ if ($argc >= 2 && $argv[1] === 'models') {
 }
 
 // Providers Command
+
 if ($argc >= 2 && $argv[1] === 'providers') {
     $config = Config::load();
     echo "OllamaDev Provider Configuration\n";

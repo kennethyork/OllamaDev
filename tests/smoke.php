@@ -143,6 +143,26 @@ if (getenv('SMOKE_NET')) {
     echo "  \033[2m· skipped live search (set SMOKE_NET=1 to enable)\033[0m\n";
 }
 
+echo "\n== Agent loop (end-to-end) ==\n";
+// Real model run, gated behind SMOKE_MODEL (set to an installed tool-capable
+// model, e.g. SMOKE_MODEL=mistral:latest). Verifies prompt -> tool -> result.
+$smokeModel = getenv('SMOKE_MODEL');
+if ($smokeModel) {
+    $target = sys_get_temp_dir() . '/smoke_agent_' . getmypid() . '.txt';
+    $ok = false;
+    // Retry: small/local models are probabilistic, so allow a couple of tries.
+    for ($attempt = 0; $attempt < 2 && !$ok; $attempt++) {
+        @unlink($target);
+        run_bin(['-m', $smokeModel, '--auto', '-p',
+            "Use the write tool now to create the file $target with the exact content: OK"]);
+        $ok = is_file($target) && stripos((string)@file_get_contents($target), 'OK') !== false;
+    }
+    ok("agent creates a file via the write tool ($smokeModel)", $ok);
+    @unlink($target);
+} else {
+    echo "  \033[2m· skipped (set SMOKE_MODEL=<installed model> to run)\033[0m\n";
+}
+
 echo "\n== Terminal daemon lifecycle ==\n";
 $tid = 'smoke-' . getmypid();
 $tdir = (getenv('HOME') ?: '/tmp') . '/.ollamadev/terminals/' . $tid;

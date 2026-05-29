@@ -48,10 +48,21 @@ class AssetInliner
         $xtermJs = @file_get_contents($vendorDir . '/xterm.js') ?: '';
         $xtermFit = @file_get_contents($vendorDir . '/xterm-addon-fit.js') ?: '';
 
+        // Bundle CodeMirror (core + theme + modes) for the editor, offline.
+        $cm = $vendorDir . '/cm';
+        $cmCss = (@file_get_contents("$cm/codemirror.css") ?: '') . "\n" . (@file_get_contents("$cm/dracula.css") ?: '');
+        $cmJs = @file_get_contents("$cm/codemirror.js") ?: '';
+        // Modes in dependency order (clike/xml/css/javascript before htmlmixed/php).
+        foreach (['clike', 'xml', 'css', 'javascript', 'htmlmixed', 'php', 'python', 'markdown', 'shell', 'yaml'] as $mode) {
+            $cmJs .= "\n" . (@file_get_contents("$cm/$mode.js") ?: '');
+        }
+
         $script = <<<HTML
 <style id="ollamadev-xterm-css">{$xtermCss}</style>
 <script>{$xtermJs}</script>
 <script>{$xtermFit}</script>
+<style id="ollamadev-cm-css">{$cmCss}</style>
+<script>{$cmJs}</script>
 <style id="ollamadev-inlined-css">{$allCss}</style>
 <style id="ollamadev-theme"></style>
 <script>

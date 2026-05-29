@@ -16,13 +16,13 @@ use Boson\WebView\Api\Schemes\SchemesExtension;
 use Boson\WebView\Api\LifecycleEvents\LifecycleEventsExtension;
 use OllamaDev\AssetInliner;
 use OllamaDev\Config;
-use OllamaDev\OllamaClient;
 use OllamaDev\SessionManager;
 use OllamaDev\MemoryStore;
 use OllamaDev\TaskStore;
 use OllamaDev\FileBrowser;
 use OllamaDev\PromptStore;
 use OllamaDev\SettingsStore;
+use OllamaDev\PtyManager;
 
 Config::load();
 
@@ -58,7 +58,6 @@ $appInfo = new ApplicationCreateInfo(
 
 $app = new Application($appInfo);
 
-$ollama = new OllamaClient();
 $sessions = new SessionManager();
 $memory = new MemoryStore();
 $tasks = new TaskStore();
@@ -66,7 +65,7 @@ $files = new FileBrowser();
 $prompts = new PromptStore();
 $settings = new SettingsStore();
 
-$app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $ollama, $sessions, $memory, $tasks, $files, $prompts, $settings) {
+$app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $sessions, $memory, $tasks, $files, $prompts, $settings) {
     /** @var \Boson\WebView\WebView $webview */
     $webview = $app->window->webview;
 
@@ -74,10 +73,13 @@ $app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $
 
     $bindings = $webview->get('bindings');
 
-    $bindings->bind('ollamaStatus', function () use ($ollama): array {
-        $connected = $ollama->checkConnection();
-        $models = $connected ? $ollama->listModelsDetailed() : [];
-        return ['connected' => $connected, 'models' => $models];
+    $bindings->bind('ollamaStatus', function (): array {
+        // Single source of truth: ask the ollamadev CLI for models/status.
+        $bin = PtyManager::cliBinary();
+        $out = shell_exec('php ' . escapeshellarg($bin) . ' models --json 2>/dev/null');
+        $data = json_decode((string)$out, true);
+        if (is_array($data) && isset($data['connected'])) return $data;
+        return ['connected' => false, 'models' => []];
     });
 
     $bindings->bind('getTasks', function () use ($tasks): array {

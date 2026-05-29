@@ -272,6 +272,20 @@ class App {
         await this.loadSessions();
     }
 
+    cmModeFor(path) {
+        const ext = (path.split('.').pop() || '').toLowerCase();
+        const map = {
+            js: 'javascript', mjs: 'javascript', json: { name: 'javascript', json: true },
+            ts: 'text/typescript', jsx: 'javascript', tsx: 'text/typescript',
+            php: 'php', py: 'python', css: 'css', scss: 'css',
+            html: 'htmlmixed', htm: 'htmlmixed', xml: 'xml', svg: 'xml',
+            md: 'markdown', markdown: 'markdown', yml: 'yaml', yaml: 'yaml',
+            sh: 'shell', bash: 'shell', c: 'text/x-csrc', h: 'text/x-csrc',
+            cpp: 'text/x-c++src', go: 'text/x-go', rs: 'text/x-rustsrc', java: 'text/x-java',
+        };
+        return map[ext] || null;
+    }
+
     async openInEditor(path) {
         try {
             const r = await window.readFile(path);
@@ -284,36 +298,44 @@ class App {
                     <span class="editor-status" id="editorStatus"></span>
                     <button class="editor-save" id="editorSave">Save</button>
                 </div>
-                <textarea class="editor-area" id="editorArea" spellcheck="false"></textarea>
+                <div class="editor-host" id="editorHost"></div>
             `;
-            const area = document.getElementById('editorArea');
-            area.value = r.content || '';
             this._editorPath = path;
+            const host = document.getElementById('editorHost');
             const markDirty = () => { document.getElementById('editorStatus').textContent = '● unsaved'; };
-            area.addEventListener('input', markDirty);
-            // Tab inserts a tab character instead of moving focus.
-            area.addEventListener('keydown', (e) => {
-                if (e.key === 'Tab') {
-                    e.preventDefault();
-                    const s = area.selectionStart, en = area.selectionEnd;
-                    area.value = area.value.slice(0, s) + '    ' + area.value.slice(en);
-                    area.selectionStart = area.selectionEnd = s + 4;
-                    markDirty();
-                } else if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-                    e.preventDefault();
-                    this.saveEditor();
-                }
-            });
+
+            if (window.CodeMirror) {
+                this._cm = window.CodeMirror(host, {
+                    value: r.content || '',
+                    mode: this.cmModeFor(path),
+                    theme: 'dracula',
+                    lineNumbers: true,
+                    indentUnit: 4,
+                    tabSize: 4,
+                    lineWrapping: false,
+                });
+                this._cm.setSize('100%', '100%');
+                this._cm.on('change', markDirty);
+                this._cm.setOption('extraKeys', { 'Cmd-S': () => this.saveEditor(), 'Ctrl-S': () => this.saveEditor() });
+                setTimeout(() => this._cm.refresh(), 0);
+            } else {
+                // Fallback: plain textarea if CodeMirror failed to load.
+                host.innerHTML = '<textarea class="editor-area" id="editorArea" spellcheck="false"></textarea>';
+                const area = document.getElementById('editorArea');
+                area.value = r.content || '';
+                area.addEventListener('input', markDirty);
+                this._cm = null;
+            }
             document.getElementById('editorSave').addEventListener('click', () => this.saveEditor());
         } catch (e) { console.error('openInEditor failed', e); }
     }
 
     async saveEditor() {
-        const area = document.getElementById('editorArea');
-        if (!area || !this._editorPath) return;
+        if (!this._editorPath) return;
         const status = document.getElementById('editorStatus');
+        const content = this._cm ? this._cm.getValue() : (document.getElementById('editorArea')?.value ?? '');
         try {
-            const r = await window.writeFile(this._editorPath, area.value);
+            const r = await window.writeFile(this._editorPath, content);
             status.textContent = (r && r.error) ? '✗ ' + r.error : '✓ saved';
         } catch (e) { status.textContent = '✗ save failed'; }
     }
