@@ -466,6 +466,8 @@ var App = {
                 sel.innerHTML = opts.map(function (m) { return '<option' + (m === pick ? ' selected' : '') + '>' + esc(m) + '</option>'; }).join('');
             }
         }
+        var hint = $('#crewDirHint');
+        if (hint) hint.textContent = 'Runs in: ' + (this.cwd || '.') + '  (navigate the sidebar to pick a project; needs a git repo)';
         o.hidden = false; var t = $('#crewTask'); if (t) t.focus();
     },
     closeCrew: function () { var o = $('#modalOverlay'); if (o) o.hidden = true; },
@@ -484,7 +486,10 @@ var App = {
         model = model || $('#modelSelect').value || 'llama3.2:latest';
         var cli = this.cli || 'ollamadev';
         var q = "'" + String(task).replace(/'/g, "'\\''") + "'"; // shell single-quote
-        var cmd = cli + ' crew ' + q + ' --max ' + (parseInt(max, 10) || 2) + ' -m ' + model + (review ? ' --review' : '');
+        // Run in the folder shown in the sidebar, so Crew works on whatever
+        // project you've navigated to — not the ADE's own directory.
+        var dir = this.cwd && this.cwd !== '.' ? "cd '" + this.cwd.replace(/'/g, "'\\''") + "' && " : '';
+        var cmd = dir + cli + ' crew ' + q + ' --max ' + (parseInt(max, 10) || 2) + ' -m ' + model + (review ? ' --review' : '');
         var id = rid(); var t = new Terminal(id, 'crew');
         var self = this;
         Promise.resolve(window.termCreate(id, model)).then(function () {
