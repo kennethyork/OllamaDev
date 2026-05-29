@@ -484,14 +484,12 @@ var App = {
     },
     render: function () {
         var wrap = $('#terminals');
-        // A zoomed terminal takes the whole area; otherwise auto-tile into a
-        // near-square grid: ceil(sqrt(n)) columns, up to 4×4 (16).
+        // A zoomed terminal takes the whole area; otherwise the CSS responsive
+        // grid fits as many readable-width panes as possible and scrolls for more.
         if (this.zoomed && !this.terminals.some(function (t) { return t.id === this.zoomed; }, this)) this.zoomed = null;
         var list = this.zoomed ? this.terminals.filter(function (t) { return t.id === this.zoomed; }) : this.terminals;
-        var n = list.length;
-        var cols = (this.zoomed || n <= 1) ? 1 : Math.min(4, Math.ceil(Math.sqrt(n)));
         wrap.className = this.zoomed ? 'zoomed' : '';
-        wrap.style.gridTemplateColumns = 'repeat(' + cols + ', minmax(0, 1fr))';
+        wrap.style.gridTemplateColumns = ''; // let the stylesheet drive columns
         wrap.innerHTML = '';
         list.forEach(function (t) {
             var pane = document.createElement('div');

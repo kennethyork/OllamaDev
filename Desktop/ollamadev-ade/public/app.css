@@ -146,8 +146,11 @@ body {
 .ed-text { flex: 1; resize: none; border: none; outline: none; padding: 10px 14px; background: var(--bg); color: var(--fg); font-family: var(--mono); font-size: 13px; line-height: 1.55; white-space: pre; overflow: auto; tab-size: 4; }
 .ed-status { position: absolute; right: 14px; bottom: 10px; font-size: 11px; color: var(--dim); background: var(--elev); border: 1px solid var(--border); border-radius: 20px; padding: 3px 11px; pointer-events: none; box-shadow: var(--shadow); }
 
-/* ===== terminals grid ===== (columns set inline by App.render, 1–16) */
-#terminals { flex: 1 1 40%; display: grid; gap: 8px; padding: 8px; min-height: 0; grid-auto-rows: minmax(0,1fr); grid-template-columns: 1fr; }
+/* ===== terminals grid ===== responsive: keeps a readable min size and scrolls
+   vertically instead of shrinking every pane to nothing at high counts. */
+#terminals { flex: 1 1 40%; display: grid; gap: 8px; padding: 8px; min-height: 0; overflow-y: auto;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); grid-auto-rows: minmax(260px, 1fr); }
+#terminals.zoomed { grid-template-columns: 1fr; grid-auto-rows: 1fr; overflow: hidden; }
 .term-pane { display: flex; flex-direction: column; min-height: 0; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; transition: border-color .15s; }
 .term-pane:focus-within { border-color: var(--accent); }
 #terminals.zoomed .term-pane { box-shadow: var(--shadow); }
