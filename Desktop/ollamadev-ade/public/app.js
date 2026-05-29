@@ -488,8 +488,13 @@ var App = {
         // grid fits as many readable-width panes as possible and scrolls for more.
         if (this.zoomed && !this.terminals.some(function (t) { return t.id === this.zoomed; }, this)) this.zoomed = null;
         var list = this.zoomed ? this.terminals.filter(function (t) { return t.id === this.zoomed; }) : this.terminals;
-        wrap.className = this.zoomed ? 'zoomed' : '';
-        wrap.style.gridTemplateColumns = ''; // let the stylesheet drive columns
+        var n = list.length;
+        // Fit all panes; shrink the font as the count rises so code stays legible.
+        var cols = this.zoomed || n <= 1 ? 1 : Math.min(4, Math.ceil(Math.sqrt(n)));
+        var fs = this.zoomed ? 13 : n <= 2 ? 13 : n <= 4 ? 12 : n <= 6 ? 11 : n <= 9 ? 10 : 9;
+        wrap.className = (this.zoomed ? 'zoomed' : '') + (!this.zoomed && n > 6 ? ' dense' : '');
+        wrap.style.gridTemplateColumns = 'repeat(' + cols + ', minmax(0, 1fr))';
+        wrap.style.setProperty('--tfs', fs + 'px');
         wrap.innerHTML = '';
         list.forEach(function (t) {
             var pane = document.createElement('div');
