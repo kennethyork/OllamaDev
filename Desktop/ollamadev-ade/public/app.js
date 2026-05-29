@@ -462,7 +462,7 @@ var App = {
     launchCli: function (id, model) {
         // SIMPLE_INPUT: the CLI uses plain line input so the embedded terminal
         // (which the host pty echoes into) renders cleanly without raw-mode escapes.
-        var cmd = 'OLLAMADEV_SIMPLE_INPUT=1 OLLAMADEV_NO_BANNER=1 ' + (this.cli || 'ollamadev') + (model ? ' -m ' + model : '') + '\n';
+        var cmd = 'OLLAMADEV_SIMPLE_INPUT=1 ' + (this.cli || 'ollamadev') + (model ? ' -m ' + model : '') + '\n';
         // Small delay so the pty shell is ready to receive the command.
         setTimeout(function () { try { window.termWrite(id, strToB64(cmd)); } catch (e) {} }, 350);
     },
