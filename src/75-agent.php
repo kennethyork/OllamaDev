@@ -2,6 +2,7 @@ class Agent {
     private OllamaClient $client;
     private string $model;
     private array $systemPrompt;
+    private bool $chatMode = false; // when true: pure conversation, no tools
 
     public function __construct() {
         $this->client = new OllamaClient();
@@ -39,6 +40,20 @@ Use a tool ONLY when the request needs it. For greetings, questions, or explanat
     }
 
     public function setModel(string $model): void { $this->model = $model; }
+    public function setChatMode(bool $on): void { $this->chatMode = $on; }
+    public function isChatMode(): bool { return $this->chatMode; }
+
+    // Heuristic: treat models <= ~3.5GB as "small" - their tool-calling is
+    // unreliable, so chat mode is a better default for them.
+    public function isSmallModel(): bool {
+        foreach ($this->client->listModelsDetailed() as $m) {
+            if (($m['name'] ?? '') === $this->model) {
+                return (int)($m['size'] ?? 0) > 0 && (int)$m['size'] < 3_758_096_384;
+            }
+        }
+        // Fall back to a name hint (e.g. 1b/2b/3b/mini/tiny/small).
+        return (bool)preg_match('/(?:^|[:\-_ ])(0\.\d|1|1\.\d|2|2\.\d|3|3\.\d)b\b|mini|tiny|small|smollm/i', $this->model);
+    }
     public function getModel(): string { return $this->model; }
     public function listModels(): array { return $this->client->listModels(); }
     public function listModelsDetailed(): array { return $this->client->listModelsDetailed(); }
@@ -59,6 +74,13 @@ public function run(array $messages, callable $handler = null): string {
     // text-format parsing. Returns ['content'=>string, 'calls'=>[...]].
     public function chatTurn(array $messages): array {
         $allMessages = array_merge([$this->systemPrompt], $messages);
+
+        // Chat mode: pure conversation, no tools offered or parsed.
+        if ($this->chatMode) {
+            $resp = '';
+            $this->client->chatWithModel($this->model, $allMessages, function($c) use (&$resp) { $resp .= $c; });
+            return ['content' => $resp, 'calls' => []];
+        }
 
         // Try native tools unless we've already learned this model lacks support.
         if (($GLOBALS['nativeTools'][$this->model] ?? null) !== false) {

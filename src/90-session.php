@@ -18,6 +18,8 @@ class Session {
         // Keep the agent and session pointed at the same model.
         $this->agent->setModel($this->model);
         $GLOBALS['currentSessionModel'] = $this->model;
+        // Small models do tool-calling poorly; default them to pure chat.
+        $this->agent->setChatMode($this->agent->isSmallModel());
     }
 
     private function ensureDataDir(): void { $dir = Config::sessionsDir(); if (!is_dir($dir)) mkdir($dir, 0755, true); }
@@ -103,6 +105,7 @@ class Session {
             'cd' => $this->changeDir($args),
             'ls' => crossPlatformLs($args ?: '.') . "\n",
             'permission', 'permissions' => $this->managePermission($args),
+            'chat', 'agent' => $this->toggleChatMode($cmd, $args),
             default => false
         };
     }
@@ -167,8 +170,9 @@ class Session {
 ART;
         $out  = "\n{$c}{$b}{$art}{$r}\n";
         $out .= "{$d}  Local AI coding assistant · powered by Ollama{$r}\n\n";
-        $out .= "  {$d}model{$r} {$c}{$this->model}{$r}   {$d}· {$modelCount} available{$r}\n";
-        $out .= "  {$d}/help · /model · /exit{$r}\n\n";
+        $mode = $this->agent->isChatMode() ? 'chat' : 'agent';
+        $out .= "  {$d}model{$r} {$c}{$this->model}{$r}   {$d}· {$modelCount} available · {$mode} mode{$r}\n";
+        $out .= "  {$d}/help · /model · /chat · /exit{$r}\n\n";
         return $out;
     }
 
@@ -187,12 +191,30 @@ ART;
         return $out;
     }
 
+    // /chat [on|off] toggles pure-conversation mode; /agent enables tools.
+    private function toggleChatMode(string $cmd, string $args): string {
+        $arg = strtolower(trim($args));
+        if ($cmd === 'agent') {
+            $this->agent->setChatMode(false);
+        } elseif ($arg === 'off') {
+            $this->agent->setChatMode(false);
+        } elseif ($arg === 'on' || $arg === '') {
+            $this->agent->setChatMode($cmd === 'chat' ? true : !$this->agent->isChatMode());
+        }
+        return $this->agent->isChatMode()
+            ? "\033[36mChat mode\033[0m — pure conversation, tools disabled.\n"
+            : "\033[36mAgent mode\033[0m — tools enabled.\n";
+    }
+
     private function switchModel(string $name): string {
         if (empty($name)) return "Usage: /model <name>\n";
         $this->agent->setModel($name);
         $this->model = $name;
         $GLOBALS['currentSessionModel'] = $name;
-        return "Model: $name\n";
+        // Re-evaluate chat mode for the new model's size.
+        $this->agent->setChatMode($this->agent->isSmallModel());
+        $mode = $this->agent->isChatMode() ? " \033[2m(chat mode — small model)\033[0m" : '';
+        return "Model: $name$mode\n";
     }
 
     private function newSession(): string {
