@@ -19,6 +19,17 @@ class PtyManager
         }
     }
 
+    // Kill any leftover terminal processes and clear their dirs. Called at ADE
+    // startup so orphaned daemons/shells from a previous run don't accumulate.
+    public static function cleanupStale(): void
+    {
+        @exec("pkill -9 -f '__pty-daemon__' 2>/dev/null");
+        @exec("pkill -9 -f 'ollamadev/terminals/' 2>/dev/null");
+        $home = getenv('HOME') ?: '/tmp';
+        $base = $home . '/.ollamadev/terminals';
+        if (is_dir($base)) @exec('rm -rf ' . escapeshellarg($base) . '/* 2>/dev/null');
+    }
+
     // Locate the ollamadev CLI binary: explicit override, then installed copy,
     // then PATH, then a repo checkout.
     public static function cliBinary(): string
@@ -90,6 +101,10 @@ class PtyManager
             usleep(150000);
             @exec('kill -9 ' . (int)$pid . ' 2>/dev/null');
         }
+        // Also reap the daemon's children (script + bash + ollamadev), which a
+        // bare kill -9 on the daemon would otherwise orphan.
+        @exec('pkill -9 -f ' . escapeshellarg('__pty-daemon__ ' . $id) . ' 2>/dev/null');
+        @exec('pkill -9 -f ' . escapeshellarg('terminals/' . $id . '/od_rc.sh') . ' 2>/dev/null');
         $terminal['pid'] = null;
         $terminal['status'] = 'stopped';
         $this->saveTerminal($id, $terminal);

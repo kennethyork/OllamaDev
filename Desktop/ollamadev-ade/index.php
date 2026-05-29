@@ -45,6 +45,9 @@ $app = new Application(new ApplicationCreateInfo(
     ),
 ));
 
+// Reap any orphaned terminals from a previous run before starting fresh.
+PtyManager::cleanupStale();
+
 $pty = new PtyManager();
 $files = new FileBrowser();
 $cli = PtyManager::cliBinary();

@@ -11,6 +11,10 @@
 // supported()) for pipes, daemons, and non-TTY contexts.
 class LineEditor {
     public static function supported(): bool {
+        // Embedded/simple terminals (e.g. the desktop ADE) can't render raw-mode
+        // cursor control cleanly; OLLAMADEV_SIMPLE_INPUT forces plain line input
+        // (the host pty echoes keystrokes itself).
+        if (getenv('OLLAMADEV_SIMPLE_INPUT')) return false;
         if (stripos(PHP_OS, 'WIN') === 0) return false;
         if (!function_exists('stream_isatty') || !@stream_isatty(STDIN)) return false;
         static $stty = null;

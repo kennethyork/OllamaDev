@@ -166,7 +166,8 @@ body {
 .badge.done .b-dot { background: var(--ok); }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
 
-.term-screen { flex: 1; min-height: 0; overflow-y: auto; padding: 9px 11px; font-family: var(--mono); font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: var(--fg); }
+.term-screen { flex: 1; min-height: 0; overflow-y: auto; padding: 9px 11px; font-family: var(--mono); font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: var(--fg); cursor: text; outline: none; }
+.term-screen:focus { box-shadow: inset 0 0 0 1px var(--accent-soft); }
 .term-line { min-height: 1.5em; }
 .term-input-row { display: flex; align-items: center; gap: 7px; padding: 7px 11px; border-top: 1px solid var(--border); background: var(--bg2); }
 .term-input-row .p { color: var(--ok); font-family: var(--mono); font-weight: 700; }

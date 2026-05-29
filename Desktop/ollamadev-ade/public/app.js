@@ -22,6 +22,40 @@ function rid() { return 'term_' + Date.now() + '_' + Math.random().toString(36).
 
 var ANSI_FG = { 30:'#484f58',31:'#f85149',32:'#3fb950',33:'#d29922',34:'#58a6ff',35:'#bc8cff',36:'#39c5cf',37:'#b1bac4',90:'#6e7681',91:'#ff7b72',92:'#56d364',93:'#e3b341',94:'#79c0ff',95:'#d2a8ff',96:'#56d4dd',97:'#f0f6fc' };
 
+// Map a browser keydown to the byte sequence a real terminal would send, so the
+// pty (and the raw-mode ollamadev CLI inside it) gets live keystrokes.
+function keyToBytes(e) {
+    if (e.altKey) return null;
+    var k = e.key;
+    if (e.ctrlKey) {
+        if (k === 'c') return '\x03';
+        if (k === 'd') return '\x04';
+        if (k === 'z') return '\x1a';
+        if (k.length === 1) {
+            var c = k.toLowerCase().charCodeAt(0);
+            if (c >= 97 && c <= 122) return String.fromCharCode(c - 96); // Ctrl-A..Z
+        }
+        return null;
+    }
+    switch (k) {
+        case 'Enter': return '\r';
+        case 'Backspace': return '\x7f';
+        case 'Tab': return '\t';
+        case 'Escape': return '\x1b';
+        case 'ArrowUp': return '\x1b[A';
+        case 'ArrowDown': return '\x1b[B';
+        case 'ArrowRight': return '\x1b[C';
+        case 'ArrowLeft': return '\x1b[D';
+        case 'Home': return '\x1b[H';
+        case 'End': return '\x1b[F';
+        case 'Delete': return '\x1b[3~';
+        case 'PageUp': return '\x1b[5~';
+        case 'PageDown': return '\x1b[6~';
+    }
+    if (k.length === 1) return k; // a printable character
+    return null;
+}
+
 // ---------- terminal pane (dependency-free, ANSI colors) ----------
 function Terminal(id, model) {
     this.id = id; this.model = model; this.offset = 0; this.polling = false;
@@ -35,28 +69,31 @@ Terminal.prototype.mount = function (host) {
         '<div class="term-head"><span class="nm">' + esc(this.model) + '</span><span class="id">' + this.id.slice(-6) + '</span>' +
         '<span class="badge ' + this.status + '"><span class="b-dot"></span><span class="b-label">' + this.status + '</span></span>' +
         '<button class="x" title="Close">&times;</button></div>' +
-        '<div class="term-screen" tabindex="0"></div>' +
-        '<div class="term-input-row"><span class="p">$</span><input class="term-input" placeholder="type a command, Enter to run"></div>' +
-        '<div class="agent-row"><span class="ico">🤖</span><input class="agent-input" placeholder="ask the agent to do something here"><button>Run</button></div>';
+        '<div class="term-screen" tabindex="0" title="Type here — this is the live ollamadev CLI"></div>' +
+        '<div class="agent-row"><span class="ico">🤖</span><input class="agent-input" placeholder="send a full prompt to the CLI…"><button>Run</button></div>';
     this.screen = host.querySelector('.term-screen');
     this.badgeEl = host.querySelector('.badge');
-    var input = host.querySelector('.term-input');
     var arow = host.querySelector('.agent-row');
     var head = host.querySelector('.term-head');
     head.title = 'Double-click to zoom / restore';
     head.ondblclick = function (e) { if (e.target.classList.contains('x')) return; app.toggleZoom(self.id); };
     host.querySelector('.x').onclick = function () { app.closeTerminal(self.id); };
-    host.querySelector('.term-input-row').onsubmit = function (e) { e.preventDefault(); };
-    input.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') { window.termWrite(self.id, strToB64(input.value + '\n')); input.value = ''; }
-        else if (e.ctrlKey && e.key === 'c') { window.termWrite(self.id, strToB64('\x03')); }
+    // The screen IS the terminal: forward every keystroke straight to the pty.
+    this.screen.addEventListener('keydown', function (e) {
+        var data = keyToBytes(e);
+        if (data !== null) { e.preventDefault(); try { window.termWrite(self.id, strToB64(data)); } catch (err) {} }
+    });
+    this.screen.addEventListener('paste', function (e) {
+        var t = (e.clipboardData || window.clipboardData).getData('text');
+        if (t) { e.preventDefault(); try { window.termWrite(self.id, strToB64(t)); } catch (err) {} }
     });
     arow.querySelector('button').onclick = function () { self.runAgent(arow.querySelector('.agent-input')); };
     arow.querySelector('.agent-input').addEventListener('keydown', function (e) {
         if (e.key === 'Enter') self.runAgent(arow.querySelector('.agent-input'));
     });
-    this.screen.onclick = function () { input.focus(); };
+    this.screen.onclick = function () { self.screen.focus(); };
     if (!this.polling) this.poll();
+    setTimeout(function () { self.screen.focus(); }, 0);
 };
 Terminal.prototype.setStatus = function (s) {
     this.status = s;
@@ -416,7 +453,9 @@ var App = {
     // Auto-launch the interactive ollamadev CLI (with the selected model) inside
     // a freshly-started pty. You can still switch models in the CLI with /model.
     launchCli: function (id, model) {
-        var cmd = (this.cli || 'ollamadev') + (model ? ' -m ' + model : '') + '\n';
+        // SIMPLE_INPUT: the CLI uses plain line input so the embedded terminal
+        // (which the host pty echoes into) renders cleanly without raw-mode escapes.
+        var cmd = 'OLLAMADEV_SIMPLE_INPUT=1 ' + (this.cli || 'ollamadev') + (model ? ' -m ' + model : '') + '\n';
         // Small delay so the pty shell is ready to receive the command.
         setTimeout(function () { try { window.termWrite(id, strToB64(cmd)); } catch (e) {} }, 350);
     },
