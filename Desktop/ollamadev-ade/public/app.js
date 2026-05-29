@@ -337,6 +337,7 @@ var App = {
             if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); Editor.save(); }
         });
         Tasks.load(); Tasks.render();
+        this.setLayout('term'); // CLI/terminal is the focus by default; editor on demand
         Promise.resolve(window.cliPath ? window.cliPath() : 'ollamadev').then(function (p) { self.cli = p || 'ollamadev'; }).catch(function () { self.cli = 'ollamadev'; });
         this.loadModels().then(function () {
             Promise.resolve(window.getRoot ? window.getRoot() : '.').then(function (root) {
@@ -390,13 +391,16 @@ var App = {
             });
         }
     },
-    cycleLayout: function () {
-        this.layout = this.layout === 'split' ? 'term' : this.layout === 'term' ? 'editor' : 'split';
+    setLayout: function (name) {
+        this.layout = name;
         var cv = $('#codeView');
-        cv.className = 'ws-view ' + (this.layout === 'term' ? 'focus-term' : this.layout === 'editor' ? 'focus-editor' : '');
-        var label = this.layout === 'term' ? 'Terminals' : this.layout === 'editor' ? 'Editor' : 'Split';
-        $('#layoutBtn').textContent = label;
+        if (cv) cv.className = 'ws-view ' + (name === 'term' ? 'focus-term' : name === 'editor' ? 'focus-editor' : '');
+        var btn = $('#layoutBtn');
+        if (btn) btn.textContent = name === 'term' ? 'Terminals' : name === 'editor' ? 'Editor' : 'Split';
         this.render();
+    },
+    cycleLayout: function () {
+        this.setLayout(this.layout === 'split' ? 'term' : this.layout === 'term' ? 'editor' : 'split');
     },
     toggleZoom: function (id) {
         this.zoomed = this.zoomed === id ? null : id;
