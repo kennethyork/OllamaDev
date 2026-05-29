@@ -131,6 +131,11 @@ body {
 #codeView.focus-term #terminals, #codeView.focus-editor #editorPane { flex: 1 1 100%; }
 
 #editorPane { flex: 1 1 60%; display: flex; flex-direction: column; min-height: 0; border-bottom: 1px solid var(--border); background: var(--bg); }
+/* draggable horizontal divider between editor and terminals */
+.vsplit { flex: 0 0 8px; cursor: row-resize; background: var(--bg2); position: relative; }
+.vsplit::after { content: ''; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 46px; height: 3px; border-radius: 2px; background: var(--border); }
+.vsplit:hover::after { background: var(--accent); }
+#codeView.focus-term .vsplit, #codeView.focus-editor .vsplit { display: none; }
 #editorTabs { display: flex; background: var(--bg2); border-bottom: 1px solid var(--border); overflow-x: auto; min-height: 36px; }
 #editorTabs::-webkit-scrollbar { height: 0; }
 .etab { display: flex; align-items: center; gap: 7px; padding: 8px 12px; font-size: 12px; cursor: pointer; border-right: 1px solid var(--border); border-top: 2px solid transparent; white-space: nowrap; color: var(--dim); transition: background .12s, color .12s; }

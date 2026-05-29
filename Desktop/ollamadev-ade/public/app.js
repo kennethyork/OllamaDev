@@ -335,6 +335,7 @@ var App = {
         // Add a task from the sidebar.
         var ti = $('#taskInput');
         if (ti) ti.addEventListener('keydown', function (e) { if (e.key === 'Enter') { Tasks.add(ti.value); ti.value = ''; } });
+        this.initSplitter();
         // Global Ctrl/Cmd+S saves the active editor tab from anywhere.
         document.addEventListener('keydown', function (e) {
             if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); Editor.save(); }
@@ -398,9 +399,28 @@ var App = {
         this.layout = name;
         var cv = $('#codeView');
         if (cv) cv.className = 'ws-view ' + (name === 'term' ? 'focus-term' : name === 'editor' ? 'focus-editor' : '');
+        // Drag-sizing only applies in split; clear it so the focus modes fill fully.
+        if (name !== 'split') { var ep = $('#editorPane'), tm = $('#terminals'); if (ep) ep.style.flex = ''; if (tm) tm.style.flex = ''; }
         var btn = $('#layoutBtn');
         if (btn) btn.textContent = name === 'term' ? 'Terminals' : name === 'editor' ? 'Editor' : 'Split';
         this.render();
+    },
+    // Draggable divider: in split mode, drag to give terminals more/less height.
+    initSplitter: function () {
+        var split = $('#vsplit'), cv = $('#codeView'), ep = $('#editorPane'), tm = $('#terminals');
+        if (!split || !cv || !ep || !tm) return;
+        var dragging = false;
+        var self = this;
+        split.addEventListener('mousedown', function (e) { if (self.layout !== 'split') return; dragging = true; document.body.style.userSelect = 'none'; e.preventDefault(); });
+        document.addEventListener('mousemove', function (e) {
+            if (!dragging) return;
+            var r = cv.getBoundingClientRect();
+            var top = e.clientY - r.top - 4;            // editor height under the cursor
+            top = Math.max(60, Math.min(r.height - 90, top)); // keep both panes usable
+            ep.style.flex = '0 0 ' + top + 'px';
+            tm.style.flex = '1 1 0';
+        });
+        document.addEventListener('mouseup', function () { if (dragging) { dragging = false; document.body.style.userSelect = ''; } });
     },
     cycleLayout: function () {
         this.setLayout(this.layout === 'split' ? 'term' : this.layout === 'term' ? 'editor' : 'split');
