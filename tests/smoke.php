@@ -131,6 +131,18 @@ if (preg_match('/class Permission \{.*?\n\}/s', $src, $pm)) {
     ok('Permission class extractable', false, 'class not found');
 }
 
+echo "\n== Web search tool ==\n";
+[$out] = run_bin([], "/tools\n/exit\n");
+ok('search tool registered', strpos($out, 'search') !== false);
+// Live check only when explicitly enabled (needs internet).
+if (getenv('SMOKE_NET')) {
+    [$out] = run_bin([], "/exit\n"); // warm
+    $res = run_bin(['-p', 'use the search tool to search for: PHP manual']);
+    ok('live web search returns results', stripos($res[0], 'http') !== false);
+} else {
+    echo "  \033[2m· skipped live search (set SMOKE_NET=1 to enable)\033[0m\n";
+}
+
 echo "\n== Terminal daemon lifecycle ==\n";
 $tid = 'smoke-' . getmypid();
 $tdir = (getenv('HOME') ?: '/tmp') . '/.ollamadev/terminals/' . $tid;

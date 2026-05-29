@@ -892,6 +892,13 @@ class Tools {
             $fn('bash', 'Run a shell command and return its output.', [
                 'command' => $str('The shell command to execute'),
             ], ['command']),
+            $fn('search', 'Search the web and return result titles, URLs, and snippets.', [
+                'query' => $str('The search query'),
+                'limit' => $int('Max results (default 5)'),
+            ], ['query']),
+            $fn('fetch', 'Fetch the raw contents of a URL.', [
+                'url' => $str('The URL to fetch'),
+            ], ['url']),
         ];
     }
 }
@@ -1447,6 +1454,51 @@ Tools::register('wait_bg', function($p) {
     }
     return "Waited $maxWait seconds";
 });
+
+Tools::register('search', function($p) {
+    $q = $p['query'] ?? $p['q'] ?? '';
+    if (empty($q)) return "missing query";
+    $limit = max(1, min(10, (int)($p['limit'] ?? 5)));
+    $ch = curl_init('https://html.duckduckgo.com/html/');
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => http_build_query(['q' => $q]),
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 20,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_USERAGENT => 'Mozilla/5.0 (X11; Linux x86_64) ollamadev',
+    ]);
+    $html = curl_exec($ch);
+    $err = curl_error($ch);
+    curl_close($ch);
+    if ($html === false || $html === '') return "Search failed: " . ($err ?: 'no response');
+
+    $results = [];
+    if (preg_match_all('#<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>#s', $html, $m, PREG_SET_ORDER)) {
+        // Snippets, parsed loosely in document order to pair with titles.
+        preg_match_all('#class="result__snippet"[^>]*>(.*?)</a>#s', $html, $sn);
+        foreach ($m as $i => $r) {
+            $url = html_entity_decode($r[1]);
+            if (preg_match('#uddg=([^&]+)#', $url, $u)) $url = urldecode($u[1]);
+            if (str_starts_with($url, '//')) $url = 'https:' . $url;
+            $title = trim(html_entity_decode(strip_tags($r[2])));
+            $snippet = isset($sn[1][$i]) ? trim(html_entity_decode(strip_tags($sn[1][$i]))) : '';
+            $results[] = ['title' => $title, 'url' => $url, 'snippet' => $snippet];
+            if (count($results) >= $limit) break;
+        }
+    }
+    if (empty($results)) return "No results for: $q";
+    $out = "Web search results for \"$q\":\n\n";
+    foreach ($results as $i => $r) {
+        $out .= ($i + 1) . ". {$r['title']}\n   {$r['url']}\n";
+        if ($r['snippet'] !== '') $out .= "   {$r['snippet']}\n";
+        $out .= "\n";
+    }
+    return trim($out);
+});
+
+Tools::register('web_search', function($p) { return Tools::run('search', $p); });
 
 Tools::register('fetch', function($p) {
     $url = $p['url'] ?? '';

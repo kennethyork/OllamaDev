@@ -55,6 +55,13 @@ class Tools {
             $fn('bash', 'Run a shell command and return its output.', [
                 'command' => $str('The shell command to execute'),
             ], ['command']),
+            $fn('search', 'Search the web and return result titles, URLs, and snippets.', [
+                'query' => $str('The search query'),
+                'limit' => $int('Max results (default 5)'),
+            ], ['query']),
+            $fn('fetch', 'Fetch the raw contents of a URL.', [
+                'url' => $str('The URL to fetch'),
+            ], ['url']),
         ];
     }
 }
