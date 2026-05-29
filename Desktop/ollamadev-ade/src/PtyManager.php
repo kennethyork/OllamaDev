@@ -116,6 +116,18 @@ class PtyManager
         return ['data' => base64_encode($data), 'offset' => $offset + strlen($data)];
     }
 
+    // Launch the agent against $prompt; its shell commands run in this terminal.
+    public function agentRun(string $id, string $prompt): bool
+    {
+        if (!is_dir(self::$baseDir . '/' . $id)) return false;
+        $binary = self::resolveBinary();
+        $cmd = 'php ' . escapeshellarg($binary) . ' __agent-in-pty__ '
+            . escapeshellarg($id) . ' ' . escapeshellarg($prompt)
+            . ' > ' . escapeshellarg(self::$baseDir . '/' . $id . '/agent.log') . ' 2>&1 &';
+        shell_exec($cmd);
+        return true;
+    }
+
     public function resize(string $id, int $cols, int $rows): bool
     {
         // Best-effort: write the size to a control file the daemon can honor.

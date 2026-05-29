@@ -58,4 +58,9 @@ class SessionManager
     {
         return $this->pty->resize($id, $cols, $rows);
     }
+
+    public function agentRun(string $id, string $prompt): bool
+    {
+        return $this->pty->agentRun($id, $prompt);
+    }
 }

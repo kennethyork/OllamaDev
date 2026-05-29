@@ -136,6 +136,10 @@ $app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $
         return $sessions->killTerminal($id);
     });
 
+    $bindings->bind('agentRun', function (string $id, string $prompt) use ($sessions): bool {
+        return $sessions->agentRun($id, $prompt);
+    });
+
     $bindings->bind('listFiles', function (?string $path = null) use ($files): array {
         return $files->listDir($path);
     });

@@ -352,9 +352,24 @@ class App {
                     <button class="terminal-close" data-id="${id}">×</button>
                 </div>
                 <div class="terminal-body"></div>
+                <form class="agent-bar">
+                    <span class="agent-icon">🤖</span>
+                    <input class="agent-input" type="text" autocomplete="off"
+                           placeholder="Ask the agent to run something in this terminal…" />
+                    <button type="submit" class="agent-run-btn">Run</button>
+                </form>
             `;
             grid.appendChild(el);
             el.querySelector('.terminal-close').addEventListener('click', () => this.closeTerminal(id));
+            const agentForm = el.querySelector('.agent-bar');
+            const agentInput = el.querySelector('.agent-input');
+            agentForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const prompt = agentInput.value.trim();
+                if (!prompt) return;
+                agentInput.value = '';
+                try { window.agentRun(id, prompt); } catch (err) { console.error(err); }
+            });
             pane.mount(el.querySelector('.terminal-body'));
         });
     }

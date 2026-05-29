@@ -349,6 +349,14 @@ Tools::register('bash', function($p) {
     $cmd = preg_replace('/^command=/', '', $cmd);
     $cmd = preg_replace('/^cmd=/', '', $cmd);
     $cmd = preg_replace('/"\s*$/', '', $cmd);
+    // When the agent is operating inside a live PTY terminal, run the command
+    // there so the user watches it execute (full shell access is intended).
+    if (isset($GLOBALS['ptyBridge']) && $GLOBALS['ptyBridge'] instanceof PtyBridge) {
+        foreach (['rm -rf /', 'mkfs', ':(){', 'sudo rm', '> /dev/sd'] as $b) {
+            if (str_contains($cmd, $b)) return "Dangerous command blocked: $b";
+        }
+        return $GLOBALS['ptyBridge']->run($cmd);
+    }
     $readonly = ['ls', 'pwd', 'cat', 'head', 'tail', 'grep', 'find', 'git', 'echo', 'wc', 'sort', 'uniq', 'awk', 'sed', 'cut', 'tr', 'file', 'stat', 'diff', 'tree'];
     $first = strtok($cmd, ' ');
     if (!in_array($first, $readonly)) return "Command not allowed (readonly only): $first";

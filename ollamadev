@@ -940,6 +940,73 @@ class CmdError {
     }
 }
 
+
+// Runs commands inside an existing PTY terminal (the desktop's live shell) by
+// appending to its pty-in queue and reading delimited output back from pty-out.
+// Used so the agent's bash tool calls execute visibly in the user's terminal.
+class PtyBridge {
+    private string $dir;
+    private string $inFile;
+    private string $outFile;
+    private int $offset;
+
+    public function __construct(string $id) {
+        $home = getenv('HOME') ?: '/tmp';
+        $this->dir = "$home/.ollamadev/terminals/$id";
+        $this->inFile = "$this->dir/pty-in";
+        $this->outFile = "$this->dir/pty-out";
+        // Begin reading from the current end so we only capture new output.
+        $this->offset = is_file($this->outFile) ? (int)filesize($this->outFile) : 0;
+    }
+
+    public function available(): bool { return is_dir($this->dir); }
+
+    // Send $cmd to the shell, wait for it to finish, return its output.
+    public function run(string $cmd, int $timeout = 120): string {
+        if (!is_dir($this->dir)) return "PTY terminal not available";
+        // Capture only this command's output.
+        clearstatcache(true, $this->outFile);
+        $this->offset = is_file($this->outFile) ? (int)filesize($this->outFile) : 0;
+        // Markers are split ("OD"."START") so the shell-echoed input line does
+        // not itself contain the literal marker we scan the output for.
+        $nonce = substr(md5(uniqid('', true)), 0, 10);
+        $start = "OD_START_$nonce";
+        $end = "OD_END_$nonce";
+        $line = "printf '%s\\n' \"OD\"\"_START_$nonce\"; ( $cmd ); printf '%s%s\\n' \"OD\"\"_END_$nonce\" \"\$?\"\n";
+        file_put_contents($this->inFile, $line, FILE_APPEND | LOCK_EX);
+
+        $deadline = time() + $timeout;
+        $buf = '';
+        while (time() < $deadline) {
+            clearstatcache(true, $this->outFile);
+            $size = (int)@filesize($this->outFile);
+            if ($size > $this->offset) {
+                $fh = fopen($this->outFile, 'rb');
+                fseek($fh, $this->offset);
+                $buf .= (string)fread($fh, $size - $this->offset);
+                fclose($fh);
+                $this->offset = $size;
+                if (strpos($buf, $end) !== false) break;
+            }
+            usleep(40000);
+        }
+
+        // Strip ANSI/control sequences, then slice between the markers.
+        $clean = preg_replace('/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*(?:\x07|\x1b\\\\)/', '', $buf);
+        $clean = str_replace("\r", '', $clean);
+        $s = strpos($clean, $start);
+        $e = strpos($clean, $end);
+        if ($s !== false && $e !== false && $e > $s) {
+            $out = substr($clean, $s + strlen($start), $e - $s - strlen($start));
+            $code = '';
+            if (preg_match('/' . preg_quote($end, '/') . '(\d+)/', $clean, $m)) $code = $m[1];
+            $out = trim($out, "\n");
+            if ($out === '') $out = '(no output)';
+            return $code !== '' && $code !== '0' ? $out . "\n[exit $code]" : $out;
+        }
+        return $e === false ? "(command still running or timed out)" : trim($clean);
+    }
+}
 Tools::register('view', function($p) {
     $path = $p['file_path'] ?? $p['file'] ?? $p['path'] ?? '';
     if (empty($path)) return CmdError::missingParam('file_path', 'view');
@@ -1291,6 +1358,14 @@ Tools::register('bash', function($p) {
     $cmd = preg_replace('/^command=/', '', $cmd);
     $cmd = preg_replace('/^cmd=/', '', $cmd);
     $cmd = preg_replace('/"\s*$/', '', $cmd);
+    // When the agent is operating inside a live PTY terminal, run the command
+    // there so the user watches it execute (full shell access is intended).
+    if (isset($GLOBALS['ptyBridge']) && $GLOBALS['ptyBridge'] instanceof PtyBridge) {
+        foreach (['rm -rf /', 'mkfs', ':(){', 'sudo rm', '> /dev/sd'] as $b) {
+            if (str_contains($cmd, $b)) return "Dangerous command blocked: $b";
+        }
+        return $GLOBALS['ptyBridge']->run($cmd);
+    }
     $readonly = ['ls', 'pwd', 'cat', 'head', 'tail', 'grep', 'find', 'git', 'echo', 'wc', 'sort', 'uniq', 'awk', 'sed', 'cut', 'tr', 'file', 'stat', 'diff', 'tree'];
     $first = strtok($cmd, ' ');
     if (!in_array($first, $readonly)) return "Command not allowed (readonly only): $first";
@@ -3507,7 +3582,8 @@ if ($argc >= 2 && $argv[1] === '__pty-daemon__') {
     file_put_contents($outFile, '');  // fresh output buffer
 
     $shell = getenv('SHELL') ?: 'bash';
-    $inner = 'cd ' . escapeshellarg($startCwd) . '; exec ' . escapeshellarg($shell) . ' -i';
+    // Set a sane default window size, then cd into the project and exec the shell.
+    $inner = 'stty rows 32 cols 120 2>/dev/null; cd ' . escapeshellarg($startCwd) . '; exec ' . escapeshellarg($shell) . ' -i';
     // Linux util-linux `script`; allocates a real PTY for the shell.
     $cmd = 'script -qfc ' . escapeshellarg($inner) . ' /dev/null';
     $descr = [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']];
@@ -3550,6 +3626,36 @@ if ($argc >= 2 && $argv[1] === '__pty-daemon__') {
     foreach ($pipes as $p) { if (is_resource($p)) fclose($p); }
     @proc_terminate($proc);
     @proc_close($proc);
+    exit(0);
+}
+
+// Agent-in-PTY: run the agent against a prompt, but route its shell/bash tool
+// calls into an existing live PTY terminal so the user watches commands run.
+if ($argc >= 2 && $argv[1] === '__agent-in-pty__') {
+    $id = $argv[2] ?? '';
+    $prompt = $argv[3] ?? '';
+    if ($id === '' || $prompt === '') { fwrite(STDERR, "agent-in-pty: need <id> <prompt>\n"); exit(1); }
+
+    $config = Config::load();
+    Permission::setMode('auto');
+    Permission::setInteractive(false);
+
+    $home = getenv('HOME') ?: '/tmp';
+    $inFile = "$home/.ollamadev/terminals/$id/pty-in";
+    if (!is_file($inFile)) { fwrite(STDERR, "agent-in-pty: terminal $id not running\n"); exit(1); }
+
+    // Announce the task in the terminal (cyan), then run the agent.
+    @file_put_contents($inFile, "printf '\\n\\033[36m[agent ▸ %s]\\033[0m\\n' " . escapeshellarg($prompt) . "\n", FILE_APPEND | LOCK_EX);
+
+    $GLOBALS['ptyBridge'] = new PtyBridge($id);
+    $session = new Session($config);
+    ob_start();
+    $final = $session->runSingle($prompt);
+    ob_end_clean();
+
+    if (trim((string)$final) !== '') {
+        @file_put_contents($inFile, "printf '\\033[32m[agent]\\033[0m %s\\n' " . escapeshellarg($final) . "\n", FILE_APPEND | LOCK_EX);
+    }
     exit(0);
 }
 

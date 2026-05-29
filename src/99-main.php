@@ -83,7 +83,8 @@ if ($argc >= 2 && $argv[1] === '__pty-daemon__') {
     file_put_contents($outFile, '');  // fresh output buffer
 
     $shell = getenv('SHELL') ?: 'bash';
-    $inner = 'cd ' . escapeshellarg($startCwd) . '; exec ' . escapeshellarg($shell) . ' -i';
+    // Set a sane default window size, then cd into the project and exec the shell.
+    $inner = 'stty rows 32 cols 120 2>/dev/null; cd ' . escapeshellarg($startCwd) . '; exec ' . escapeshellarg($shell) . ' -i';
     // Linux util-linux `script`; allocates a real PTY for the shell.
     $cmd = 'script -qfc ' . escapeshellarg($inner) . ' /dev/null';
     $descr = [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']];
@@ -126,6 +127,36 @@ if ($argc >= 2 && $argv[1] === '__pty-daemon__') {
     foreach ($pipes as $p) { if (is_resource($p)) fclose($p); }
     @proc_terminate($proc);
     @proc_close($proc);
+    exit(0);
+}
+
+// Agent-in-PTY: run the agent against a prompt, but route its shell/bash tool
+// calls into an existing live PTY terminal so the user watches commands run.
+if ($argc >= 2 && $argv[1] === '__agent-in-pty__') {
+    $id = $argv[2] ?? '';
+    $prompt = $argv[3] ?? '';
+    if ($id === '' || $prompt === '') { fwrite(STDERR, "agent-in-pty: need <id> <prompt>\n"); exit(1); }
+
+    $config = Config::load();
+    Permission::setMode('auto');
+    Permission::setInteractive(false);
+
+    $home = getenv('HOME') ?: '/tmp';
+    $inFile = "$home/.ollamadev/terminals/$id/pty-in";
+    if (!is_file($inFile)) { fwrite(STDERR, "agent-in-pty: terminal $id not running\n"); exit(1); }
+
+    // Announce the task in the terminal (cyan), then run the agent.
+    @file_put_contents($inFile, "printf '\\n\\033[36m[agent ▸ %s]\\033[0m\\n' " . escapeshellarg($prompt) . "\n", FILE_APPEND | LOCK_EX);
+
+    $GLOBALS['ptyBridge'] = new PtyBridge($id);
+    $session = new Session($config);
+    ob_start();
+    $final = $session->runSingle($prompt);
+    ob_end_clean();
+
+    if (trim((string)$final) !== '') {
+        @file_put_contents($inFile, "printf '\\033[32m[agent]\\033[0m %s\\n' " . escapeshellarg($final) . "\n", FILE_APPEND | LOCK_EX);
+    }
     exit(0);
 }
 
