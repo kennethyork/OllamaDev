@@ -205,7 +205,11 @@ body {
 #crewTask:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .modal-row { display: flex; align-items: center; gap: 10px; }
 .modal-row .modal-label { margin: 14px 0 0; }
-#crewMax { background: var(--bg3); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 5px 9px; font-size: 13px; margin-top: 12px; }
+#crewMax { -webkit-appearance: none; appearance: none; background: var(--bg3); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 6px 28px 6px 10px; font-size: 13px; margin-top: 12px; cursor: pointer;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b949e' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+    background-repeat: no-repeat; background-position: right 9px center; }
+#crewMax:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+#crewMax option { background: var(--bg2); color: var(--fg); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 .modal-actions button { background: var(--bg3); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 8px 16px; font-size: 13px; cursor: pointer; transition: background .15s, filter .15s; }
 .modal-actions button:hover { background: var(--elev); }
