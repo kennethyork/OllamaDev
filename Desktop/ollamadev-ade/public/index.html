@@ -1,200 +1,31 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="void">
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OllamaDev ADE</title>
-    <link rel="stylesheet" href="/css/variables.css">
-    <link rel="stylesheet" href="/css/layout.css">
-    <link rel="stylesheet" href="/css/terminal.css">
-    <link rel="stylesheet" href="/css/kanban.css">
-    <link rel="stylesheet" href="/css/memory.css">
-    <link rel="stylesheet" href="/css/themes/void.css">
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body { height: 100%; overflow: hidden; }
-        body { font-family: var(--font-ui); }
-    </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OllamaDev ADE</title>
+<style>/* {{CSS}} */</style>
 </head>
 <body>
-    <div id="app">
-        <header class="header">
-            <div class="header-left">
-                <span class="app-title">OllamaDev ADE</span>
-            </div>
-            <div class="header-center">
-                <div class="workspace-tabs">
-                    <button class="tab active" data-tab="terminals">Terminals</button>
-                    <button class="tab" data-tab="memory">Memory</button>
-                    <button class="tab" data-tab="editor">Editor</button>
-                    <button class="tab-add" id="addTab">+</button>
-                </div>
-            </div>
-            <div class="header-right">
-                <select id="modelSelect" class="model-select">
-                    <option value="llama3.2:latest">llama3.2:latest</option>
-                </select>
-                <select id="themeSelect" class="theme-select">
-                    <option value="void">Void</option>
-                </select>
-                <button id="settingsBtn" class="icon-btn" title="Agent settings">⚙</button>
-                <div class="window-controls">
-                    <button class="win-btn win-minimize">─</button>
-                    <button class="win-btn win-maximize">□</button>
-                    <button class="win-btn win-close">×</button>
-                </div>
-            </div>
-        </header>
+    <div id="banner">starting…</div>
 
-        <div class="main-container">
-            <aside class="sidebar">
-                <div class="sidebar-section">
-                    <div class="sidebar-header">Files</div>
-                    <div id="fileTree" class="file-tree"></div>
-                </div>
-                <div class="sidebar-section">
-                    <div class="sidebar-header">Sessions</div>
-                    <div id="sessionList" class="session-list"></div>
-                </div>
-            </aside>
+    <header id="topbar">
+        <span class="brand">OllamaDev <span class="dim">ADE</span></span>
+        <span id="conn" class="conn">●</span>
+        <select id="modelSelect" title="Model"></select>
+        <button id="newTermBtn">+ Terminal</button>
+        <div class="spacer"></div>
+        <span id="cwd" class="dim"></span>
+    </header>
 
-            <main class="content">
-                <div class="tab-content active" id="terminals-content">
-                    <div class="terminal-toolbar">
-                        <div class="pane-templates">
-                            <button class="template-btn" data-panes="1">1</button>
-                            <button class="template-btn" data-panes="2">2</button>
-                            <button class="template-btn" data-panes="4">4</button>
-                            <button class="template-btn" data-panes="6">6</button>
-                            <button class="template-btn" data-panes="8">8</button>
-                            <button class="template-btn" data-panes="12">12</button>
-                            <button class="template-btn" data-panes="16">16</button>
-                        </div>
-                        <button class="new-terminal-btn" id="newTerminal">+ New Terminal</button>
-                    </div>
-                    <div id="terminalGrid" class="terminal-grid single">
-                    </div>
-                </div>
+    <main id="main">
+        <aside id="sidebar">
+            <div class="side-title">FILES</div>
+            <div id="fileTree"></div>
+        </aside>
+        <section id="terminals"></section>
+    </main>
 
-                <div class="tab-content" id="memory-content">
-                    <div class="memory-header">
-                        <input type="text" id="searchMemory" placeholder="Search notes..." class="search-input">
-                        <button class="btn" id="newNote">+ New Note</button>
-                    </div>
-                    <div class="memory-container">
-                        <div class="notes-list" id="notesList"></div>
-                        <div class="note-editor" id="noteEditor">
-                            <textarea id="noteContent" placeholder="Write your note..."></textarea>
-                            <div class="note-toolbar">
-                                <span id="noteMeta"></span>
-                                <button class="btn btn-save" id="saveNote">Save</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="tab-content" id="editor-content">
-                    <div class="editor-placeholder">
-                        <p>Select a file to edit</p>
-                    </div>
-                </div>
-            </main>
-
-            <aside class="right-panel">
-                <div class="panel-section">
-                    <div class="panel-header">Kanban</div>
-                    <div class="kanban-board" id="kanbanBoard">
-                        <div class="kanban-column" data-status="todo">
-                            <div class="column-header">TODO</div>
-                            <div class="column-cards" id="todoCards"></div>
-                            <button class="add-card-btn" data-status="todo">+ Add</button>
-                        </div>
-                        <div class="kanban-column" data-status="inprogress">
-                            <div class="column-header">IN PROGRESS</div>
-                            <div class="column-cards" id="inprogressCards"></div>
-                        </div>
-                        <div class="kanban-column" data-status="review">
-                            <div class="column-header">REVIEW</div>
-                            <div class="column-cards" id="reviewCards"></div>
-                        </div>
-                        <div class="kanban-column" data-status="done">
-                            <div class="column-header">DONE</div>
-                            <div class="column-cards" id="doneCards"></div>
-                        </div>
-                    </div>
-                </div>
-            </aside>
-        </div>
-
-        <footer class="statusbar">
-            <div class="status-left">
-                <span class="status-indicator connected"></span>
-                <span>OllamaDev v3.9.2</span>
-            </div>
-            <div class="status-center">
-                <span id="statusModel">Model: llama3.2:latest</span>
-                <span id="statusTokens">Tokens: ~0</span>
-            </div>
-            <div class="status-right">
-                <span id="statusDiag" style="color:#d29922">starting…</span>
-                <span id="statusMemory">Memory: 0MB</span>
-            </div>
-        </footer>
-    </div>
-
-    <div id="settingsModal" class="modal hidden">
-        <div class="modal-content settings-content">
-            <h3>Agent Settings</h3>
-            <label>Default model<input type="text" id="cfgModel" placeholder="llama3.2:latest"></label>
-            <label>Ollama host<input type="text" id="cfgHost" placeholder="http://localhost:11434"></label>
-            <label>Temperature<input type="number" step="0.1" min="0" max="2" id="cfgTemp"></label>
-            <label>Permission mode
-                <select id="cfgPerm">
-                    <option value="auto">auto — run everything</option>
-                    <option value="ask">ask — prompt before mutating</option>
-                    <option value="readonly">readonly — block mutating</option>
-                </select>
-            </label>
-            <label>System prompt<textarea id="cfgSystem" rows="5" placeholder="(default)"></textarea></label>
-            <hr>
-            <h3>Prompt Library</h3>
-            <div id="promptList" class="prompt-list"></div>
-            <div class="prompt-add">
-                <input type="text" id="promptTitle" placeholder="Title">
-                <input type="text" id="promptBody" placeholder="Prompt text">
-                <button id="promptAdd">Add</button>
-            </div>
-            <div class="modal-actions">
-                <button id="settingsSave" class="primary">Save</button>
-                <button id="settingsClose">Close</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="quickOpen" class="modal hidden">
-        <div class="modal-content">
-            <input type="text" id="quickOpenInput" placeholder="Search files...">
-            <div id="quickOpenResults" class="quick-open-results"></div>
-        </div>
-    </div>
-
-    <div id="taskModal" class="modal hidden">
-        <div class="modal-content">
-            <h3>New Task</h3>
-            <input type="text" id="taskTitle" placeholder="Task title">
-            <textarea id="taskDescription" placeholder="Description"></textarea>
-            <select id="taskAgent">
-                <option value="builder">Builder</option>
-                <option value="reviewer">Reviewer</option>
-                <option value="scout">Scout</option>
-            </select>
-            <div class="modal-actions">
-                <button class="btn" id="cancelTask">Cancel</button>
-                <button class="btn btn-primary" id="createTask">Create</button>
-            </div>
-        </div>
-    </div>
-
-    <script src="/js/app.js"></script>
+<script>/* {{JS}} */</script>
 </body>
 </html>
