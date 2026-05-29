@@ -38,6 +38,9 @@ Terminal.prototype.mount = function (host) {
     this.screen = host.querySelector('.term-screen');
     var input = host.querySelector('.term-input');
     var arow = host.querySelector('.agent-row');
+    var head = host.querySelector('.term-head');
+    head.title = 'Double-click to zoom / restore';
+    head.ondblclick = function (e) { if (e.target.classList.contains('x')) return; app.toggleZoom(self.id); };
     host.querySelector('.x').onclick = function () { app.closeTerminal(self.id); };
     host.querySelector('.term-input-row').onsubmit = function (e) { e.preventDefault(); };
     input.addEventListener('keydown', function (e) {
@@ -200,10 +203,11 @@ var Editor = {
 
 // ---------- app ----------
 var App = {
-    terminals: [], cwd: '.',
+    terminals: [], cwd: '.', layout: 'split', zoomed: null,
     init: function () {
         var self = this;
         $('#newTermBtn').onclick = function () { self.newTerminal(); };
+        $('#layoutBtn').onclick = function () { self.cycleLayout(); };
         // Global Ctrl/Cmd+S saves the active editor tab from anywhere.
         document.addEventListener('keydown', function (e) {
             if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); Editor.save(); }
@@ -215,6 +219,18 @@ var App = {
             self.newTerminal();
             banner('ready', 'ok');
         });
+    },
+    cycleLayout: function () {
+        this.layout = this.layout === 'split' ? 'term' : this.layout === 'term' ? 'editor' : 'split';
+        var ws = $('#workspace');
+        ws.className = this.layout === 'term' ? 'focus-term' : this.layout === 'editor' ? 'focus-editor' : '';
+        var label = this.layout === 'term' ? 'Terminals' : this.layout === 'editor' ? 'Editor' : 'Split';
+        $('#layoutBtn').textContent = 'Layout: ' + label;
+        this.render();
+    },
+    toggleZoom: function (id) {
+        this.zoomed = this.zoomed === id ? null : id;
+        this.render();
     },
     markActiveFile: function (path) {
         document.querySelectorAll('#fileTree .tree-item').forEach(function (el) {
@@ -276,14 +292,16 @@ var App = {
     },
     render: function () {
         var wrap = $('#terminals');
-        // Auto-tile into a near-square grid: ceil(sqrt(n)) columns, up to 4×4 (16).
-        var n = this.terminals.length;
-        var cols = n <= 1 ? 1 : Math.min(4, Math.ceil(Math.sqrt(n)));
-        wrap.className = '';
+        // A zoomed terminal takes the whole area; otherwise auto-tile into a
+        // near-square grid: ceil(sqrt(n)) columns, up to 4×4 (16).
+        if (this.zoomed && !this.terminals.some(function (t) { return t.id === this.zoomed; }, this)) this.zoomed = null;
+        var list = this.zoomed ? this.terminals.filter(function (t) { return t.id === this.zoomed; }) : this.terminals;
+        var n = list.length;
+        var cols = (this.zoomed || n <= 1) ? 1 : Math.min(4, Math.ceil(Math.sqrt(n)));
+        wrap.className = this.zoomed ? 'zoomed' : '';
         wrap.style.gridTemplateColumns = 'repeat(' + cols + ', minmax(0, 1fr))';
         wrap.innerHTML = '';
-        var self = this;
-        this.terminals.forEach(function (t) {
+        list.forEach(function (t) {
             var pane = document.createElement('div');
             pane.className = 'term-pane';
             wrap.appendChild(pane);
