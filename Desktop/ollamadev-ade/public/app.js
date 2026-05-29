@@ -324,6 +324,15 @@ var App = {
         this.initThemes();
         $('#newTermBtn').onclick = function () { self.newTerminal(); };
         $('#layoutBtn').onclick = function () { self.cycleLayout(); };
+        // Forge modal
+        var fb = $('#forgeBtn'); if (fb) fb.onclick = function () { self.openForge(); };
+        var fc = $('#forgeCancel'); if (fc) fc.onclick = function () { self.closeForge(); };
+        var fr = $('#forgeRun'); if (fr) fr.onclick = function () { self.submitForge(); };
+        var ov = $('#modalOverlay'); if (ov) ov.onclick = function (e) { if (e.target === ov) self.closeForge(); };
+        var ft = $('#forgeTask'); if (ft) ft.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') self.closeForge();
+            else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') self.submitForge();
+        });
         // Activity rail: switch the sidebar between Files and Tasks.
         document.querySelectorAll('.rail-btn').forEach(function (b) {
             b.onclick = function () { self.setPanel(b.dataset.panel); };
@@ -424,6 +433,30 @@ var App = {
     },
     cycleLayout: function () {
         this.setLayout(this.layout === 'split' ? 'term' : this.layout === 'term' ? 'editor' : 'split');
+    },
+    openForge: function () { var o = $('#modalOverlay'); if (o) { o.hidden = false; var t = $('#forgeTask'); if (t) t.focus(); } },
+    closeForge: function () { var o = $('#modalOverlay'); if (o) o.hidden = true; },
+    submitForge: function () {
+        var task = ($('#forgeTask').value || '').trim();
+        if (!task) { $('#forgeTask').focus(); return; }
+        var max = $('#forgeMax').value || '3';
+        this.closeForge();
+        this.runForge(task, max);
+    },
+    // Launch `ollamadev forge "<task>"` in a fresh terminal and show it full-screen.
+    runForge: function (task, max) {
+        if (this.terminals.length >= this.MAX_TERMINALS) { banner('close a terminal first (max ' + this.MAX_TERMINALS + ')', 'err'); return; }
+        var model = $('#modelSelect').value || 'llama3.2:latest';
+        var cli = this.cli || 'ollamadev';
+        var q = "'" + String(task).replace(/'/g, "'\\''") + "'"; // shell single-quote
+        var cmd = cli + ' forge ' + q + ' --max ' + (parseInt(max, 10) || 3) + ' -m ' + model;
+        var id = rid(); var t = new Terminal(id, 'forge');
+        var self = this;
+        Promise.resolve(window.termCreate(id, model)).then(function () {
+            self.terminals.push(t); self.render(); self.setView('code'); self.setLayout('term');
+            setTimeout(function () { try { window.termWrite(id, strToB64(cmd + '\n')); } catch (e) {} }, 400);
+            banner('forge running…', 'ok');
+        }).catch(function (e) { banner('forge launch failed: ' + e, 'err'); });
     },
     toggleZoom: function (id) {
         this.zoomed = this.zoomed === id ? null : id;

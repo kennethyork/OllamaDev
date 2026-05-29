@@ -16,6 +16,7 @@
         <select id="modelSelect" title="Model"></select>
         <select id="themeSelect" title="Theme"></select>
         <button id="newTermBtn" class="primary">+ Terminal</button>
+        <button id="forgeBtn" title="Run the agent bench (Director / Coders / Auditor)">🛠 Forge</button>
         <button id="layoutBtn" title="Cycle layout: split / terminals / editor">Split</button>
         <span id="cwd" class="dim"></span>
     </header>
@@ -63,6 +64,24 @@
             </div>
         </section>
     </main>
+
+    <div id="modalOverlay" class="modal-overlay" hidden>
+        <div class="modal">
+            <div class="modal-title">🛠 Forge — agent bench</div>
+            <div class="modal-sub dim">Researcher → Director → Coders (git worktrees) → Auditor → auto-merge clean</div>
+            <label class="modal-label">Task</label>
+            <textarea id="forgeTask" placeholder="Describe the high-level task… e.g. add a /health route and a test for it"></textarea>
+            <div class="modal-row">
+                <label class="modal-label">Max coders</label>
+                <select id="forgeMax"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option><option>6</option></select>
+            </div>
+            <div class="modal-actions">
+                <button id="forgeCancel">Cancel</button>
+                <button id="forgeRun" class="primary">Run bench</button>
+            </div>
+            <div class="modal-hint dim">Runs in a terminal using the current model. Needs a git repo with at least one commit.</div>
+        </div>
+    </div>
 
 <script>/* {{JS}} */</script>
 </body>
