@@ -60,11 +60,11 @@ function keyToBytes(e) {
 function Terminal(id, model) {
     this.id = id; this.model = model; this.offset = 0; this.polling = false;
     this.screen = null; this.line = null; this.fg = null; this.bold = false;
-    this.status = 'idle'; this.lastData = 0; this.badgeEl = null;
+    this.status = 'idle'; this.lastData = 0; this.badgeEl = null; this.cr = false;
 }
 Terminal.prototype.mount = function (host) {
     var self = this;
-    this.offset = 0; this.line = null; this.fg = null; this.bold = false;
+    this.offset = 0; this.line = null; this.fg = null; this.bold = false; this.cr = false;
     host.innerHTML =
         '<div class="term-head"><span class="nm">' + esc(this.model) + '</span><span class="id">' + this.id.slice(-6) + '</span>' +
         '<span class="badge ' + this.status + '"><span class="b-dot"></span><span class="b-label">' + this.status + '</span></span>' +
@@ -111,6 +111,10 @@ Terminal.prototype.runAgent = function (el) {
 Terminal.prototype.newLine = function () { this.line = document.createElement('div'); this.line.className = 'term-line'; this.screen.appendChild(this.line); };
 Terminal.prototype.emit = function (s) {
     if (!this.line) this.newLine();
+    // A pending carriage return overwrites the current line (e.g. progress bars),
+    // but a bare \r\n must NOT erase the line — that's handled by clearing here
+    // only when actual text follows the \r.
+    if (this.cr) { this.line.innerHTML = ''; this.cr = false; }
     var sp = document.createElement('span');
     if (this.fg) sp.style.color = this.fg;
     if (this.bold) sp.style.fontWeight = '700';
@@ -141,8 +145,8 @@ Terminal.prototype.write = function (text) {
             if (osc) { i += osc[0].length; continue; }
             i++; continue;
         }
-        if (ch === '\r') { if (this.line) this.line.innerHTML = ''; i++; continue; }
-        if (ch === '\n') { this.newLine(); i++; continue; }
+        if (ch === '\r') { this.cr = true; i++; continue; }
+        if (ch === '\n') { this.cr = false; this.newLine(); i++; continue; }
         var j = i;
         while (j < text.length && text[j] !== '\x1b' && text[j] !== '\n' && text[j] !== '\r') j++;
         this.emit(text.slice(i, j)); i = j;
@@ -506,7 +510,7 @@ var App = {
     function go() {
         if (ready()) { try { App.init(); } catch (e) { banner('init error: ' + e.message, 'err'); } }
         else if (waited < 15000) { waited += 50; banner('waiting for bindings… ' + waited + 'ms'); setTimeout(go, 50); }
-        else { banner('bindings unavailable (window.listModels=' + typeof window.listModels + ')', 'err'); }
+        else { banner('bindings unavailable', 'err'); }
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', go); else go();
 })();
