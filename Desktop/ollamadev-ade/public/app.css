@@ -203,6 +203,8 @@ body {
 .modal-label { display: block; font-size: 11px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--faint); margin: 14px 0 6px; }
 #crewTask { width: 100%; min-height: 90px; resize: vertical; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--fg); padding: 10px; font-family: var(--mono); font-size: 13px; outline: none; }
 #crewTask:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+#folderPath { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--fg); padding: 10px; font-family: var(--mono); font-size: 13px; outline: none; }
+#folderPath:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .modal-row { display: flex; align-items: center; gap: 10px; }
 .modal-row .modal-label { margin: 14px 0 0; }
 #crewMax, #crewModel { -webkit-appearance: none; appearance: none; background: var(--bg3); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 6px 28px 6px 10px; font-size: 13px; margin-top: 12px; cursor: pointer;

@@ -15,6 +15,7 @@
         <div class="spacer"></div>
         <select id="modelSelect" title="Model"></select>
         <select id="themeSelect" title="Theme"></select>
+        <button id="openFolderBtn" title="Open a project folder">📂 Open</button>
         <button id="newTermBtn" class="primary">+ Terminal</button>
         <button id="crewBtn" title="OllamaDev Crew — a team of agents (Director / Coders / Auditor)">👥 Crew</button>
         <button id="layoutBtn" title="Cycle layout: split / terminals / editor">Split</button>
@@ -64,6 +65,19 @@
             </div>
         </section>
     </main>
+
+    <div id="folderOverlay" class="modal-overlay" hidden>
+        <div class="modal">
+            <div class="modal-title">📂 Open project folder</div>
+            <div class="modal-sub dim">Points the file tree, terminals, and Crew at this folder.</div>
+            <label class="modal-label">Path</label>
+            <input id="folderPath" placeholder="/home/you/projects/my-app  (or ~/projects/my-app)">
+            <div class="modal-actions">
+                <button id="folderCancel">Cancel</button>
+                <button id="folderOpen" class="primary">Open</button>
+            </div>
+        </div>
+    </div>
 
     <div id="modalOverlay" class="modal-overlay" hidden>
         <div class="modal">

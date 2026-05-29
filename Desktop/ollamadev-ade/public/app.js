@@ -338,6 +338,15 @@ var App = {
         this.initThemes();
         $('#newTermBtn').onclick = function () { self.newTerminal(); };
         $('#layoutBtn').onclick = function () { self.cycleLayout(); };
+        // Open-folder modal
+        var ofb = $('#openFolderBtn'); if (ofb) ofb.onclick = function () { self.openFolderModal(false); };
+        var fok = $('#folderOpen'); if (fok) fok.onclick = function () { self.submitFolder(); };
+        var fcx = $('#folderCancel'); if (fcx) fcx.onclick = function () { self.closeFolder(); };
+        var fov = $('#folderOverlay'); if (fov) fov.onclick = function (e) { if (e.target === fov) self.closeFolder(); };
+        var fpi = $('#folderPath'); if (fpi) fpi.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') self.submitFolder();
+            else if (e.key === 'Escape') self.closeFolder();
+        });
         // Crew modal
         var fb = $('#crewBtn'); if (fb) fb.onclick = function () { self.openCrew(); };
         var fc = $('#crewCancel'); if (fc) fc.onclick = function () { self.closeCrew(); };
@@ -367,12 +376,54 @@ var App = {
         this.setLayout('term'); // CLI/terminal is the focus by default; editor on demand
         Promise.resolve(window.cliPath ? window.cliPath() : 'ollamadev').then(function (p) { self.cli = p || 'ollamadev'; }).catch(function () { self.cli = 'ollamadev'; });
         this.loadModels().then(function () {
-            Promise.resolve(window.getRoot ? window.getRoot() : '.').then(function (root) {
-                self.loadFiles(root || '.');
-            }).catch(function () { self.loadFiles('.'); });
-            self.newTerminal();
+            // Startup: prompt for the project folder (prefilled with the last one),
+            // so the file tree, terminals, and Crew all open on your chosen project.
+            var last = ''; try { last = localStorage.getItem('ade.folder') || ''; } catch (e) {}
+            self.pendingFolder = last;
+            self.openFolderModal(true);
             banner('ready', 'ok');
         });
+    },
+    cdPrefix: function () {
+        return (this.cwd && this.cwd !== '.') ? "cd '" + this.cwd.replace(/'/g, "'\\''") + "' && " : '';
+    },
+    openFolderModal: function (firstRun) {
+        var o = $('#folderOverlay'); if (!o) return;
+        this._folderFirstRun = !!firstRun;
+        var inp = $('#folderPath');
+        if (inp) {
+            var pre = this.pendingFolder || this.cwd || '';
+            inp.value = (pre && pre !== '.') ? pre : '';
+            this.pendingFolder = '';
+        }
+        o.hidden = false; if (inp) { inp.focus(); inp.select(); }
+    },
+    closeFolder: function () {
+        var o = $('#folderOverlay'); if (o) o.hidden = true;
+        // First run with no folder chosen → fall back to the default root so the app isn't empty.
+        if (this._folderFirstRun && !this.terminals.length) {
+            this._folderFirstRun = false;
+            var self = this;
+            Promise.resolve(window.getRoot ? window.getRoot() : '.').then(function (r) { self.loadFiles(r || '.'); self.newTerminal(); }).catch(function () { self.loadFiles('.'); self.newTerminal(); });
+        }
+    },
+    submitFolder: function () {
+        var path = ($('#folderPath').value || '').trim();
+        if (!path) { $('#folderPath').focus(); return; }
+        this.openFolder(path, this._folderFirstRun);
+    },
+    // Set the workspace to a folder: file tree, future terminals, and Crew.
+    openFolder: function (path, firstRun) {
+        var self = this;
+        Promise.resolve(window.setRoot ? window.setRoot(path) : { root: path }).then(function (r) {
+            if (!r || r.error) { banner('open failed: ' + ((r && r.error) || 'unknown'), 'err'); $('#folderPath').focus(); return; }
+            self.cwd = r.root;
+            try { localStorage.setItem('ade.folder', r.root); } catch (e) {}
+            var o = $('#folderOverlay'); if (o) o.hidden = true;
+            self.loadFiles(r.root);
+            banner('opened ' + r.root, 'ok');
+            if (firstRun && !self.terminals.length) { self._folderFirstRun = false; self.newTerminal(); }
+        }).catch(function (e) { banner('open error: ' + e, 'err'); });
     },
     THEMES: [['void', 'Void'], ['neon-tokyo', 'Neon Tokyo'], ['synthwave', 'Synthwave'], ['dracula', 'Dracula'], ['midnight', 'Midnight'], ['mono', 'Mono']],
     initThemes: function () {
@@ -486,10 +537,8 @@ var App = {
         model = model || $('#modelSelect').value || 'llama3.2:latest';
         var cli = this.cli || 'ollamadev';
         var q = "'" + String(task).replace(/'/g, "'\\''") + "'"; // shell single-quote
-        // Run in the folder shown in the sidebar, so Crew works on whatever
-        // project you've navigated to — not the ADE's own directory.
-        var dir = this.cwd && this.cwd !== '.' ? "cd '" + this.cwd.replace(/'/g, "'\\''") + "' && " : '';
-        var cmd = dir + cli + ' crew ' + q + ' --max ' + (parseInt(max, 10) || 2) + ' -m ' + model + (review ? ' --review' : '');
+        // Run in the opened project folder, not the ADE's own directory.
+        var cmd = this.cdPrefix() + cli + ' crew ' + q + ' --max ' + (parseInt(max, 10) || 2) + ' -m ' + model + (review ? ' --review' : '');
         var id = rid(); var t = new Terminal(id, 'crew');
         var self = this;
         Promise.resolve(window.termCreate(id, model)).then(function () {
@@ -572,7 +621,7 @@ var App = {
     launchCli: function (id, model) {
         // SIMPLE_INPUT: the CLI uses plain line input so the embedded terminal
         // (which the host pty echoes into) renders cleanly without raw-mode escapes.
-        var cmd = 'OLLAMADEV_SIMPLE_INPUT=1 ' + (this.cli || 'ollamadev') + (model ? ' -m ' + model : '') + '\n';
+        var cmd = this.cdPrefix() + 'OLLAMADEV_SIMPLE_INPUT=1 ' + (this.cli || 'ollamadev') + (model ? ' -m ' + model : '') + '\n';
         // Small delay so the pty shell is ready to receive the command.
         setTimeout(function () { try { window.termWrite(id, strToB64(cmd)); } catch (e) {} }, 350);
     },

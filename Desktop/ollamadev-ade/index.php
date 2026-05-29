@@ -103,6 +103,15 @@ $app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $
     $b->bind('getRoot', function () use ($files): string {
         return $files->getRoot();
     });
+    // Point the workspace at a project folder (expands ~). Returns the real path.
+    $b->bind('setRoot', function (string $path) use ($files): array {
+        $path = trim($path);
+        if ($path !== '' && $path[0] === '~') $path = (getenv('HOME') ?: '') . substr($path, 1);
+        $real = realpath($path);
+        if ($real === false || !is_dir($real)) return ['error' => "Not a directory: $path"];
+        $files->setRoot($real);
+        return ['root' => $real];
+    });
     $b->bind('listFiles', function (?string $path = null) use ($files): array {
         return $files->listDir($path);
     });
