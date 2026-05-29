@@ -159,6 +159,37 @@ if ($smokeModel) {
     }
     ok("agent creates a file via the write tool ($smokeModel)", $ok);
     @unlink($target);
+
+    // --- End-to-end checks for the new features (real model, in a temp cwd) ---
+    $wd = sys_get_temp_dir() . '/smoke_e2e_' . getmypid();
+    @mkdir($wd, 0755, true);
+
+    // Checkpoint + diff pipeline: an edit via the model snapshots the prior file.
+    $ef = $wd . '/edit_target.txt';
+    file_put_contents($ef, "ALPHA\n");
+    $done = false;
+    for ($attempt = 0; $attempt < 2 && !$done; $attempt++) {
+        run_bin(['-m', $smokeModel, '--auto', '-p',
+            "Use the edit tool to replace the text ALPHA with OMEGA in the file edit_target.txt"], '', [], $wd);
+        $done = stripos((string)@file_get_contents($ef), 'OMEGA') !== false;
+    }
+    $ckpts = glob($wd . '/.ollamadev/checkpoints/ckpt_*.json') ?: [];
+    ok("edit tool writes the change ($smokeModel)", $done);
+    ok('edit via model created a checkpoint', count($ckpts) >= 1, count($ckpts) . ' checkpoints');
+
+    // @file mention: the model can answer about an inlined file it never tool-read.
+    $secret = 'ZEBRA' . substr(md5((string)getmypid()), 0, 4);
+    file_put_contents($wd . '/fact.txt', "The magic word is $secret.\n");
+    [$mout] = run_bin(['-m', $smokeModel, '--auto', '-p',
+        "What is the magic word? It is stated in @$wd/fact.txt — answer with just the word."], '', [], $wd);
+    ok('@file mention reaches the model', stripos($mout, $secret) !== false);
+
+    // Token meter: a real turn records non-zero usage shown by /status.
+    [$sout] = run_bin(['-m', $smokeModel], "hi\n/status\n/exit\n");
+    ok('/status reports real token usage after a turn',
+        (bool)preg_match('/last turn:\s*\d+\s*in/i', $sout), trim(substr($sout, -160)));
+
+    shell_exec('rm -rf ' . escapeshellarg($wd));
 } else {
     echo "  \033[2m· skipped (set SMOKE_MODEL=<installed model> to run)\033[0m\n";
 }
@@ -317,6 +348,20 @@ ok('init command wired', strpos($src, 'ProjectInit::run') !== false);
 ok('custom-command fallthrough wired', strpos($src, 'UserCmds::exists') !== false);
 ok('pull command wired', strpos($src, 'Puller::pull') !== false);
 ok('hooks fire in the loop', strpos($src, "Hooks::run('beforePrompt')") !== false);
+
+// Discoverability: the new commands appear in /help, top-level help, and completion.
+[$out] = run_bin([], "/help\n/exit\n");
+$inChat = stripos($out, '/undo') !== false && stripos($out, '/pull') !== false
+       && stripos($out, '/init') !== false && stripos($out, '/retry') !== false;
+ok('/help lists the new slash commands', $inChat);
+
+[$out] = run_bin(['help', 'commands']);
+ok('help commands lists pull/init/resume',
+    stripos($out, 'pull') !== false && stripos($out, 'init') !== false && stripos($out, 'resume') !== false);
+
+[$out] = run_bin(['completion', 'bash']);
+ok('bash completion includes new commands',
+    strpos($out, 'pull') !== false && strpos($out, 'init') !== false && strpos($out, 'resume') !== false);
 
 echo "\n========================\n";
 echo "Results: $pass passed, $fail failed\n";

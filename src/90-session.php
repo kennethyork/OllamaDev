@@ -151,10 +151,11 @@ class Session {
         $args = $parts[1] ?? '';
 
         return match($cmd) {
-            'help' => $this->renderBanner(),
+            'help' => $this->slashHelp(),
             'models' => $this->listModels($args),
             'model' => $this->switchModel($args),
             'pull' => $this->pullModel($args),
+            'image' => 'PROMPT:/image ' . $args, // hand to Vision::extract as a message
             'new' => $this->newSession(),
             'exit', 'quit' => $this->exitCli(),
             'clear' => $this->clearScreen(),
@@ -213,6 +214,41 @@ class Session {
         }
     }
 
+    // Full in-chat command reference (shown by /help), grouped by purpose so the
+    // newer commands are actually discoverable.
+    private function slashHelp(): string {
+        $c = "\033[36m"; $b = "\033[1m"; $d = "\033[2m"; $r = "\033[0m";
+        $row = fn($cmd, $desc) => sprintf("  {$c}%-22s{$r}{$d}%s{$r}\n", $cmd, $desc);
+        $out  = "\n  {$b}Commands{$r}\n\n";
+        $out .= "  {$d}Conversation{$r}\n";
+        $out .= $row('/chat · /agent', 'toggle chat-only vs. tool-using mode');
+        $out .= $row('/retry · /regenerate', 're-run the last turn for a fresh answer');
+        $out .= $row('/compact', 'summarize older messages to free context');
+        $out .= $row('/new', 'start a fresh session');
+        $out .= "\n  {$d}Models{$r}\n";
+        $out .= $row('/model <name>', 'switch model (offers to pull if missing)');
+        $out .= $row('/models', 'list installed models');
+        $out .= $row('/pull <model>', 'download a model from Ollama');
+        $out .= "\n  {$d}Files & edits{$r}\n";
+        $out .= $row('@path/to/file', 'inline a file into your message');
+        $out .= $row('/image <path>', 'attach an image (vision models)');
+        $out .= $row('/undo', 'revert the most recent file edit');
+        $out .= $row('/checkpoints', 'list saved edit checkpoints');
+        $out .= "\n  {$d}Project & context{$r}\n";
+        $out .= $row('/init', 'generate OLLAMADEV.md project memory');
+        $out .= $row('/context · /status', 'show context fill & token usage');
+        $out .= $row('/tools', 'list available tools');
+        $out .= $row('/commands', 'list custom commands');
+        $out .= $row('/permission <…>', 'manage tool approval (auto|ask|readonly)');
+        $out .= "\n  {$d}Session{$r}\n";
+        $out .= $row('/cd · /ls · /pwd', 'navigate the working directory');
+        $out .= $row('/git <cmd>', 'run a git command');
+        $out .= $row('/save · /session', 'save / show the current session');
+        $out .= $row('/clear · /exit', 'clear screen / quit');
+        $out .= "\n  {$d}Tip: Tab completes commands, paths, and model names. Ctrl-C interrupts a response.{$r}\n";
+        return $out;
+    }
+
     private function listCheckpoints(): string {
         $list = Checkpoints::list();
         if (empty($list)) return "No checkpoints.\n";
@@ -254,7 +290,7 @@ ART;
         $out .= "{$d}  Local AI coding assistant · powered by Ollama{$r}\n\n";
         $mode = $this->agent->isChatMode() ? 'chat' : 'agent';
         $out .= "  {$d}model{$r} {$c}{$this->model}{$r}   {$d}· {$modelCount} available · {$mode} mode{$r}\n";
-        $out .= "  {$d}/help · /model · /chat · /exit{$r}\n\n";
+        $out .= "  {$d}/help for all commands · /model · /undo · @file · Ctrl-C interrupts{$r}\n\n";
         return $out;
     }
 
@@ -465,8 +501,8 @@ return "Available: " . implode(', ', array_keys($gitAliases)) . "\n";
         if ($firstWord) {
             $base = ['/help', '/model', '/models', '/pull', '/chat', '/agent', '/retry', '/regenerate', '/new', '/clear', '/compact',
                 '/save', '/session', '/git', '/status', '/tools', '/context', '/pwd', '/cd', '/ls',
-                '/permission', '/verbose', '/undo', '/checkpoints', '/exit', '/quit',
-                'help', 'exit', 'quit', 'clear', 'model', 'models', 'tools', 'git', 'status', 'compact', 'context', 'new', 'cd', 'ls', '/init', 'init'];
+                '/permission', '/verbose', '/undo', '/checkpoints', '/init', '/image', '/commands', '/exit', '/quit',
+                'help', 'exit', 'quit', 'clear', 'model', 'models', 'tools', 'git', 'status', 'compact', 'context', 'new', 'cd', 'ls', 'init'];
             foreach ($base as $c) if ($token === '' || str_starts_with($c, $token)) $cands[] = $c;
         } else {
             $cmd = ltrim($parts[0], '/');

@@ -462,7 +462,7 @@ _ollamadev() {
             return 0
             ;;
         *)
-            COMPREPLY=($(compgen -W 'chat new list load terminal git lsp models help --help --version --model --prompt --continue --dry-run -h -v' -- "${cur}"))
+            COMPREPLY=($(compgen -W 'chat new list load resume pull init terminal git lsp models help --help --version --model --prompt --continue --resume --dry-run -h -v' -- "${cur}"))
             ;;
     esac
     return 0
@@ -480,6 +480,9 @@ _ollamadev() {
         'new:Create new session'
         'list:List sessions'
         'load:Load session'
+        'resume:Resume a recent session'
+        'pull:Download a model from Ollama'
+        'init:Generate OLLAMADEV.md project memory'
         'terminal:Terminal multiplexer'
         'git:Git commands'
         'lsp:LSP server for IDEs'
@@ -495,7 +498,7 @@ ZSH;
         echo <<<'FISH'
 # OllamaDev Fish Shell Completion
 
-complete -c ollamadev -n '__fish_use_subcommand' -a 'chat new list load terminal git lsp models help' -d 'Command'
+complete -c ollamadev -n '__fish_use_subcommand' -a 'chat new list load resume pull init terminal git lsp models help' -d 'Command'
 complete -c ollamadev -n '__fish_seen_subcommand_from terminal' -a 'create spawn list attach start stop pause resume broadcast delete log' -d 'Terminal command'
 complete -c ollamadev -n '__fish_seen_subcommand_from git' -a 'status diff log branch commit push pull stash checkout add' -d 'Git command'
 complete -c ollamadev -s h -l help -d 'Show help'
@@ -734,10 +737,16 @@ Commands:
   ollamadev new        Create new session
   ollamadev list       List sessions
   ollamadev load <id>  Load session
+  ollamadev resume     Pick a recent session to resume
+  ollamadev pull <m>   Download a model from Ollama
+  ollamadev init       Generate OLLAMADEV.md project memory
   ollamadev git        Git commands (status, diff, commit, etc.)
   ollamadev terminal   Terminal multiplexer
   ollamadev lsp        LSP server for IDEs (AI completions, linter diagnostics)
   ollamadev help [topic] Show help
+
+In-chat: type /help for slash commands (/undo, /pull, /init, /retry,
+  /checkpoints, /image, @file mentions). Ctrl-C interrupts a response.
 
 See 'ollamadev help <topic>' for detailed help.
 COMMANDS
