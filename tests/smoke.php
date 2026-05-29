@@ -342,6 +342,9 @@ shell_exec('rm -rf ' . escapeshellarg($ckRoot));
 ok('task tool registered', strpos($src, "Tools::register('task'") !== false);
 ok('task schema exposed to model', strpos($src, "\$fn('task'") !== false);
 ok('subagent has a recursion depth guard', stripos($src, 'depth') !== false && strpos($src, 'SubAgent') !== false);
+ok('subagent defaults to read-only', strpos($src, "agents.subagentPermission") !== false && strpos($src, "'readonly'") !== false);
+ok('subagent restores parent permission mode', strpos($src, 'Permission::setMode($parentMode)') !== false);
+ok('subagent cannot escalate past parent', strpos($src, "\$parentMode === 'readonly') \$subMode = 'readonly'") !== false);
 
 // 8/9/12. command wiring present in the built source.
 ok('init command wired', strpos($src, 'ProjectInit::run') !== false);

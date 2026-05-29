@@ -29,6 +29,19 @@ class SubAgent {
             $sub->setModel($resolved ?: $model);
         }
 
+        // Permission policy: a sub-agent runs read-only BY DEFAULT so an
+        // auto-mode parent can't let it silently write files or run shell. The
+        // caller can opt in to mutations (allow_writes / permission:auto), but a
+        // sub-agent is never MORE permissive than its parent.
+        $parentMode = Permission::getMode();
+        $parentInteractive = Permission::isInteractive();
+        $subMode = Config::get('agents.subagentPermission', 'readonly');
+        $req = strtolower(trim((string)($p['permission'] ?? '')));
+        if (!empty($p['allow_writes']) || $req === 'auto') $subMode = 'auto';
+        elseif (in_array($req, ['ask', 'readonly', 'auto'], true)) $subMode = $req;
+        if ($parentMode === 'readonly') $subMode = 'readonly';            // can't escalate past parent
+        if ($parentMode === 'ask' && $subMode === 'auto') $subMode = 'ask';
+
         $userContent = "Task: $prompt";
         if ($context !== '') $userContent .= "\n\nContext:\n$context";
         $userContent .= "\n\nWork through this using tools as needed, then give a concise final answer in plain text.";
@@ -38,6 +51,10 @@ class SubAgent {
         $toolTail = [];
 
         self::$depth++;
+        // Sub-agents can't field approval prompts, so run non-interactively under
+        // the chosen (cautious) mode, then restore the parent's policy.
+        Permission::setMode($subMode);
+        Permission::setInteractive(false);
         try {
             for ($i = 0; $i < $maxIterations; $i++) {
                 $turn = $sub->chatTurn($messages);
@@ -63,6 +80,8 @@ class SubAgent {
             return 'Sub-agent error: ' . $e->getMessage();
         } finally {
             self::$depth--;
+            Permission::setMode($parentMode);          // restore parent policy
+            Permission::setInteractive($parentInteractive);
         }
 
         if ($lastText !== '') return $lastText;

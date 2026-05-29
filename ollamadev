@@ -83,7 +83,7 @@ class Config {
         if (getenv('OLLAMA_MODEL')) $envOverrides['ollama']['defaultModel'] = getenv('OLLAMA_MODEL');
         $defaults = [
             'ollama' => ['host' => getenv('OLLAMA_HOST') ?: 'http://localhost:11434', 'defaultModel' => getenv('OLLAMA_MODEL') ?: 'llama3.2:latest', 'contextWindow' => (int)(getenv('OLLAMA_NUM_CTX') ?: 16384), 'temperature' => 0.6, 'stream' => true],
-            'agents' => ['coder' => ['temperature' => 0.7, 'maxTokens' => 4096], 'maxIterations' => 12, 'maxToolOutput' => 12000],
+            'agents' => ['coder' => ['temperature' => 0.7, 'maxTokens' => 4096], 'maxIterations' => 12, 'maxToolOutput' => 12000, 'subagentPermission' => 'readonly'],
             'data' => ['directory' => '.ollamadev']
         ];
         $home = getenv('HOME') ?: '/tmp';
@@ -943,10 +943,11 @@ class Tools {
             $fn('fetch', 'Fetch the raw contents of a URL.', [
                 'url' => $str('The URL to fetch'),
             ], ['url']),
-            $fn('task', 'Delegate a focused sub-task to a fresh nested agent (its own short context, same model, full tools, bounded iterations). Returns a concise result string. Use for self-contained work you want handled in isolation.', [
+            $fn('task', 'Delegate a focused sub-task to a fresh nested agent (its own short context, same model, bounded iterations). The sub-agent is READ-ONLY by default (it can read/search/analyze but not write files or run shell). Returns a concise result string. Use for self-contained research/analysis you want handled in isolation.', [
                 'prompt' => $str('The sub-task to perform, described fully and self-contained'),
                 'context' => $str('Optional extra context the sub-agent needs'),
                 'max_iterations' => $int('Max tool/think iterations (default 6, capped at 12)'),
+                'allow_writes' => ['type' => 'boolean', 'description' => 'Set true ONLY if the sub-task must create/edit files or run commands (default false = read-only)'],
             ], ['prompt']),
         ];
     }
@@ -3295,6 +3296,19 @@ class SubAgent {
             $sub->setModel($resolved ?: $model);
         }
 
+        // Permission policy: a sub-agent runs read-only BY DEFAULT so an
+        // auto-mode parent can't let it silently write files or run shell. The
+        // caller can opt in to mutations (allow_writes / permission:auto), but a
+        // sub-agent is never MORE permissive than its parent.
+        $parentMode = Permission::getMode();
+        $parentInteractive = Permission::isInteractive();
+        $subMode = Config::get('agents.subagentPermission', 'readonly');
+        $req = strtolower(trim((string)($p['permission'] ?? '')));
+        if (!empty($p['allow_writes']) || $req === 'auto') $subMode = 'auto';
+        elseif (in_array($req, ['ask', 'readonly', 'auto'], true)) $subMode = $req;
+        if ($parentMode === 'readonly') $subMode = 'readonly';            // can't escalate past parent
+        if ($parentMode === 'ask' && $subMode === 'auto') $subMode = 'ask';
+
         $userContent = "Task: $prompt";
         if ($context !== '') $userContent .= "\n\nContext:\n$context";
         $userContent .= "\n\nWork through this using tools as needed, then give a concise final answer in plain text.";
@@ -3304,6 +3318,10 @@ class SubAgent {
         $toolTail = [];
 
         self::$depth++;
+        // Sub-agents can't field approval prompts, so run non-interactively under
+        // the chosen (cautious) mode, then restore the parent's policy.
+        Permission::setMode($subMode);
+        Permission::setInteractive(false);
         try {
             for ($i = 0; $i < $maxIterations; $i++) {
                 $turn = $sub->chatTurn($messages);
@@ -3329,6 +3347,8 @@ class SubAgent {
             return 'Sub-agent error: ' . $e->getMessage();
         } finally {
             self::$depth--;
+            Permission::setMode($parentMode);          // restore parent policy
+            Permission::setInteractive($parentInteractive);
         }
 
         if ($lastText !== '') return $lastText;
