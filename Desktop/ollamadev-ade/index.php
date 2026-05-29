@@ -90,6 +90,15 @@ $app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $
         return $cli;
     });
 
+    // Live Crew board (Director's plan + per-subtask state) for the kanban view.
+    $b->bind('crewBoard', function (): array {
+        $home = getenv('HOME') ?: sys_get_temp_dir();
+        $f = $home . '/.ollamadev/crew/current.json';
+        if (!is_file($f)) return [];
+        $d = json_decode((string) @file_get_contents($f), true);
+        return is_array($d) ? $d : [];
+    });
+
     // --- Files ---
     $b->bind('getRoot', function () use ($files): string {
         return $files->getRoot();

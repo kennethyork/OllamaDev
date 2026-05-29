@@ -50,6 +50,17 @@ class Crew {
         $subtasks = array_slice($subtasks, 0, $maxCoders);
         foreach ($subtasks as $i => $st) echo "  {$c}" . ($i + 1) . ".{$r} " . ($st['title'] ?? 'subtask') . "\n";
 
+        // Live kanban board the desktop polls ($HOME/.ollamadev/crew/current.json):
+        // the Director's plan becomes To-do cards that move as the crew works.
+        $home = getenv('HOME') ?: sys_get_temp_dir();
+        $boardFile = $home . '/.ollamadev/crew/current.json';
+        @mkdir(dirname($boardFile), 0755, true);
+        $board = ['task' => $task, 'runId' => $runId, 'active' => true, 'model' => $model, 'subtasks' => []];
+        foreach ($subtasks as $i => $st) $board['subtasks'][] = ['n' => $i + 1, 'title' => $st['title'] ?? ('task ' . ($i + 1)), 'state' => 'todo'];
+        $writeBoard = function () use (&$board, $boardFile) { $board['ts'] = time(); @file_put_contents($boardFile, json_encode($board)); };
+        $setState = function (int $n, string $s) use (&$board, $writeBoard) { foreach ($board['subtasks'] as &$bs) { if ($bs['n'] === $n) $bs['state'] = $s; } unset($bs); $writeBoard(); };
+        $writeBoard();
+
         // ---- Coders: one git worktree/branch each ----
         $wtRoot = sys_get_temp_dir() . '/ollamadev-crew/' . $runId;
         @mkdir($wtRoot, 0755, true);
@@ -60,8 +71,9 @@ class Crew {
             $wt = $wtRoot . '/c' . $n;
             echo "\n{$b}▸ Coder {$n}{$r} {$d}{$branch}{$r}\n";
             $add = self::sh('git worktree add -b ' . escapeshellarg($branch) . ' ' . escapeshellarg($wt) . ' ' . escapeshellarg($baseCommit) . ' 2>&1');
-            if (!is_dir($wt)) { echo "  {$y}skipped (worktree failed): {$add}{$r}\n"; continue; }
+            if (!is_dir($wt)) { echo "  {$y}skipped (worktree failed): {$add}{$r}\n"; $setState($n, 'held'); continue; }
 
+            $setState($n, 'doing');
             self::runCoder($wt, $st, $model, $maxIter, $research, $task);
             // Commit whatever the coder changed — but never the agent's own
             // .ollamadev state (costs/checkpoints/sessions it wrote in the worktree).
@@ -89,16 +101,17 @@ class Crew {
         echo "\n{$b}▸ Landing{$r}\n";
         $merged = []; $held = [];
         foreach ($results as $res) {
-            if ($res['empty']) continue;
-            if (empty($res['audit']['clean'])) { $held[] = $res; echo "  {$y}held{$r} #{$res['n']} {$res['branch']} {$d}(audit flagged){$r}\n"; continue; }
+            if ($res['empty']) { $setState($res['n'], 'held'); continue; }
+            if (empty($res['audit']['clean'])) { $held[] = $res; $setState($res['n'], 'held'); echo "  {$y}held{$r} #{$res['n']} {$res['branch']} {$d}(audit flagged){$r}\n"; continue; }
             $m = self::sh('git merge --no-ff --no-edit ' . escapeshellarg($res['branch']) . ' 2>&1');
             if (self::sh('git status --porcelain') !== '' && self::sh('git ls-files -u') !== '') {
                 self::sh('git merge --abort 2>&1');
-                $held[] = $res; echo "  {$y}held{$r} #{$res['n']} {$res['branch']} {$d}(merge conflict — review manually){$r}\n";
+                $held[] = $res; $setState($res['n'], 'held'); echo "  {$y}held{$r} #{$res['n']} {$res['branch']} {$d}(merge conflict — review manually){$r}\n";
             } else {
-                $merged[] = $res; echo "  {$g}merged{$r} #{$res['n']} {$res['branch']}\n";
+                $merged[] = $res; $setState($res['n'], 'done'); echo "  {$g}merged{$r} #{$res['n']} {$res['branch']}\n";
             }
         }
+        $board['active'] = false; $writeBoard();
 
         // ---- Cleanup worktrees (keep branches) ----
         foreach ($results as $res) self::sh('git worktree remove --force ' . escapeshellarg($res['wt']) . ' 2>&1');

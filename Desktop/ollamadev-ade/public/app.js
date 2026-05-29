@@ -270,21 +270,35 @@ var Tasks = {
     move: function (id, col) { var t = this.items.find(function (x) { return x.id === id; }); if (t) { t.col = col; this.save(); this.render(); } },
     del: function (id) { this.items = this.items.filter(function (x) { return x.id !== id; }); this.save(); this.render(); },
     run: function (id) { var t = this.items.find(function (x) { return x.id === id; }); if (!t) return; this.move(id, 'doing'); App.runTaskInAgent(t.title); },
+    // Map a crew subtask state to a board column (held shows in Doing, flagged).
+    crewCol: function (state) { return state === 'done' ? 'done' : (state === 'todo' ? 'todo' : 'doing'); },
     render: function () {
         var board = $('#board'); if (!board) return;
         var self = this;
+        var crew = (App.crewBoard && Array.isArray(App.crewBoard.subtasks)) ? App.crewBoard.subtasks : [];
         board.innerHTML = this.COLS.map(function (c) {
+            // Director's plan as live, read-only crew cards.
+            var crewInCol = crew.filter(function (s) { return self.crewCol(s.state) === c[0]; });
+            var crewCards = crewInCol.map(function (s) {
+                var held = s.state === 'held';
+                return '<div class="card crew' + (held ? ' held' : '') + '">' +
+                    '<div class="title">🤖 ' + esc(s.title) + '</div>' +
+                    '<div class="cmeta">' + (held ? '⚠ held' : (s.state === 'doing' ? '● working' : s.state)) + '</div></div>';
+            }).join('');
+            // The user's own manual tasks.
             var cards = self.items.filter(function (t) { return t.col === c[0]; });
-            var body = cards.length ? cards.map(function (t) {
+            var manual = cards.map(function (t) {
                 return '<div class="card" draggable="true" data-id="' + t.id + '">' +
                     '<div class="title">' + esc(t.title) + '</div>' +
                     '<div class="actions">' +
                     (c[0] !== 'done' ? '<button class="run" data-act="run">▶ Run</button>' : '') +
                     '<button data-act="back">◀</button><button data-act="fwd">▶</button>' +
                     '<button class="del" data-act="del">✕</button></div></div>';
-            }).join('') : '<div class="board-empty">—</div>';
+            }).join('');
+            var body = (crewCards + manual) || '<div class="board-empty">—</div>';
+            var count = crewInCol.length + cards.length;
             return '<div class="col" data-col="' + c[0] + '"><div class="col-head"><span class="dotc"></span>' + c[1] +
-                '<span class="count">' + cards.length + '</span></div><div class="col-body">' + body + '</div></div>';
+                '<span class="count">' + count + '</span></div><div class="col-body">' + body + '</div></div>';
         }).join('');
         this.wire(board);
     },
@@ -318,7 +332,7 @@ var Tasks = {
 };
 
 var App = {
-    terminals: [], cwd: '.', layout: 'split', zoomed: null, view: 'code', panel: 'files',
+    terminals: [], cwd: '.', layout: 'split', zoomed: null, view: 'code', panel: 'files', crewBoard: null, crewPoll: null,
     init: function () {
         var self = this;
         this.initThemes();
@@ -473,10 +487,27 @@ var App = {
         var id = rid(); var t = new Terminal(id, 'crew');
         var self = this;
         Promise.resolve(window.termCreate(id, model)).then(function () {
-            self.terminals.push(t); self.render(); self.setView('code'); self.setLayout('term');
+            self.terminals.push(t); self.render();
             setTimeout(function () { try { window.termWrite(id, strToB64(cmd + '\n')); } catch (e) {} }, 400);
+            self.setView('board');        // show the kanban so the Director's plan appears
+            self.startCrewPoll();
             banner('crew running…', 'ok');
         }).catch(function (e) { banner('crew launch failed: ' + e, 'err'); });
+    },
+    // Poll the live crew board so the kanban reflects the Director's plan + progress.
+    startCrewPoll: function () {
+        var self = this;
+        if (this.crewPoll) return;
+        var idle = 0;
+        this.crewPoll = setInterval(function () {
+            Promise.resolve(window.crewBoard ? window.crewBoard() : null).then(function (b) {
+                self.crewBoard = (b && b.subtasks) ? b : self.crewBoard;
+                if (self.view === 'board') Tasks.render();
+                // Stop polling a while after the run goes inactive.
+                if (b && b.active === false) { if (++idle > 6) { clearInterval(self.crewPoll); self.crewPoll = null; } }
+                else idle = 0;
+            }).catch(function () {});
+        }, 1500);
     },
     toggleZoom: function (id) {
         this.zoomed = this.zoomed === id ? null : id;
