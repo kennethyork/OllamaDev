@@ -82,6 +82,11 @@ $app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $
         return $pty->agentRun($id, $prompt);
     });
 
+    // Resolved ollamadev CLI path, so the frontend can auto-launch it in a pty.
+    $b->bind('cliPath', function () use ($cli): string {
+        return $cli;
+    });
+
     // --- Files ---
     $b->bind('getRoot', function () use ($files): string {
         return $files->getRoot();

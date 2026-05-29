@@ -68,7 +68,8 @@ Terminal.prototype.setStatus = function (s) {
 Terminal.prototype.runAgent = function (el) {
     var v = (el.value || '').trim(); if (!v) return; el.value = '';
     this.setStatus('running'); this.lastData = Date.now();
-    try { window.agentRun(this.id, v); } catch (e) {}
+    // The terminal runs the interactive ollamadev CLI, so just type the prompt in.
+    try { window.termWrite(this.id, strToB64(v + '\n')); } catch (e) {}
 };
 Terminal.prototype.newLine = function () { this.line = document.createElement('div'); this.line.className = 'term-line'; this.screen.appendChild(this.line); };
 Terminal.prototype.emit = function (s) {
@@ -299,6 +300,7 @@ var App = {
             if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); Editor.save(); }
         });
         Tasks.load(); Tasks.render();
+        Promise.resolve(window.cliPath ? window.cliPath() : 'ollamadev').then(function (p) { self.cli = p || 'ollamadev'; }).catch(function () { self.cli = 'ollamadev'; });
         this.loadModels().then(function () {
             Promise.resolve(window.getRoot ? window.getRoot() : '.').then(function (root) {
                 self.loadFiles(root || '.');
@@ -333,15 +335,22 @@ var App = {
         $('#boardView').hidden = v !== 'board';
         if (v === 'board') Tasks.render();
     },
-    // Hand a task title to an agent terminal (create one if none exist).
+    // Hand a task title to an agent terminal's CLI (create one if none exist).
     runTaskInAgent: function (title) {
         var self = this;
-        var run = function (t) { t.setStatus('running'); t.lastData = Date.now(); try { window.agentRun(t.id, title); } catch (e) {} self.setView('code'); banner('running task in ' + t.id.slice(-6), 'ok'); };
-        if (this.terminals.length) { run(this.terminals[0]); }
+        var type = function (t, delay) {
+            t.setStatus('running'); t.lastData = Date.now();
+            setTimeout(function () { try { window.termWrite(t.id, strToB64(title + '\n')); } catch (e) {} }, delay || 0);
+            self.setView('code'); banner('running task in ' + t.id.slice(-6), 'ok');
+        };
+        if (this.terminals.length) { type(this.terminals[0], 0); }
         else {
             var model = $('#modelSelect').value || 'llama3.2:latest';
             var id = rid(); var t = new Terminal(id, model);
-            Promise.resolve(window.termCreate(id, model)).then(function () { self.terminals.push(t); self.render(); run(t); });
+            Promise.resolve(window.termCreate(id, model)).then(function () {
+                self.terminals.push(t); self.render(); self.launchCli(id, model);
+                type(t, 1800); // wait for the CLI to boot before sending the prompt
+            });
         }
     },
     cycleLayout: function () {
@@ -364,9 +373,14 @@ var App = {
     loadModels: function () {
         return Promise.resolve(window.listModels()).then(function (s) {
             var sel = $('#modelSelect'); var conn = $('#conn');
-            conn.className = 'conn' + (s && s.connected ? ' on' : '');
-            var models = (s && s.models) || [];
-            sel.innerHTML = models.map(function (m) { return '<option>' + esc(m.name || m) + '</option>'; }).join('') || '<option>llama3.2:latest</option>';
+            if (conn) {
+                conn.className = 'conn' + (s && s.connected ? ' on' : '');
+                conn.title = s && s.connected ? 'Ollama connected' : 'Ollama not reachable';
+            }
+            if (sel) {
+                var models = (s && s.models) || [];
+                sel.innerHTML = models.map(function (m) { return '<option>' + esc(m.name || m) + '</option>'; }).join('') || '<option>llama3.2:latest</option>';
+            }
         }).catch(function (e) { banner('listModels failed: ' + e, 'err'); });
     },
     loadFiles: function (path) {
@@ -399,6 +413,13 @@ var App = {
         }).catch(function (e) { banner('list error: ' + e, 'err'); });
     },
     MAX_TERMINALS: 16,
+    // Auto-launch the interactive ollamadev CLI (with the selected model) inside
+    // a freshly-started pty. You can still switch models in the CLI with /model.
+    launchCli: function (id, model) {
+        var cmd = (this.cli || 'ollamadev') + (model ? ' -m ' + model : '') + '\n';
+        // Small delay so the pty shell is ready to receive the command.
+        setTimeout(function () { try { window.termWrite(id, strToB64(cmd)); } catch (e) {} }, 350);
+    },
     newTerminal: function () {
         if (this.terminals.length >= this.MAX_TERMINALS) { banner('maximum of ' + this.MAX_TERMINALS + ' terminals', 'err'); return; }
         var model = $('#modelSelect').value || 'llama3.2:latest';
@@ -408,6 +429,7 @@ var App = {
         Promise.resolve(window.termCreate(id, model)).then(function () {
             self.terminals.push(t);
             self.render();
+            self.launchCli(id, model);
         }).catch(function (e) { banner('termCreate failed: ' + e, 'err'); });
     },
     closeTerminal: function (id) {
