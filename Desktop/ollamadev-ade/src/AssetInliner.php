@@ -42,27 +42,9 @@ class AssetInliner
 
         $themesJson = json_encode($this->themes);
 
-        // Bundle xterm locally (vendored) so the app works fully offline.
-        $vendorDir = $this->baseDir . '/public/vendor';
-        $xtermCss = @file_get_contents($vendorDir . '/xterm.css') ?: '';
-        $xtermJs = @file_get_contents($vendorDir . '/xterm.js') ?: '';
-        $xtermFit = @file_get_contents($vendorDir . '/xterm-addon-fit.js') ?: '';
-
-        // Bundle CodeMirror (core + theme + modes) for the editor, offline.
-        $cm = $vendorDir . '/cm';
-        $cmCss = (@file_get_contents("$cm/codemirror.css") ?: '') . "\n" . (@file_get_contents("$cm/dracula.css") ?: '');
-        $cmJs = @file_get_contents("$cm/codemirror.js") ?: '';
-        // Modes in dependency order (clike/xml/css/javascript before htmlmixed/php).
-        foreach (['clike', 'xml', 'css', 'javascript', 'htmlmixed', 'php', 'python', 'markdown', 'shell', 'yaml'] as $mode) {
-            $cmJs .= "\n" . (@file_get_contents("$cm/$mode.js") ?: '');
-        }
-
+        // No third-party JS: the terminal and editor are dependency-free
+        // (plain DOM + a small ANSI parser in app.js).
         $script = <<<HTML
-<style id="ollamadev-xterm-css">{$xtermCss}</style>
-<script>{$xtermJs}</script>
-<script>{$xtermFit}</script>
-<style id="ollamadev-cm-css">{$cmCss}</style>
-<script>{$cmJs}</script>
 <style id="ollamadev-inlined-css">{$allCss}</style>
 <style id="ollamadev-theme"></style>
 <script>

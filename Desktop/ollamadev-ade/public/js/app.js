@@ -20,6 +20,9 @@ class App {
         await this.loadPrompts();
         await this.loadSessions();
         this.renderFileTree();
+        // Open one terminal so the app is immediately usable.
+        this.renderTerminalGrid();
+        await this.createTerminal();
     }
 
     async loadPrompts() {
@@ -272,20 +275,6 @@ class App {
         await this.loadSessions();
     }
 
-    cmModeFor(path) {
-        const ext = (path.split('.').pop() || '').toLowerCase();
-        const map = {
-            js: 'javascript', mjs: 'javascript', json: { name: 'javascript', json: true },
-            ts: 'text/typescript', jsx: 'javascript', tsx: 'text/typescript',
-            php: 'php', py: 'python', css: 'css', scss: 'css',
-            html: 'htmlmixed', htm: 'htmlmixed', xml: 'xml', svg: 'xml',
-            md: 'markdown', markdown: 'markdown', yml: 'yaml', yaml: 'yaml',
-            sh: 'shell', bash: 'shell', c: 'text/x-csrc', h: 'text/x-csrc',
-            cpp: 'text/x-c++src', go: 'text/x-go', rs: 'text/x-rustsrc', java: 'text/x-java',
-        };
-        return map[ext] || null;
-    }
-
     async openInEditor(path) {
         try {
             const r = await window.readFile(path);
@@ -298,34 +287,24 @@ class App {
                     <span class="editor-status" id="editorStatus"></span>
                     <button class="editor-save" id="editorSave">Save</button>
                 </div>
-                <div class="editor-host" id="editorHost"></div>
+                <textarea class="editor-area" id="editorArea" spellcheck="false"></textarea>
             `;
             this._editorPath = path;
-            const host = document.getElementById('editorHost');
+            const area = document.getElementById('editorArea');
+            area.value = r.content || '';
             const markDirty = () => { document.getElementById('editorStatus').textContent = '● unsaved'; };
-
-            if (window.CodeMirror) {
-                this._cm = window.CodeMirror(host, {
-                    value: r.content || '',
-                    mode: this.cmModeFor(path),
-                    theme: 'dracula',
-                    lineNumbers: true,
-                    indentUnit: 4,
-                    tabSize: 4,
-                    lineWrapping: false,
-                });
-                this._cm.setSize('100%', '100%');
-                this._cm.on('change', markDirty);
-                this._cm.setOption('extraKeys', { 'Cmd-S': () => this.saveEditor(), 'Ctrl-S': () => this.saveEditor() });
-                setTimeout(() => this._cm.refresh(), 0);
-            } else {
-                // Fallback: plain textarea if CodeMirror failed to load.
-                host.innerHTML = '<textarea class="editor-area" id="editorArea" spellcheck="false"></textarea>';
-                const area = document.getElementById('editorArea');
-                area.value = r.content || '';
-                area.addEventListener('input', markDirty);
-                this._cm = null;
-            }
+            area.addEventListener('input', markDirty);
+            area.addEventListener('keydown', (e) => {
+                if (e.key === 'Tab') {
+                    e.preventDefault();
+                    const s = area.selectionStart, en = area.selectionEnd;
+                    area.value = area.value.slice(0, s) + '    ' + area.value.slice(en);
+                    area.selectionStart = area.selectionEnd = s + 4;
+                    markDirty();
+                } else if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+                    e.preventDefault(); this.saveEditor();
+                }
+            });
             document.getElementById('editorSave').addEventListener('click', () => this.saveEditor());
         } catch (e) { console.error('openInEditor failed', e); }
     }
@@ -333,7 +312,7 @@ class App {
     async saveEditor() {
         if (!this._editorPath) return;
         const status = document.getElementById('editorStatus');
-        const content = this._cm ? this._cm.getValue() : (document.getElementById('editorArea')?.value ?? '');
+        const content = document.getElementById('editorArea')?.value ?? '';
         try {
             const r = await window.writeFile(this._editorPath, content);
             status.textContent = (r && r.error) ? '✗ ' + r.error : '✓ saved';
@@ -436,11 +415,13 @@ class App {
         const model = document.getElementById('modelSelect')?.value || 'llama3.2:latest';
         try {
             const id = await window.createSession(model);
+            if (!id || typeof id !== 'string') { setDiag('createSession returned ' + JSON.stringify(id), '#f85149'); return; }
             this.terminals.set(id, new TerminalPane(id, model));
             this.renderTerminalGrid();
             await this.loadSessions();
+            setDiag('terminal ✓ ' + id.slice(-6), '#3fb950');
         } catch (e) {
-            console.error('Failed to create terminal:', e);
+            setDiag('terminal error: ' + (e && e.message ? e.message : e), '#f85149');
         }
     }
 
@@ -611,32 +592,56 @@ class App {
 
 // Encode a JS string (incl. UTF-8) to base64 for the binding boundary.
 function strToB64(s) { return btoa(unescape(encodeURIComponent(s))); }
-// Decode base64 to raw bytes for xterm (handles binary/ANSI/UTF-8 output).
-function b64ToBytes(b64) {
+function b64ToStr(b64) {
     const bin = atob(b64);
     const arr = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-    return arr;
+    try { return new TextDecoder('utf-8', { fatal: false }).decode(arr); } catch (e) { return bin; }
 }
 
-// A real shell terminal backed by the CLI's __pty-daemon__ (bash in a PTY).
-// xterm renders output; keystrokes stream to the daemon's input queue.
+// 16-color ANSI foreground palette.
+const ANSI_FG = {
+    30: '#3b4048', 31: '#f85149', 32: '#3fb950', 33: '#d29922', 34: '#58a6ff', 35: '#bc8cff', 36: '#39c5cf', 37: '#b1bac4',
+    90: '#6e7681', 91: '#ff7b72', 92: '#56d364', 93: '#e3b341', 94: '#79c0ff', 95: '#d2a8ff', 96: '#56d4dd', 97: '#f0f6fc',
+};
+
+// Dependency-free terminal: streams PTY bytes from the daemon and renders them
+// with ANSI SGR colors to the DOM. Full-screen TUIs (vim/htop) aren't supported,
+// but command output, colors, and the agent running commands display cleanly.
 class TerminalPane {
     constructor(id, model) {
-        this.id = id;
-        this.model = model;
-        this.term = null;
-        this.fit = null;
-        this.offset = 0;   // bytes consumed from pty-out
-        this.polling = false;
-        this._ro = null;
+        this.id = id; this.model = model;
+        this.offset = 0; this.polling = false;
+        this.screen = null; this.lineEl = null;
+        this.fg = null; this.bold = false;
         this.blocksPanel = null;
     }
 
-    setBlocksPanel(el) {
-        this.blocksPanel = el;
-        if (el) this.refreshBlocks();
+    mount(container) {
+        this.offset = 0; this.lineEl = null; this.fg = null; this.bold = false;
+        container.innerHTML = `
+            <div class="term-screen" tabindex="0"></div>
+            <form class="term-inputline">
+                <span class="term-prompt">$</span>
+                <input class="term-input" type="text" autocomplete="off" spellcheck="false" placeholder="type a command, Enter to run">
+            </form>`;
+        this.screen = container.querySelector('.term-screen');
+        const input = container.querySelector('.term-input');
+        const form = container.querySelector('.term-inputline');
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            window.writeToSession(this.id, strToB64(input.value + '\n'));
+            input.value = '';
+        });
+        input.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'c') { e.preventDefault(); window.writeToSession(this.id, strToB64('\x03')); }
+            else if (e.ctrlKey && e.key === 'd') { e.preventDefault(); window.writeToSession(this.id, strToB64('\x04')); }
+        });
+        this.screen.addEventListener('click', () => input.focus());
+        if (!this.polling) this.startPolling();
     }
+
+    setBlocksPanel(el) { this.blocksPanel = el; if (el) this.refreshBlocks(); }
 
     async refreshBlocks() {
         if (!this.blocksPanel) return;
@@ -656,30 +661,58 @@ class TerminalPane {
         } catch (e) {}
     }
 
-    mount(container) {
-        if (!window.Terminal) { container.textContent = 'xterm.js failed to load'; return; }
-        if (this.term) { try { this.term.dispose(); } catch (e) {} }
-        this.offset = 0; // replay full PTY output into the fresh element
+    newLine() {
+        this.lineEl = document.createElement('div');
+        this.lineEl.className = 'term-line';
+        this.screen.appendChild(this.lineEl);
+    }
 
-        this.term = new window.Terminal({
-            cursorBlink: true,
-            fontSize: 13,
-            fontFamily: "'SF Mono', 'Fira Code', monospace",
-            theme: { background: '#0d1117', foreground: '#e6edf3' },
-        });
-        this.fit = new FitAddon.FitAddon();
-        this.term.loadAddon(this.fit);
-        this.term.open(container);
-        try { this.fit.fit(); } catch (e) {}
+    appendText(s) {
+        if (!this.lineEl) this.newLine();
+        const span = document.createElement('span');
+        if (this.fg) span.style.color = this.fg;
+        if (this.bold) span.style.fontWeight = 'bold';
+        span.textContent = s;
+        this.lineEl.appendChild(span);
+    }
 
-        this.term.onData(d => window.writeToSession(this.id, strToB64(d)));
-        this.term.onResize(({ cols, rows }) => { try { window.resizeSession(this.id, cols, rows); } catch (e) {} });
-
-        if (window.ResizeObserver) {
-            this._ro = new ResizeObserver(() => { try { this.fit.fit(); } catch (e) {} });
-            this._ro.observe(container);
+    applySgr(params) {
+        const codes = params.split(';').filter(x => x !== '').map(Number);
+        if (codes.length === 0) codes.push(0);
+        for (const c of codes) {
+            if (c === 0) { this.fg = null; this.bold = false; }
+            else if (c === 1) this.bold = true;
+            else if (c === 22) this.bold = false;
+            else if (c === 39) this.fg = null;
+            else if (ANSI_FG[c]) this.fg = ANSI_FG[c];
         }
-        if (!this.polling) this.startPolling();
+    }
+
+    write(text) {
+        if (!this.screen) return;
+        const atBottom = this.screen.scrollHeight - this.screen.scrollTop - this.screen.clientHeight < 40;
+        let i = 0;
+        while (i < text.length) {
+            const ch = text[i];
+            if (ch === '\x1b') {
+                const csi = /^\x1b\[([0-9;?]*)([A-Za-z])/.exec(text.slice(i));
+                if (csi) {
+                    if (csi[2] === 'm') this.applySgr(csi[1]);
+                    else if ((csi[2] === 'K' || csi[2] === 'J') && this.lineEl) this.lineEl.innerHTML = '';
+                    i += csi[0].length; continue;
+                }
+                const osc = /^\x1b\][^\x07]*(?:\x07|\x1b\\)/.exec(text.slice(i));
+                if (osc) { i += osc[0].length; continue; }
+                i++; continue;
+            }
+            if (ch === '\r') { if (this.lineEl) this.lineEl.innerHTML = ''; i++; continue; }
+            if (ch === '\n') { this.newLine(); i++; continue; }
+            let j = i;
+            while (j < text.length && text[j] !== '\x1b' && text[j] !== '\n' && text[j] !== '\r') j++;
+            this.appendText(text.slice(i, j));
+            i = j;
+        }
+        if (atBottom) this.screen.scrollTop = this.screen.scrollHeight;
     }
 
     startPolling() {
@@ -689,22 +722,48 @@ class TerminalPane {
             if (!this.polling) return;
             try {
                 const r = await window.readSession(this.id, this.offset);
-                if (r && r.data) { this.term.write(b64ToBytes(r.data)); this.offset = r.offset; }
+                if (r && r.data) { this.write(b64ToStr(r.data)); this.offset = r.offset; }
             } catch (e) {}
-            if (this.blocksPanel && (++tick % 16 === 0)) this.refreshBlocks(); // ~1/s
-            if (this.polling) setTimeout(poll, 60);
+            if (this.blocksPanel && (++tick % 12 === 0)) this.refreshBlocks();
+            if (this.polling) setTimeout(poll, 80);
         };
         poll();
     }
 
     close() {
         this.polling = false;
-        if (this._ro) { this._ro.disconnect(); this._ro = null; }
         try { window.killSession(this.id); } catch (e) {}
-        if (this.term) { try { this.term.dispose(); } catch (e) {} this.term = null; }
     }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-    window.app = new App();
-});
+// Boson injects the PHP bindings (window.createSession, etc.) into the page
+// asynchronously, which can race with DOMContentLoaded. Wait for a known
+// binding to exist before starting the app so its first calls don't no-op.
+function setDiag(msg, color) {
+    const el = document.getElementById('statusDiag');
+    if (el) { el.textContent = msg; if (color) el.style.color = color; }
+}
+window.onerror = (m, src, ln) => { setDiag('JS error: ' + m + ' @' + ln, '#f85149'); };
+
+function startApp() {
+    let waited = 0;
+    const tick = () => {
+        if (typeof window.createSession === 'function' && typeof window.getTasks === 'function') {
+            setDiag('bindings ✓', '#3fb950');
+            try { window.app = new App(); } catch (e) { setDiag('init error: ' + (e && e.message ? e.message : e), '#f85149'); }
+        } else if (waited < 10000) {
+            waited += 50;
+            setDiag('waiting for bindings… ' + waited + 'ms', '#d29922');
+            setTimeout(tick, 50);
+        } else {
+            setDiag('bindings NEVER appeared — window.createSession=' + (typeof window.createSession), '#f85149');
+            try { window.app = new App(); } catch (e) {}
+        }
+    };
+    tick();
+}
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startApp);
+} else {
+    startApp();
+}

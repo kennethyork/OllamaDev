@@ -69,8 +69,9 @@ $app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $
     /** @var \Boson\WebView\WebView $webview */
     $webview = $app->window->webview;
 
-    $webview->html = $html;
-
+    // Register bindings BEFORE loading the page: Boson injects the binding
+    // scripts at document-start of the load triggered by setting `html`, so
+    // window.* functions must be registered first.
     $bindings = $webview->get('bindings');
 
     $bindings->bind('ollamaStatus', function (): array {
@@ -185,6 +186,9 @@ $app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $
     $bindings->bind('searchFiles', function (string $query, ?string $path = null) use ($files): array {
         return $files->search($query, $path);
     });
+
+    // Load the page now that all bindings are registered.
+    $webview->html = $html;
 });
 
 $app->run();

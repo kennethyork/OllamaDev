@@ -166,7 +166,7 @@
 .terminal-streaming {
     color: var(--accent);
 
-/* Real PTY terminal (xterm) + agent bar */
+/* Terminal pane + agent bar */
 .terminal-pane {
     display: flex;
     flex-direction: column;
@@ -182,7 +182,6 @@
     overflow: hidden;
 }
 
-.terminal-body .xterm { height: 100%; }
 
 .agent-bar {
     display: flex;
@@ -309,6 +308,16 @@
 .prompt-add input { flex: 1; }
 .agent-prompts { background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-secondary); border-radius: var(--radius-md); font-size: 12px; max-width: 40px; cursor: pointer; }
 
-/* CodeMirror editor host */
-.editor-host { flex: 1; min-height: 0; overflow: hidden; }
-.editor-host .CodeMirror { height: 100%; font-family: var(--font-mono); font-size: 13px; }
+
+/* Dependency-free DOM terminal */
+.terminal-body { display: flex; flex-direction: column; flex: 1; min-height: 0; background: #0d1117; }
+.term-screen {
+    flex: 1; min-height: 0; overflow-y: auto; padding: 8px 10px;
+    font-family: var(--font-mono); font-size: 13px; line-height: 1.4;
+    color: #e6edf3; white-space: pre-wrap; word-break: break-word;
+}
+.term-line { white-space: pre-wrap; min-height: 1.4em; }
+.term-inputline { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-top: 1px solid var(--border-color); background: var(--bg-secondary); }
+.term-prompt { color: var(--accent-success, #3fb950); font-family: var(--font-mono); font-weight: bold; }
+.term-input { flex: 1; background: transparent; border: none; outline: none; color: var(--text-primary); font-family: var(--font-mono); font-size: 13px; }
+.term-input::placeholder { color: var(--text-muted); }
