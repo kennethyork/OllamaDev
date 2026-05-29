@@ -288,3 +288,23 @@
     font-family: var(--font-mono); font-size: 13px; line-height: 1.5;
     tab-size: 4; white-space: pre; overflow: auto;
 }
+
+/* Settings modal + prompts */
+.icon-btn { background: transparent; border: 1px solid var(--border-color); color: var(--text-primary); border-radius: var(--radius-md); cursor: pointer; font-size: 14px; padding: 4px 8px; }
+.icon-btn:hover { background: var(--bg-hover); }
+.settings-content { width: 460px; max-width: 90vw; max-height: 85vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.settings-content h3 { margin: 0; color: var(--text-primary); font-size: 14px; }
+.settings-content label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); }
+.settings-content input, .settings-content select, .settings-content textarea {
+    background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary);
+    border-radius: var(--radius-md); padding: 6px 8px; font-size: 13px; outline: none; font-family: inherit;
+}
+.settings-content textarea { font-family: var(--font-mono); resize: vertical; }
+.settings-content hr { border: none; border-top: 1px solid var(--border-color); width: 100%; }
+.primary { background: var(--accent); color: #fff; border: none; border-radius: var(--radius-md); padding: 6px 14px; cursor: pointer; }
+.prompt-list { display: flex; flex-direction: column; gap: 4px; max-height: 150px; overflow-y: auto; }
+.prompt-item { display: flex; justify-content: space-between; align-items: center; background: var(--bg-primary); border-radius: var(--radius-md); padding: 4px 8px; font-size: 12px; }
+.prompt-del { background: transparent; border: none; color: var(--accent-error, #f85149); cursor: pointer; font-size: 14px; }
+.prompt-add { display: flex; gap: 6px; }
+.prompt-add input { flex: 1; }
+.agent-prompts { background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-secondary); border-radius: var(--radius-md); font-size: 12px; max-width: 40px; cursor: pointer; }

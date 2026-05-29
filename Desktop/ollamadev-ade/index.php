@@ -21,6 +21,8 @@ use OllamaDev\SessionManager;
 use OllamaDev\MemoryStore;
 use OllamaDev\TaskStore;
 use OllamaDev\FileBrowser;
+use OllamaDev\PromptStore;
+use OllamaDev\SettingsStore;
 
 Config::load();
 
@@ -61,8 +63,10 @@ $sessions = new SessionManager();
 $memory = new MemoryStore();
 $tasks = new TaskStore();
 $files = new FileBrowser();
+$prompts = new PromptStore();
+$settings = new SettingsStore();
 
-$app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $ollama, $sessions, $memory, $tasks, $files) {
+$app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $ollama, $sessions, $memory, $tasks, $files, $prompts, $settings) {
     /** @var \Boson\WebView\WebView $webview */
     $webview = $app->window->webview;
 
@@ -150,6 +154,26 @@ $app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $
 
     $bindings->bind('writeFile', function (string $path, string $content) use ($files): array {
         return $files->writeFile($path, $content);
+    });
+
+    $bindings->bind('getPrompts', function () use ($prompts): array {
+        return $prompts->list();
+    });
+
+    $bindings->bind('createPrompt', function (string $title, string $body) use ($prompts): string {
+        return $prompts->create($title, $body);
+    });
+
+    $bindings->bind('deletePrompt', function (string $id) use ($prompts): bool {
+        return $prompts->delete($id);
+    });
+
+    $bindings->bind('getConfig', function () use ($settings): array {
+        return $settings->get();
+    });
+
+    $bindings->bind('setConfig', function (array $s) use ($settings): bool {
+        return $settings->set($s);
     });
 
     $bindings->bind('listFiles', function (?string $path = null) use ($files): array {

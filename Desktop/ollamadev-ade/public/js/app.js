@@ -5,6 +5,7 @@ class App {
         this.terminals = new Map();
         this.tasks = [];
         this.notes = [];
+        this.prompts = [];
         this.theme = 'void';
 
         this.init();
@@ -16,8 +17,58 @@ class App {
         await this.loadOllamaStatus();
         await this.loadTasks();
         await this.loadNotes();
+        await this.loadPrompts();
         await this.loadSessions();
         this.renderFileTree();
+    }
+
+    async loadPrompts() {
+        try { this.prompts = await window.getPrompts() || []; } catch (e) { this.prompts = []; }
+    }
+
+    openSettings() {
+        const modal = document.getElementById('settingsModal');
+        window.getConfig().then(c => {
+            document.getElementById('cfgModel').value = c.model || '';
+            document.getElementById('cfgHost').value = c.host || '';
+            document.getElementById('cfgTemp').value = c.temperature ?? 0.7;
+            document.getElementById('cfgPerm').value = c.permissionMode || 'ask';
+            document.getElementById('cfgSystem').value = c.systemPrompt || '';
+        });
+        this.renderPromptList();
+        modal.classList.remove('hidden');
+    }
+
+    async saveSettings() {
+        await window.setConfig({
+            model: document.getElementById('cfgModel').value,
+            host: document.getElementById('cfgHost').value,
+            temperature: parseFloat(document.getElementById('cfgTemp').value) || 0.7,
+            permissionMode: document.getElementById('cfgPerm').value,
+            systemPrompt: document.getElementById('cfgSystem').value,
+        });
+        document.getElementById('settingsModal').classList.add('hidden');
+    }
+
+    renderPromptList() {
+        const el = document.getElementById('promptList');
+        if (!el) return;
+        el.innerHTML = (this.prompts || []).map(p =>
+            `<div class="prompt-item"><span title="${(p.body || '').replace(/"/g, '&quot;')}">${p.title}</span><button data-id="${p.id}" class="prompt-del">×</button></div>`
+        ).join('') || '<div class="blocks-empty">No saved prompts</div>';
+        el.querySelectorAll('.prompt-del').forEach(b =>
+            b.addEventListener('click', async () => { await window.deletePrompt(b.dataset.id); await this.loadPrompts(); this.renderPromptList(); this.renderTerminalGrid(); }));
+    }
+
+    async addPrompt() {
+        const t = document.getElementById('promptTitle');
+        const b = document.getElementById('promptBody');
+        if (!t.value.trim() || !b.value.trim()) return;
+        await window.createPrompt(t.value.trim(), b.value.trim());
+        t.value = ''; b.value = '';
+        await this.loadPrompts();
+        this.renderPromptList();
+        this.renderTerminalGrid();
     }
 
     bindEvents() {
@@ -32,6 +83,11 @@ class App {
         });
 
         document.getElementById('newTerminal')?.addEventListener('click', () => this.createTerminal());
+
+        document.getElementById('settingsBtn')?.addEventListener('click', () => this.openSettings());
+        document.getElementById('settingsSave')?.addEventListener('click', () => this.saveSettings());
+        document.getElementById('settingsClose')?.addEventListener('click', () => document.getElementById('settingsModal').classList.add('hidden'));
+        document.getElementById('promptAdd')?.addEventListener('click', () => this.addPrompt());
 
         document.getElementById('themeSelect')?.addEventListener('change', (e) => this.setTheme(e.target.value));
 
@@ -424,6 +480,10 @@ class App {
                 </div>
                 <form class="agent-bar">
                     <span class="agent-icon">🤖</span>
+                    <select class="agent-prompts" title="Saved prompts">
+                        <option value="">⌄</option>
+                        ${(this.prompts || []).map(p => `<option value="${(p.body || '').replace(/"/g, '&quot;')}">${p.title}</option>`).join('')}
+                    </select>
                     <input class="agent-input" type="text" autocomplete="off"
                            placeholder="Ask the agent to run something in this terminal…" />
                     <button type="submit" class="agent-run-btn">Run</button>
@@ -438,6 +498,10 @@ class App {
             });
             const agentForm = el.querySelector('.agent-bar');
             const agentInput = el.querySelector('.agent-input');
+            const promptSel = el.querySelector('.agent-prompts');
+            promptSel.addEventListener('change', () => {
+                if (promptSel.value) { agentInput.value = promptSel.value; promptSel.value = ''; agentInput.focus(); }
+            });
             agentForm.addEventListener('submit', (e) => {
                 e.preventDefault();
                 const prompt = agentInput.value.trim();
