@@ -9,6 +9,11 @@ use Boson\ApplicationCreateInfo;
 use Boson\Window\WindowCreateInfo;
 use Boson\WebView\WebViewCreateInfo;
 use Boson\WebView\Api\Bindings\BindingsExtension;
+use Boson\WebView\Api\Scripts\ScriptsExtension;
+use Boson\WebView\Api\Data\DataExtension;
+use Boson\WebView\Api\Security\SecurityExtension;
+use Boson\WebView\Api\Schemes\SchemesExtension;
+use Boson\WebView\Api\LifecycleEvents\LifecycleEventsExtension;
 use OllamaDev\Config;
 use OllamaDev\PtyManager;
 use OllamaDev\FileBrowser;
@@ -29,7 +34,14 @@ $app = new Application(new ApplicationCreateInfo(
         height: 820,
         visible: true,
         resizable: true,
-        webview: new WebViewCreateInfo(extensions: [new BindingsExtension()]),
+        webview: new WebViewCreateInfo(extensions: [
+            new ScriptsExtension(),
+            new BindingsExtension(),
+            new DataExtension(),
+            new SecurityExtension(),
+            new SchemesExtension(),
+            new LifecycleEventsExtension(),
+        ]),
     ),
 ));
 
