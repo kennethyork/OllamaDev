@@ -883,7 +883,7 @@ Tools::register('git_show', function($p) {
 
 Tools::register('update', function($p) {
     $install = $p['install'] ?? false;
-    $current = '3.9.5';
+    $current = OLLAMADEV_VERSION;
     $ctx = stream_context_create(['http' => ['timeout' => 10, 'ignore_errors' => true]]);
     $json = @file_get_contents('https://api.github.com/repos/kennethyork/OllamaDev/releases/latest', false, $ctx);
     if (!$json) return "Error: Could not check for updates. Check your internet connection.";

@@ -84,15 +84,53 @@ class OllamaClient {
         return $this->chatWithModel($model, $messages, $handler);
     }
 
+    // Generation options applied to every chat request. Crucially this sets
+    // num_ctx: without it Ollama silently caps context at 2048 tokens, which
+    // truncates the system prompt and tool history out from under the agent.
+    public static function chatOptions(): array {
+        return [
+            'num_ctx' => (int)Config::get('ollama.contextWindow', 16384),
+            'temperature' => (float)Config::get('ollama.temperature', 0.6),
+        ];
+    }
+
     public function chatWithModel(string $model, array $messages, callable $handler = null): string {
-        $params = ['model' => $model, 'messages' => $messages, 'stream' => false];
+        // Stream when a handler is present so tokens appear as they're produced;
+        // fall back to a single blocking response when no handler wants chunks.
+        $stream = $handler !== null && (bool)Config::get('ollama.stream', true);
+        $params = ['model' => $model, 'messages' => $messages, 'stream' => $stream, 'options' => self::chatOptions()];
         $ch = curl_init($this->host . '/api/chat');
-        curl_setopt_array($ch, [
+        $opts = [
             CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 120
-        ]);
+            CURLOPT_TIMEOUT => 300,
+        ];
+
+        if ($stream) {
+            // Parse Ollama's NDJSON stream line-by-line, emitting content deltas.
+            $content = ''; $buf = '';
+            $opts[CURLOPT_WRITEFUNCTION] = function($ch, $data) use (&$content, &$buf, $handler) {
+                $buf .= $data;
+                while (($nl = strpos($buf, "\n")) !== false) {
+                    $line = trim(substr($buf, 0, $nl));
+                    $buf = substr($buf, $nl + 1);
+                    if ($line === '') continue;
+                    $j = json_decode($line, true);
+                    if (!is_array($j)) continue;
+                    $delta = $j['message']['content'] ?? '';
+                    if ($delta === '' && !empty($j['message']['thinking'])) $delta = $j['message']['thinking'];
+                    if ($delta !== '') { $content .= $delta; if ($handler) $handler($delta); }
+                }
+                return strlen($data);
+            };
+            curl_setopt_array($ch, $opts);
+            curl_exec($ch);
+            curl_close($ch);
+            return $content;
+        }
+
+        curl_setopt_array($ch, $opts);
         $resp = curl_exec($ch);
         curl_close($ch);
         if ($resp) {
@@ -114,7 +152,7 @@ class OllamaClient {
     //   ['ok'=>true, 'content'=>string, 'calls'=>[['name'=>,'params'=>], ...]]
     //   ['ok'=>false, 'unsupported'=>bool, 'error'=>string]
     public function chatWithTools(string $model, array $messages, array $tools): array {
-        $params = ['model' => $model, 'messages' => $messages, 'tools' => $tools, 'stream' => false];
+        $params = ['model' => $model, 'messages' => $messages, 'tools' => $tools, 'stream' => false, 'options' => self::chatOptions()];
         $ch = curl_init($this->host . '/api/chat');
         curl_setopt_array($ch, [
             CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),

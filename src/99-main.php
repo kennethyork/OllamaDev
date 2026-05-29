@@ -399,12 +399,13 @@ if ($argc >= 2 && $argv[1] === 'stats') {
 }
 
 // ===== FLAG PARSING (must be before config load) =====
-$flags = ['model' => null, 'continue' => false, 'session' => null, 'fork' => false, 'prompt' => null, 'agent' => null, 'pure' => false, 'port' => 0, 'hostname' => '127.0.0.1', 'mdns' => false, 'help' => false, 'version' => false, 'cwd' => null, 'permission' => null];
+$flags = ['model' => null, 'continue' => false, 'resume' => false, 'session' => null, 'fork' => false, 'prompt' => null, 'agent' => null, 'pure' => false, 'port' => 0, 'hostname' => '127.0.0.1', 'mdns' => false, 'help' => false, 'version' => false, 'cwd' => null, 'permission' => null];
 $positional = [];
 for ($i = 1; $i < $argc; $i++) {
     $a = $argv[$i];
     if ($a === '-m' || $a === '--model') { $flags['model'] = $argv[++$i] ?? null; }
     elseif ($a === '-c' || $a === '--continue') { $flags['continue'] = true; }
+    elseif ($a === '-r' || $a === '--resume') { $flags['resume'] = true; }
     elseif ($a === '-s' || $a === '--session') { $flags['session'] = $argv[++$i] ?? null; }
     elseif ($a === '--fork') { $flags['fork'] = true; }
     elseif ($a === '-p' || $a === '--prompt') { $flags['prompt'] = $argv[++$i] ?? null; }
@@ -876,6 +877,12 @@ if (!empty($flags['prompt'])) {
     exit(0);
 }
 
+// Interactive resume picker: `ollamadev resume` or `-r`/`--resume`.
+if ($flags['resume'] || $cmd === 'resume') {
+    Session::pickAndResume($config);
+    exit(0);
+}
+
 // Continue last session
 if ($flags['continue'] || $flags['session']) {
     $sessionId = $flags['session'];
@@ -908,8 +915,8 @@ if ($cmd === 'chat') {
     foreach (Session::listAll($config) as $s) echo "{$s['id']} | {$s['title']} | {$s['model']} | {$s['updated_at']}\n";
 } elseif ($cmd === 'update') {
     $install = isset($flags['install']);
-    $current = '3.9.5';
-    $ctx = stream_context_create(['http' => ['timeout' => 10, 'ignore_errors' => true, 'header' => "User-Agent: OllamaDev/3.9.5\r\n"]]);
+    $current = OLLAMADEV_VERSION;
+    $ctx = stream_context_create(['http' => ['timeout' => 10, 'ignore_errors' => true, 'header' => "User-Agent: OllamaDev/" . OLLAMADEV_VERSION . "\r\n"]]);
     $json = @file_get_contents('https://api.github.com/repos/kennethyork/OllamaDev/releases/latest', false, $ctx);
     if (!$json || strpos($json, 'Request forbidden') !== false) { echo "Error: Could not check for updates (GitHub rate limit). Try again later.\n"; exit(1); }
     $data = json_decode($json, true);

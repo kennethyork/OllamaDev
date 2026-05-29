@@ -17,13 +17,13 @@ function ok(string $name, bool $cond, string $detail = '') {
 }
 
 // Run the binary with optional piped stdin. Returns [stdout, stderr, exitcode].
-function run_bin(array $args, string $stdin = '', array $env = []): array {
+function run_bin(array $args, string $stdin = '', array $env = [], ?string $cwd = null): array {
     global $BIN;
     $cmd = 'php ' . escapeshellarg($BIN);
     foreach ($args as $a) $cmd .= ' ' . escapeshellarg($a);
     $descriptors = [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']];
     $fullEnv = array_merge(getenv() ?: [], $env);
-    $proc = proc_open($cmd, $descriptors, $pipes, sys_get_temp_dir(), $fullEnv);
+    $proc = proc_open($cmd, $descriptors, $pipes, $cwd ?? sys_get_temp_dir(), $fullEnv);
     if (!is_resource($proc)) return ['', 'proc_open failed', 1];
     fwrite($pipes[0], $stdin);
     fclose($pipes[0]);
@@ -179,6 +179,53 @@ usleep(700000);
 ok('daemon exits on __STOP__', !($dpid > 0 && posix_kill($dpid, 0)));
 if ($dpid > 0) @posix_kill($dpid, 9);
 shell_exec('rm -rf ' . escapeshellarg($tdir));
+
+echo "\n== New features (harness) ==\n";
+
+// chatOptions must set num_ctx well above Ollama's silent 2048 default, or the
+// agent's system prompt + tool history get truncated mid-task.
+if (preg_match('/class Config \{.*?\n\}/s', $src, $cfg)
+ && preg_match('/public static function chatOptions\(\): array \{.*?\n    \}/s', $src, $co)) {
+    eval($cfg[0]);
+    eval('class _Opts { ' . $co[0] . ' }');
+    $opts = _Opts::chatOptions();
+    ok('chatOptions sets num_ctx > 2048', ($opts['num_ctx'] ?? 0) > 2048, 'num_ctx=' . ($opts['num_ctx'] ?? 'unset'));
+    ok('chatOptions sets a temperature', isset($opts['temperature']));
+} else {
+    ok('chatOptions extractable', false, 'Config or chatOptions not found');
+}
+
+// Tab-completion's common-prefix helper underpins completion behaviour.
+if (preg_match('/private static function commonPrefix\(array \$strs\): string \{.*?\n    \}/s', $src, $cp2)
+ && preg_match('/private static function split\(string \$s\): array \{.*?\n    \}/s', $src, $sp)) {
+    $body = str_replace('private static function', 'public static function', $cp2[0] . "\n" . $sp[0]);
+    eval('class _LE { ' . $body . ' }');
+    ok('commonPrefix finds shared prefix', _LE::commonPrefix(['/model', '/models']) === '/model');
+    ok('commonPrefix empty when none shared', _LE::commonPrefix(['abc', 'xyz']) === '');
+} else {
+    ok('commonPrefix extractable', false, 'methods not found');
+}
+
+// relativeTime formats session ages for the resume picker.
+if (preg_match('/private static function relativeTime\(string \$iso\): string \{.*?\n    \}/s', $src, $rt)) {
+    eval('class _RT { ' . str_replace('private static function', 'public static function', $rt[0]) . ' }');
+    ok('relativeTime: recent reads "just now"', _RT::relativeTime(date('c')) === 'just now');
+    ok('relativeTime: hours ago', _RT::relativeTime(date('c', time() - 7200)) === '2h ago');
+    ok('relativeTime: empty is unknown', _RT::relativeTime('') === 'unknown');
+} else {
+    ok('relativeTime extractable', false, 'method not found');
+}
+
+// `resume` with no sessions (run in a clean empty dir) reports nothing to resume.
+$tmpHome = sys_get_temp_dir() . '/ollamadev_smoke_resume_' . getmypid();
+@mkdir($tmpHome, 0755, true);
+[$out] = run_bin(['resume'], "\n", [], $tmpHome);
+ok('resume picker handles no sessions', stripos($out, 'No previous sessions') !== false, trim($out));
+shell_exec('rm -rf ' . escapeshellarg($tmpHome));
+
+// /model with an uninstalled name reports it instead of silently switching.
+[$out] = run_bin([], "/model definitely-not-real-model-xyz\n/exit\n");
+ok('/model rejects an uninstalled model', stripos($out, 'not installed') !== false);
 
 echo "\n========================\n";
 echo "Results: $pass passed, $fail failed\n";

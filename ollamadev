@@ -82,8 +82,8 @@ class Config {
         if (getenv('OLLAMA_HOST')) $envOverrides['ollama']['host'] = getenv('OLLAMA_HOST');
         if (getenv('OLLAMA_MODEL')) $envOverrides['ollama']['defaultModel'] = getenv('OLLAMA_MODEL');
         $defaults = [
-            'ollama' => ['host' => getenv('OLLAMA_HOST') ?: 'http://localhost:11434', 'defaultModel' => getenv('OLLAMA_MODEL') ?: 'llama3.2:latest'],
-            'agents' => ['coder' => ['temperature' => 0.7, 'maxTokens' => 4096]],
+            'ollama' => ['host' => getenv('OLLAMA_HOST') ?: 'http://localhost:11434', 'defaultModel' => getenv('OLLAMA_MODEL') ?: 'llama3.2:latest', 'contextWindow' => (int)(getenv('OLLAMA_NUM_CTX') ?: 16384), 'temperature' => 0.6, 'stream' => true],
+            'agents' => ['coder' => ['temperature' => 0.7, 'maxTokens' => 4096], 'maxIterations' => 12, 'maxToolOutput' => 12000],
             'data' => ['directory' => '.ollamadev']
         ];
         $home = getenv('HOME') ?: '/tmp';
@@ -775,15 +775,53 @@ class OllamaClient {
         return $this->chatWithModel($model, $messages, $handler);
     }
 
+    // Generation options applied to every chat request. Crucially this sets
+    // num_ctx: without it Ollama silently caps context at 2048 tokens, which
+    // truncates the system prompt and tool history out from under the agent.
+    public static function chatOptions(): array {
+        return [
+            'num_ctx' => (int)Config::get('ollama.contextWindow', 16384),
+            'temperature' => (float)Config::get('ollama.temperature', 0.6),
+        ];
+    }
+
     public function chatWithModel(string $model, array $messages, callable $handler = null): string {
-        $params = ['model' => $model, 'messages' => $messages, 'stream' => false];
+        // Stream when a handler is present so tokens appear as they're produced;
+        // fall back to a single blocking response when no handler wants chunks.
+        $stream = $handler !== null && (bool)Config::get('ollama.stream', true);
+        $params = ['model' => $model, 'messages' => $messages, 'stream' => $stream, 'options' => self::chatOptions()];
         $ch = curl_init($this->host . '/api/chat');
-        curl_setopt_array($ch, [
+        $opts = [
             CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 120
-        ]);
+            CURLOPT_TIMEOUT => 300,
+        ];
+
+        if ($stream) {
+            // Parse Ollama's NDJSON stream line-by-line, emitting content deltas.
+            $content = ''; $buf = '';
+            $opts[CURLOPT_WRITEFUNCTION] = function($ch, $data) use (&$content, &$buf, $handler) {
+                $buf .= $data;
+                while (($nl = strpos($buf, "\n")) !== false) {
+                    $line = trim(substr($buf, 0, $nl));
+                    $buf = substr($buf, $nl + 1);
+                    if ($line === '') continue;
+                    $j = json_decode($line, true);
+                    if (!is_array($j)) continue;
+                    $delta = $j['message']['content'] ?? '';
+                    if ($delta === '' && !empty($j['message']['thinking'])) $delta = $j['message']['thinking'];
+                    if ($delta !== '') { $content .= $delta; if ($handler) $handler($delta); }
+                }
+                return strlen($data);
+            };
+            curl_setopt_array($ch, $opts);
+            curl_exec($ch);
+            curl_close($ch);
+            return $content;
+        }
+
+        curl_setopt_array($ch, $opts);
         $resp = curl_exec($ch);
         curl_close($ch);
         if ($resp) {
@@ -805,7 +843,7 @@ class OllamaClient {
     //   ['ok'=>true, 'content'=>string, 'calls'=>[['name'=>,'params'=>], ...]]
     //   ['ok'=>false, 'unsupported'=>bool, 'error'=>string]
     public function chatWithTools(string $model, array $messages, array $tools): array {
-        $params = ['model' => $model, 'messages' => $messages, 'tools' => $tools, 'stream' => false];
+        $params = ['model' => $model, 'messages' => $messages, 'tools' => $tools, 'stream' => false, 'options' => self::chatOptions()];
         $ch = curl_init($this->host . '/api/chat');
         curl_setopt_array($ch, [
             CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
@@ -1899,7 +1937,7 @@ Tools::register('git_show', function($p) {
 
 Tools::register('update', function($p) {
     $install = $p['install'] ?? false;
-    $current = '3.9.5';
+    $current = OLLAMADEV_VERSION;
     $ctx = stream_context_create(['http' => ['timeout' => 10, 'ignore_errors' => true]]);
     $json = @file_get_contents('https://api.github.com/repos/kennethyork/OllamaDev/releases/latest', false, $ctx);
     if (!$json) return "Error: Could not check for updates. Check your internet connection.";
@@ -2073,6 +2111,20 @@ User: run the tests
     }
 
     public function setModel(string $model): void { $this->model = $model; $this->systemPrompt = $this->buildSystemPrompt(); }
+
+    // Resolve a user-typed model name to an actually-installed model. Matches
+    // exactly, then "name:latest", then a unique prefix (so "/model qwen2.5-coder"
+    // works without the tag). Returns null when nothing matches.
+    public function resolveModel(string $name): ?string {
+        $name = trim($name);
+        if ($name === '') return null;
+        $installed = $this->client->listModels();
+        if (empty($installed)) return $name; // can't verify (Ollama down) - trust it
+        if (in_array($name, $installed, true)) return $name;
+        if (in_array("$name:latest", $installed, true)) return "$name:latest";
+        $prefix = array_values(array_filter($installed, fn($m) => str_starts_with($m, $name)));
+        return count($prefix) >= 1 ? $prefix[0] : null;
+    }
     public function setChatMode(bool $on): void { $this->chatMode = $on; $this->systemPrompt = $this->buildSystemPrompt(); }
     public function isChatMode(): bool { return $this->chatMode; }
 
@@ -2092,8 +2144,39 @@ User: run the tests
     public function listModelsDetailed(): array { return $this->client->listModelsDetailed(); }
     public function checkConnection(): bool { return $this->client->checkConnection(); }
 
-public function run(array $messages, callable $handler = null): string {
-        $allMessages = array_merge([$this->systemPrompt], $messages);
+    // Summarize a transcript with the model itself (one-shot, no tools). Used by
+    // session compaction. Returns '' on any failure so the caller can fall back.
+    public function summarize(string $transcript): string {
+        $transcript = substr($transcript, 0, 24000); // bound the prompt size
+        $sys = ['role' => 'system', 'content' =>
+            "You compress conversations for an AI coding assistant's memory. Produce a " .
+            "concise summary that preserves: decisions made, file paths touched, code/edits " .
+            "applied, commands run and their outcomes, and any unfinished tasks. Use terse " .
+            "bullet points. Do NOT call tools or ask questions - output only the summary."];
+        $user = ['role' => 'user', 'content' => "Summarize this conversation so far:\n\n" . $transcript];
+        try {
+            return trim($this->client->chatWithModel($this->model, [$sys, $user]));
+        } catch (\Throwable $e) {
+            return '';
+        }
+    }
+
+    // Convert stored session messages into the shape Ollama's chat API expects:
+    // drop internal bookkeeping (id, created_at) and keep only role/content plus
+    // the structured tool_calls / tool_name that make function-calling coherent.
+    private function wire(array $messages): array {
+        $out = [];
+        foreach ($messages as $m) {
+            $w = ['role' => $m['role'] ?? 'user', 'content' => (string)($m['content'] ?? '')];
+            if (!empty($m['tool_calls'])) $w['tool_calls'] = $m['tool_calls'];
+            if (!empty($m['tool_name'])) $w['tool_name'] = $m['tool_name'];
+            $out[] = $w;
+        }
+        return $out;
+    }
+
+    public function run(array $messages, callable $handler = null): string {
+        $allMessages = array_merge([$this->systemPrompt], $this->wire($messages));
         $response = '';
         $this->client->chatWithModel($this->model, $allMessages, function($chunk) use (&$response, $handler) {
             $response .= $chunk;
@@ -2106,7 +2189,7 @@ public function run(array $messages, callable $handler = null): string {
     // supports it (structured tool_calls, no parsing); otherwise falls back to
     // text-format parsing. Returns ['content'=>string, 'calls'=>[...]].
     public function chatTurn(array $messages): array {
-        $allMessages = array_merge([$this->systemPrompt], $messages);
+        $allMessages = array_merge([$this->systemPrompt], $this->wire($messages));
 
         // Chat mode: pure conversation, no tools offered or parsed.
         if ($this->chatMode) {
@@ -2556,6 +2639,206 @@ class TUI {
     }
 }
 
+
+// A small raw-mode line editor that renders a Claude-Code-style bordered input
+// box you type *inside*, with the session status (model · mode · cwd) embedded
+// in the top border. Pure vanilla PHP: it drives the terminal with `stty` and
+// ANSI escapes, no extensions beyond what the CLI already uses.
+//
+// Supports: printable input (UTF-8), left/right/home/end cursor movement,
+// backspace/delete, up/down history, Ctrl-C (cancel line), Ctrl-D (EOF on an
+// empty line). Long input scrolls horizontally so the box stays exactly three
+// terminal rows and never wraps. Falls back gracefully (caller checks
+// supported()) for pipes, daemons, and non-TTY contexts.
+class LineEditor {
+    public static function supported(): bool {
+        if (stripos(PHP_OS, 'WIN') === 0) return false;
+        if (!function_exists('stream_isatty') || !@stream_isatty(STDIN)) return false;
+        static $stty = null;
+        if ($stty === null) $stty = (bool)@exec('command -v stty 2>/dev/null');
+        return $stty;
+    }
+
+    private static function termWidth(): int {
+        $cols = (int)getenv('COLUMNS');
+        if ($cols <= 0) $cols = (int)@exec('tput cols 2>/dev/null');
+        if ($cols <= 0) $cols = 80;
+        return $cols;
+    }
+
+    // Read one logical keypress from raw STDIN. Returns ['type'=>..., 'val'=>...]
+    // where type is one of: char, enter, backspace, delete, left, right, home,
+    // end, up, down, ctrl-c, eof, ignore.
+    private static function readKey(): array {
+        $b = fread(STDIN, 1);
+        if ($b === '' || $b === false) return ['type' => 'eof'];
+        $o = ord($b);
+        if ($o === 13 || $o === 10) return ['type' => 'enter'];
+        if ($o === 127 || $o === 8) return ['type' => 'backspace'];
+        if ($o === 3) return ['type' => 'ctrl-c'];
+        if ($o === 4) return ['type' => 'eof'];
+        if ($o === 1) return ['type' => 'home'];
+        if ($o === 5) return ['type' => 'end'];
+        if ($o === 9) return ['type' => 'tab'];
+        if ($o === 27) { // escape sequence
+            $n = fread(STDIN, 1);
+            if ($n === '[' || $n === 'O') {
+                $seq = '';
+                while (true) {
+                    $x = fread(STDIN, 1);
+                    if ($x === '' || $x === false) break;
+                    $seq .= $x;
+                    $c = ord($x);
+                    if ($c >= 0x40 && $c <= 0x7e) break; // final byte
+                }
+                switch ($seq) {
+                    case 'A': return ['type' => 'up'];
+                    case 'B': return ['type' => 'down'];
+                    case 'C': return ['type' => 'right'];
+                    case 'D': return ['type' => 'left'];
+                    case 'H': case '1~': case '7~': return ['type' => 'home'];
+                    case 'F': case '4~': case '8~': return ['type' => 'end'];
+                    case '3~': return ['type' => 'delete'];
+                }
+            }
+            return ['type' => 'ignore'];
+        }
+        if ($o < 32) return ['type' => 'ignore'];
+        // UTF-8: pull continuation bytes for a complete character.
+        $extra = $o >= 0xF0 ? 3 : ($o >= 0xE0 ? 2 : ($o >= 0xC0 ? 1 : 0));
+        $ch = $b;
+        for ($i = 0; $i < $extra; $i++) { $x = fread(STDIN, 1); if ($x === '' || $x === false) break; $ch .= $x; }
+        return ['type' => 'char', 'val' => $ch];
+    }
+
+    // Render a simple single-line prompt ("> <text>"), redrawing in place. Long
+    // input scrolls horizontally so it stays on one line and the caret is always
+    // visible.
+    private static function render(array $glyphs, int $cursor): void {
+        $promptLen = 2; // "> "
+        $w = max(20, self::termWidth() - $promptLen - 1);
+        static $start = 0;
+        if ($cursor < $start) $start = $cursor;
+        if ($cursor > $start + $w) $start = $cursor - $w;
+        if ($start < 0) $start = 0;
+        $visible = implode('', array_slice($glyphs, $start, $w));
+        echo "\r\033[K\033[36m> \033[0m" . $visible;
+        $col = $promptLen + ($cursor - $start);
+        echo "\r";
+        if ($col > 0) echo "\033[{$col}C";
+    }
+
+    // Common leading run of glyphs shared by all candidate strings.
+    private static function commonPrefix(array $strs): string {
+        if (!$strs) return '';
+        $first = self::split($strs[0]);
+        $len = count($first);
+        foreach ($strs as $s) {
+            $g = self::split($s);
+            $len = min($len, count($g));
+            for ($i = 0; $i < $len; $i++) { if ($g[$i] !== $first[$i]) { $len = $i; break; } }
+        }
+        return implode('', array_slice($first, 0, $len));
+    }
+
+    // Read one line of input inside the box. Returns the string, or null on EOF
+    // (Ctrl-D on an empty line). $history is read for up/down recall. $complete,
+    // if given, is called as $complete(string $line, int $cursor) and returns
+    // ['start' => glyphIndex, 'candidates' => string[]] for Tab-completion.
+    public static function readLine(string $model, string $mode, string $cwd, array $history, ?callable $complete = null): ?string {
+        $saved = trim((string)@exec('stty -g 2>/dev/null'));
+        @exec('stty raw -echo 2>/dev/null');
+        $glyphs = [];
+        $cursor = 0;
+        $hidx = count($history);
+        $stash = '';
+        $result = null;
+
+        try {
+            self::render($glyphs, $cursor);
+            while (true) {
+                $key = self::readKey();
+                switch ($key['type']) {
+                    case 'enter':
+                        $result = implode('', $glyphs);
+                        break 2;
+                    case 'eof':
+                        if (empty($glyphs)) { $result = null; break 2; }
+                        break; // Ctrl-D mid-line: ignore
+                    case 'ctrl-c':
+                        $result = ''; // cancel this line
+                        break 2;
+                    case 'char':
+                        array_splice($glyphs, $cursor, 0, [$key['val']]);
+                        $cursor++;
+                        break;
+                    case 'backspace':
+                        if ($cursor > 0) { array_splice($glyphs, $cursor - 1, 1); $cursor--; }
+                        break;
+                    case 'delete':
+                        if ($cursor < count($glyphs)) array_splice($glyphs, $cursor, 1);
+                        break;
+                    case 'left':  if ($cursor > 0) $cursor--; break;
+                    case 'right': if ($cursor < count($glyphs)) $cursor++; break;
+                    case 'home':  $cursor = 0; break;
+                    case 'end':   $cursor = count($glyphs); break;
+                    case 'tab':
+                        if ($complete) {
+                            $res = $complete(implode('', $glyphs), $cursor);
+                            $cands = $res['candidates'] ?? [];
+                            $tstart = max(0, min((int)($res['start'] ?? $cursor), $cursor));
+                            $token = implode('', array_slice($glyphs, $tstart, $cursor - $tstart));
+                            if (count($cands) === 1) {
+                                array_splice($glyphs, $tstart, $cursor - $tstart, self::split($cands[0]));
+                                $cursor = $tstart + count(self::split($cands[0]));
+                            } elseif (count($cands) > 1) {
+                                $common = self::commonPrefix($cands);
+                                if (mb_strlen($common) > mb_strlen($token)) {
+                                    array_splice($glyphs, $tstart, $cursor - $tstart, self::split($common));
+                                    $cursor = $tstart + count(self::split($common));
+                                } else {
+                                    // No further shared prefix: list the candidates
+                                    // on a new line, then redraw the prompt below.
+                                    echo "\r\n";
+                                    echo "\033[2m" . wordwrap(implode('   ', $cands), max(20, self::termWidth() - 2), "\n", true) . "\033[0m\n";
+                                }
+                            }
+                        }
+                        break;
+                    case 'up':
+                        if ($hidx > 0) {
+                            if ($hidx === count($history)) $stash = implode('', $glyphs);
+                            $hidx--;
+                            $glyphs = self::split($history[$hidx]);
+                            $cursor = count($glyphs);
+                        }
+                        break;
+                    case 'down':
+                        if ($hidx < count($history)) {
+                            $hidx++;
+                            $line = $hidx === count($history) ? $stash : $history[$hidx];
+                            $glyphs = self::split($line);
+                            $cursor = count($glyphs);
+                        }
+                        break;
+                    default: break; // ignore
+                }
+                self::render($glyphs, $cursor);
+            }
+        } finally {
+            // Move to the next line and restore the terminal.
+            echo "\r\n";
+            if ($saved !== '') @exec('stty ' . escapeshellarg($saved) . ' 2>/dev/null');
+            else @exec('stty sane 2>/dev/null');
+        }
+        return $result;
+    }
+
+    // Split a string into an array of UTF-8 glyphs.
+    private static function split(string $s): array {
+        return $s === '' ? [] : preg_split('//u', $s, -1, PREG_SPLIT_NO_EMPTY);
+    }
+}
 class TerminalManager
 {
     public string $baseDir;
@@ -2690,6 +2973,7 @@ class Session {
     private string $title;
     private string $model;
     private array $messages = [];
+    private array $history = []; // in-session input history for the line editor
     private Agent $agent;
 
     public function __construct(array $config, ?string $sessionId = null) {
@@ -2728,8 +3012,14 @@ class Session {
         file_put_contents($path, json_encode(['id' => $this->id, 'title' => $this->title, 'model' => $this->model, 'messages' => $this->messages, 'created_at' => date('c'), 'updated_at' => date('c')], JSON_PRETTY_PRINT));
     }
 
-    public function addMessage(string $role, string $content): void {
-        $this->messages[] = ['id' => 'msg_' . time() . '_' . substr(md5(mt_rand()), 0, 6), 'role' => $role, 'content' => $content, 'created_at' => date('c')];
+    // $extra carries structured fields that must survive into the wire format
+    // sent to Ollama, e.g. an assistant turn's 'tool_calls' or a tool result's
+    // 'tool_name', so native function-calling models can correlate the two.
+    public function addMessage(string $role, string $content, array $extra = []): void {
+        $this->messages[] = array_merge(
+            ['id' => 'msg_' . time() . '_' . substr(md5(mt_rand()), 0, 6), 'role' => $role, 'content' => $content, 'created_at' => date('c')],
+            $extra
+        );
         $this->save();
     }
 
@@ -2744,10 +3034,67 @@ class Session {
         $sessions = [];
         foreach (glob($dir . '/session_*.json') as $file) {
             $data = json_decode(file_get_contents($file), true);
-            if ($data) $sessions[] = ['id' => basename($file, '.json'), 'title' => $data['title'] ?? 'Untitled', 'model' => $data['model'] ?? 'unknown', 'created_at' => $data['created_at'] ?? '', 'updated_at' => $data['updated_at'] ?? ''];
+            if ($data) {
+                $msgs = $data['messages'] ?? [];
+                // First user message makes a good human-readable preview.
+                $preview = '';
+                foreach ($msgs as $m) {
+                    if (($m['role'] ?? '') === 'user') { $preview = trim((string)($m['content'] ?? '')); break; }
+                }
+                $sessions[] = [
+                    'id' => basename($file, '.json'),
+                    'title' => $data['title'] ?? 'Untitled',
+                    'model' => $data['model'] ?? 'unknown',
+                    'created_at' => $data['created_at'] ?? '',
+                    'updated_at' => $data['updated_at'] ?? '',
+                    'count' => count($msgs),
+                    'preview' => $preview,
+                ];
+            }
         }
         usort($sessions, fn($a, $b) => strcmp($b['updated_at'] ?? '', $a['updated_at'] ?? ''));
         return $sessions;
+    }
+
+    // Interactive "resume a previous session" picker. Lists recent sessions with
+    // a preview and lets the user choose one by number; the chosen session is
+    // then started. Returns false if there was nothing to resume.
+    public static function pickAndResume(array $config): bool {
+        $sessions = self::listAll($config);
+        if (empty($sessions)) {
+            echo "\033[2m  No previous sessions to resume.\033[0m\n";
+            return false;
+        }
+        $sessions = array_slice($sessions, 0, 20); // most recent (listAll sorts desc)
+        $c = "\033[36m"; $d = "\033[2m"; $b = "\033[1m"; $r = "\033[0m";
+        echo "\n  {$b}Resume a session{$r}\n\n";
+        foreach ($sessions as $i => $s) {
+            $n = $i + 1;
+            $when = self::relativeTime($s['updated_at'] ?? '');
+            $preview = $s['preview'] !== '' ? $s['preview'] : $s['title'];
+            $preview = preg_replace('/\s+/', ' ', $preview);
+            if (mb_strlen($preview) > 50) $preview = mb_substr($preview, 0, 50) . '…';
+            echo sprintf("  {$c}%2d{$r}  %-52s {$d}%s · %d msg · %s{$r}\n", $n, $preview, $s['model'], $s['count'], $when);
+        }
+        echo "\n  {$d}Enter a number to resume (or blank to cancel):{$r} ";
+        $choice = trim((string)fgets(STDIN));
+        if ($choice === '' || !ctype_digit($choice)) { echo "\033[2m  Cancelled.\033[0m\n"; return false; }
+        $idx = (int)$choice - 1;
+        if ($idx < 0 || $idx >= count($sessions)) { echo "\033[2m  Out of range.\033[0m\n"; return false; }
+        (new Session($config, $sessions[$idx]['id']))->start();
+        return true;
+    }
+
+    // Compact "3m ago" / "2h ago" / "5d ago" relative time from an ISO string.
+    private static function relativeTime(string $iso): string {
+        if ($iso === '') return 'unknown';
+        $t = strtotime($iso);
+        if ($t === false) return 'unknown';
+        $diff = time() - $t;
+        if ($diff < 60) return 'just now';
+        if ($diff < 3600) return floor($diff / 60) . 'm ago';
+        if ($diff < 86400) return floor($diff / 3600) . 'h ago';
+        return floor($diff / 86400) . 'd ago';
     }
 
     private function getLatestModel(): string {
@@ -2910,13 +3257,21 @@ ART;
 
     private function switchModel(string $name): string {
         if (empty($name)) return "Usage: /model <name>\n";
-        $this->agent->setModel($name);
-        $this->model = $name;
-        $GLOBALS['currentSessionModel'] = $name;
+        $resolved = $this->agent->resolveModel($name);
+        if ($resolved === null) {
+            $installed = $this->agent->listModels();
+            return "\033[33mModel '$name' is not installed.\033[0m\n"
+                . "  Installed: " . (empty($installed) ? '(none — is Ollama running?)' : implode(', ', $installed)) . "\n"
+                . "  Pull it with: ollama pull $name\n";
+        }
+        $this->agent->setModel($resolved);
+        $this->model = $resolved;
+        $GLOBALS['currentSessionModel'] = $resolved;
         // Re-evaluate chat mode for the new model's size.
         $this->agent->setChatMode($this->agent->isSmallModel());
-        $mode = $this->agent->isChatMode() ? " \033[2m(chat mode — small model)\033[0m" : '';
-        return "Model: $name$mode\n";
+        // Clear the screen and redraw the banner so the header always reflects
+        // the current model (the original banner is frozen in scrollback).
+        return "\033[2J\033[H" . $this->renderBanner() . "\033[32m  ✓ switched to $resolved\033[0m\n";
     }
 
     private function newSession(): string {
@@ -2940,7 +3295,7 @@ ART;
     }
 
     private function compactSession(): string {
-        $this->compactMessages();
+        $this->compactMessages(true);
         return '';
     }
 
@@ -2979,7 +3334,91 @@ return "Available: " . implode(', ', array_keys($gitAliases)) . "\n";
 
     private function countTokens(): int { $total = 0; foreach ($this->messages as $msg) $total += strlen($msg['content'] ?? '') / 4; return (int)$total; }
     private function renderStatus(): void { echo "\n[Model: {$this->model} | Tokens: ~" . $this->countTokens() . " | Messages: " . count($this->messages) . "]\n"; }
-    private function renderPrompt(): void { echo "\n› "; }
+    // Best-effort terminal width for drawing the prompt box.
+    private function termWidth(): int {
+        $cols = (int)getenv('COLUMNS');
+        if ($cols <= 0) { $cols = (int)@exec('tput cols 2>/dev/null'); }
+        if ($cols <= 0) $cols = 80;
+        return $cols;
+    }
+
+    // Current directory with $HOME collapsed to ~.
+    private function shortCwd(): string {
+        $cwd = getcwd();
+        $home = getenv('HOME') ?: '';
+        if ($home !== '' && str_starts_with($cwd, $home)) $cwd = '~' . substr($cwd, strlen($home));
+        return $cwd;
+    }
+
+    // Tab-completion for the line editor. Given the current line and cursor,
+    // returns the glyph index where the active token starts and the full-token
+    // replacement candidates: slash/base commands for the first word, then
+    // context-aware completion (git subcommands, model names, file paths).
+    private function completeInput(string $line, int $cur): array {
+        $before = mb_substr($line, 0, $cur);
+        preg_match('/(\S*)$/u', $before, $m);
+        $token = $m[1] ?? '';
+        $start = $cur - mb_strlen($token);
+        $parts = preg_split('/\s+/', trim($before), -1, PREG_SPLIT_NO_EMPTY);
+        $firstWord = count($parts) <= 1 && !preg_match('/\s$/u', $before);
+
+        $cands = [];
+        if ($firstWord) {
+            $base = ['/help', '/model', '/models', '/chat', '/agent', '/new', '/clear', '/compact',
+                '/save', '/session', '/git', '/status', '/tools', '/context', '/pwd', '/cd', '/ls',
+                '/permission', '/verbose', '/exit', '/quit',
+                'help', 'exit', 'quit', 'clear', 'model', 'models', 'tools', 'git', 'status', 'compact', 'context', 'new', 'cd', 'ls'];
+            foreach ($base as $c) if ($token === '' || str_starts_with($c, $token)) $cands[] = $c;
+        } else {
+            $cmd = ltrim($parts[0], '/');
+            if ($cmd === 'git') {
+                foreach (['status', 'diff', 'log', 'branch', 'commit', 'push', 'pull', 'stash', 'checkout', 'add', 'fetch', 'merge', 'rebase'] as $g)
+                    if (str_starts_with($g, $token)) $cands[] = $g;
+            } elseif ($cmd === 'model' || $cmd === 'models') {
+                foreach ($this->agent->listModels() as $mn) if ($token === '' || str_starts_with($mn, $token)) $cands[] = $mn;
+            } elseif ($cmd === 'cd' || in_array($cmd, ['view', 'cat', 'edit', 'write', 'grep', 'find', 'ls', 'diff', 'rm', 'cp', 'mv'])) {
+                $cands = $this->completePath($token);
+            }
+        }
+        sort($cands);
+        return ['start' => $start, 'candidates' => $cands];
+    }
+
+    // Filesystem path completion: returns full replacement paths (with a trailing
+    // slash on directories) for the given partial token.
+    private function completePath(string $token): array {
+        if (strpos($token, '/') !== false) {
+            $parent = dirname($token);
+            $prefix = $parent === '/' ? '/' : $parent . '/';
+        } else {
+            $parent = '.';
+            $prefix = '';
+        }
+        if (!is_dir($parent)) return [];
+        $needle = basename($token);
+        $out = [];
+        foreach (scandir($parent) as $f) {
+            if ($f === '.' || $f === '..') continue;
+            if ($needle !== '' && !str_starts_with($f, $needle)) continue;
+            $full = $prefix . $f;
+            $out[] = is_dir($parent . '/' . $f) ? $full . '/' : $full;
+        }
+        return $out;
+    }
+
+    // Read a line of user input. Uses the bordered raw-mode line editor on a real
+    // terminal (typed text appears inside the box); falls back to a plain status
+    // line + prompt for pipes, daemons, and other non-TTY contexts.
+    private function readInput(): ?string {
+        $mode = $this->agent->isChatMode() ? 'chat' : 'agent';
+        if (LineEditor::supported()) {
+            return LineEditor::readLine($this->model, $mode, $this->shortCwd(), $this->history,
+                fn(string $line, int $cur) => $this->completeInput($line, $cur));
+        }
+        echo "\n\033[2m" . $this->model . '  ·  ' . $mode . '  ·  ' . $this->shortCwd() . "\033[0m\n\033[36m❯\033[0m ";
+        $line = fgets(STDIN);
+        return $line === false ? null : $line;
+    }
     private function showContext(): void {
         $pwd = getcwd();
         $edited = $GLOBALS['editedFiles'] ?? [];
@@ -3009,7 +3448,7 @@ $GLOBALS['currentSessionModel'] = null;
             case 'mode': echo "Mode set to: " . ($args ?: 'auto') . "\n"; return false;
             case 'verbose': $GLOBALS['verbose'] = trim($args) === 'on'; echo "Verbose: " . ($GLOBALS['verbose'] ? 'on' : 'off') . "\n"; return false;
             case 'models':
-                if (!empty($args)) { $this->agent->setModel($args); $this->model = $args; $GLOBALS['currentSessionModel'] = $args; echo "Model: $args\n"; }
+                if (!empty($args)) { echo $this->switchModel($args); }
                 else {
                     $models = $this->agent->listModelsDetailed();
                     echo "\nAvailable Models:\n";
@@ -3050,65 +3489,11 @@ $GLOBALS['currentSessionModel'] = null;
         }
 
         while (true) {
-            $this->renderPrompt();
-            if (function_exists('readline')) {
-                readline_completion_function(function($string, $position) {
-                    $baseCommands = ['help', 'exit', 'quit', 'clear', 'model', 'session', 'tools', 'git', 'status', 'compact', 'context', 'new', 'cd', 'ls'];
-                    $line = readline_info()['line_buffer'] ?? '';
-                    $parts = preg_split('/\s+/', $line, -1, PREG_SPLIT_NO_EMPTY);
-                    $matches = [];
-
-                    if (count($parts) === 1) {
-                        foreach ($baseCommands as $cmd) {
-                            if (strpos($cmd, $string) === 0) $matches[] = $cmd;
-                        }
-                        return $matches;
-                    }
-
-                    $first = $parts[0];
-                    if ($first === 'cd' && count($parts) === 2) {
-                        $partial = $parts[1];
-                        $parent = dirname($partial);
-                        if (is_dir($parent)) {
-                            $prefix = $parent === '/' ? '' : $parent . '/';
-                            foreach (scandir($parent) as $f) {
-                                if ($f !== '.' && strpos($f, basename($partial)) === 0) {
-                                    $full = $prefix . $f;
-                                    if (is_dir($full)) $matches[] = $full . '/';
-                                    else $matches[] = $full;
-                                }
-                            }
-                        }
-                    } elseif ($first === 'git' && count($parts) === 2) {
-                        $gitCmds = ['status', 'diff', 'log', 'branch', 'commit', 'push', 'pull', 'stash', 'checkout', 'add', 'fetch', 'merge', 'rebase'];
-                        foreach ($gitCmds as $gc) { if (strpos($gc, $string) === 0) $matches[] = $gc; }
-                    } elseif (in_array($first, ['view', 'cat', 'edit', 'write', 'grep', 'find', 'ls', 'diff', 'rm', 'cp', 'mv']) && count($parts) === 2) {
-                        $partial = $parts[1];
-                        if (strpos($partial, '/') !== false) {
-                            $parent = dirname($partial);
-                            if (is_dir($parent)) {
-                                $prefix = $parent === '/' ? '' : $parent . '/';
-                                foreach (scandir($parent) as $f) {
-                                    if ($f !== '.' && strpos($f, basename($partial)) === 0) {
-                                        $full = $prefix . $f;
-                                        if (is_dir($full)) $matches[] = $full . '/';
-                                        else $matches[] = $full;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    return array_slice($matches, 0, 50);
-                });
-                $input = readline('');
-                if ($input === false) break;
-                $input = trim($input);
-                if (!empty($input)) readline_add_history($input);
-            } else {
-                $input = trim(fgets(STDIN));
-            }
-
-            if (empty($input)) continue;
+            $raw = $this->readInput();
+            if ($raw === null) { echo "\n"; break; } // EOF / Ctrl-D
+            $input = trim($raw);
+            if ($input === '') continue;
+            $this->history[] = $input;
 
             // Slash commands are handled here and never sent to the model.
             if (str_starts_with($input, '/')) {
@@ -3143,34 +3528,48 @@ $GLOBALS['currentSessionModel'] = null;
                 $GLOBALS['editedFiles'] = [];
             }
 
-            if (count($this->messages) > 20) {
-                $this->compactMessages();
-            }
+            $this->compactMessages();
             $this->save();
         }
     }
 
-    private function compactMessages(): void {
-        if (count($this->messages) < 15) return;
+    private function compactMessages(bool $force = false): void {
+        $threshold = (int)Config::get('agents.compactThreshold', 30);
+        $keepLast = (int)Config::get('agents.compactKeep', 8);
+        if (!$force && count($this->messages) < $threshold) return;
 
-        echo "\n📝 Compacting conversation...\n";
-
-        $keepLast = 5;
         $toSummarize = array_slice($this->messages, 0, -$keepLast);
+        if (count($toSummarize) < 2) return;
 
-        $summary = "Previous conversation summary:\n";
+        echo "\n\033[2m📝 compacting " . count($toSummarize) . " messages…\033[0m\n";
+
+        // Build a readable transcript and ask the model to summarize it. Fall
+        // back to the old truncation join if the model is unavailable, so growth
+        // is still bounded either way.
+        $transcript = '';
         foreach ($toSummarize as $msg) {
-            $role = strtoupper($msg['role']);
-            $content = substr($msg['content'], 0, 150);
-            $summary .= "- $role: $content...\n";
+            $content = trim((string)($msg['content'] ?? ''));
+            if ($content === '') continue;
+            $label = strtoupper($msg['role'] ?? '');
+            if (!empty($msg['tool_name'])) $label .= '(' . $msg['tool_name'] . ')';
+            $transcript .= "$label: $content\n";
+        }
+
+        $summary = $this->agent->summarize($transcript);
+        if (trim($summary) === '') {
+            $summary = '';
+            foreach ($toSummarize as $msg) {
+                $summary .= "- " . strtoupper($msg['role'] ?? '') . ": " . substr((string)($msg['content'] ?? ''), 0, 150) . "…\n";
+            }
         }
 
         $this->messages = array_merge(
-            [['id' => 'summary_' . time(), 'role' => 'system', 'content' => $summary, 'created_at' => date('c')]],
+            [['id' => 'summary_' . time(), 'role' => 'system', 'content' => "Summary of earlier conversation:\n" . $summary, 'created_at' => date('c')]],
             array_slice($this->messages, -$keepLast)
         );
+        $this->save();
 
-        echo "   Compacted " . count($toSummarize) . " messages into summary.\n";
+        echo "\033[2m   compacted into a summary; keeping last $keepLast messages.\033[0m\n";
     }
 
     public function runSingle(string $prompt): string {
@@ -3204,7 +3603,17 @@ $GLOBALS['currentSessionModel'] = null;
 
             $clean = $this->agent->stripToolMarkup($response);
             // Store the assistant turn (cleaned, so markup doesn't pollute history).
-            $this->addMessage('assistant', $clean !== '' ? $clean : $response);
+            // When the model issued tool calls, attach them in Ollama's wire shape
+            // so the follow-up tool results correlate back to the originating call
+            // instead of the model re-issuing the same call every iteration.
+            $assistantExtra = [];
+            if (!empty($calls)) {
+                $assistantExtra['tool_calls'] = array_map(
+                    fn($c) => ['function' => ['name' => $c['name'], 'arguments' => (object)($c['params'] ?? [])]],
+                    $calls
+                );
+            }
+            $this->addMessage('assistant', $clean !== '' ? $clean : $response, $assistantExtra);
 
             $toolResults = $this->agent->executeCalls($calls);
             if (empty($toolResults)) {
@@ -3214,8 +3623,18 @@ $GLOBALS['currentSessionModel'] = null;
 
             // Show the model's reasoning text (without the tool markup) before results.
             if ($clean !== '' && $emit) $emit($clean . "\n");
+            $maxOut = (int)Config::get('agents.maxToolOutput', 12000);
             foreach ($toolResults as $result) {
-                $this->addMessage('tool', $result['content']);
+                // Cap result size so a single big read/grep can't overflow the
+                // model's context window; tag it with tool_name so it pairs with
+                // the assistant tool_call above.
+                $content = (string)$result['content'];
+                if (strlen($content) > $maxOut) {
+                    $content = substr($content, 0, $maxOut)
+                        . "\n…[truncated " . (strlen($content) - $maxOut) . " bytes]";
+                }
+                $name = $result['name'] ?? 'tool';
+                $this->addMessage('tool', $content, ['tool_name' => $name]);
                 if ($emit) {
                     // Compact, dimmed tool line: "⏺ name  result-preview".
                     $name = $result['name'] ?? 'tool';
@@ -3635,12 +4054,13 @@ if ($argc >= 2 && $argv[1] === 'stats') {
 }
 
 // ===== FLAG PARSING (must be before config load) =====
-$flags = ['model' => null, 'continue' => false, 'session' => null, 'fork' => false, 'prompt' => null, 'agent' => null, 'pure' => false, 'port' => 0, 'hostname' => '127.0.0.1', 'mdns' => false, 'help' => false, 'version' => false, 'cwd' => null, 'permission' => null];
+$flags = ['model' => null, 'continue' => false, 'resume' => false, 'session' => null, 'fork' => false, 'prompt' => null, 'agent' => null, 'pure' => false, 'port' => 0, 'hostname' => '127.0.0.1', 'mdns' => false, 'help' => false, 'version' => false, 'cwd' => null, 'permission' => null];
 $positional = [];
 for ($i = 1; $i < $argc; $i++) {
     $a = $argv[$i];
     if ($a === '-m' || $a === '--model') { $flags['model'] = $argv[++$i] ?? null; }
     elseif ($a === '-c' || $a === '--continue') { $flags['continue'] = true; }
+    elseif ($a === '-r' || $a === '--resume') { $flags['resume'] = true; }
     elseif ($a === '-s' || $a === '--session') { $flags['session'] = $argv[++$i] ?? null; }
     elseif ($a === '--fork') { $flags['fork'] = true; }
     elseif ($a === '-p' || $a === '--prompt') { $flags['prompt'] = $argv[++$i] ?? null; }
@@ -4112,6 +4532,12 @@ if (!empty($flags['prompt'])) {
     exit(0);
 }
 
+// Interactive resume picker: `ollamadev resume` or `-r`/`--resume`.
+if ($flags['resume'] || $cmd === 'resume') {
+    Session::pickAndResume($config);
+    exit(0);
+}
+
 // Continue last session
 if ($flags['continue'] || $flags['session']) {
     $sessionId = $flags['session'];
@@ -4144,8 +4570,8 @@ if ($cmd === 'chat') {
     foreach (Session::listAll($config) as $s) echo "{$s['id']} | {$s['title']} | {$s['model']} | {$s['updated_at']}\n";
 } elseif ($cmd === 'update') {
     $install = isset($flags['install']);
-    $current = '3.9.5';
-    $ctx = stream_context_create(['http' => ['timeout' => 10, 'ignore_errors' => true, 'header' => "User-Agent: OllamaDev/3.9.5\r\n"]]);
+    $current = OLLAMADEV_VERSION;
+    $ctx = stream_context_create(['http' => ['timeout' => 10, 'ignore_errors' => true, 'header' => "User-Agent: OllamaDev/" . OLLAMADEV_VERSION . "\r\n"]]);
     $json = @file_get_contents('https://api.github.com/repos/kennethyork/OllamaDev/releases/latest', false, $ctx);
     if (!$json || strpos($json, 'Request forbidden') !== false) { echo "Error: Could not check for updates (GitHub rate limit). Try again later.\n"; exit(1); }
     $data = json_decode($json, true);

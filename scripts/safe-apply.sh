@@ -30,8 +30,10 @@ if ! php tests/smoke.php; then
 fi
 
 echo "▶ Installing ..."
+# Back up the live binary first so it can be restored with `make rollback`.
+[ -f "$HOME/.local/bin/ollamadev" ] && cp "$HOME/.local/bin/ollamadev" "$HOME/.local/bin/ollamadev.bak"
 cp ollamadev "$HOME/.local/bin/ollamadev" && chmod +x "$HOME/.local/bin/ollamadev"
-echo "✓ installed"
+echo "✓ installed (previous saved to ~/.local/bin/ollamadev.bak)"
 
 if [ "$MSG" != "" ] && [ "$MSG" != "--no-commit" ]; then
     git add src/ ollamadev tests/ 2>/dev/null || true

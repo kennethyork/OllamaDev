@@ -64,6 +64,20 @@ User: run the tests
     }
 
     public function setModel(string $model): void { $this->model = $model; $this->systemPrompt = $this->buildSystemPrompt(); }
+
+    // Resolve a user-typed model name to an actually-installed model. Matches
+    // exactly, then "name:latest", then a unique prefix (so "/model qwen2.5-coder"
+    // works without the tag). Returns null when nothing matches.
+    public function resolveModel(string $name): ?string {
+        $name = trim($name);
+        if ($name === '') return null;
+        $installed = $this->client->listModels();
+        if (empty($installed)) return $name; // can't verify (Ollama down) - trust it
+        if (in_array($name, $installed, true)) return $name;
+        if (in_array("$name:latest", $installed, true)) return "$name:latest";
+        $prefix = array_values(array_filter($installed, fn($m) => str_starts_with($m, $name)));
+        return count($prefix) >= 1 ? $prefix[0] : null;
+    }
     public function setChatMode(bool $on): void { $this->chatMode = $on; $this->systemPrompt = $this->buildSystemPrompt(); }
     public function isChatMode(): bool { return $this->chatMode; }
 
@@ -83,8 +97,39 @@ User: run the tests
     public function listModelsDetailed(): array { return $this->client->listModelsDetailed(); }
     public function checkConnection(): bool { return $this->client->checkConnection(); }
 
-public function run(array $messages, callable $handler = null): string {
-        $allMessages = array_merge([$this->systemPrompt], $messages);
+    // Summarize a transcript with the model itself (one-shot, no tools). Used by
+    // session compaction. Returns '' on any failure so the caller can fall back.
+    public function summarize(string $transcript): string {
+        $transcript = substr($transcript, 0, 24000); // bound the prompt size
+        $sys = ['role' => 'system', 'content' =>
+            "You compress conversations for an AI coding assistant's memory. Produce a " .
+            "concise summary that preserves: decisions made, file paths touched, code/edits " .
+            "applied, commands run and their outcomes, and any unfinished tasks. Use terse " .
+            "bullet points. Do NOT call tools or ask questions - output only the summary."];
+        $user = ['role' => 'user', 'content' => "Summarize this conversation so far:\n\n" . $transcript];
+        try {
+            return trim($this->client->chatWithModel($this->model, [$sys, $user]));
+        } catch (\Throwable $e) {
+            return '';
+        }
+    }
+
+    // Convert stored session messages into the shape Ollama's chat API expects:
+    // drop internal bookkeeping (id, created_at) and keep only role/content plus
+    // the structured tool_calls / tool_name that make function-calling coherent.
+    private function wire(array $messages): array {
+        $out = [];
+        foreach ($messages as $m) {
+            $w = ['role' => $m['role'] ?? 'user', 'content' => (string)($m['content'] ?? '')];
+            if (!empty($m['tool_calls'])) $w['tool_calls'] = $m['tool_calls'];
+            if (!empty($m['tool_name'])) $w['tool_name'] = $m['tool_name'];
+            $out[] = $w;
+        }
+        return $out;
+    }
+
+    public function run(array $messages, callable $handler = null): string {
+        $allMessages = array_merge([$this->systemPrompt], $this->wire($messages));
         $response = '';
         $this->client->chatWithModel($this->model, $allMessages, function($chunk) use (&$response, $handler) {
             $response .= $chunk;
@@ -97,7 +142,7 @@ public function run(array $messages, callable $handler = null): string {
     // supports it (structured tool_calls, no parsing); otherwise falls back to
     // text-format parsing. Returns ['content'=>string, 'calls'=>[...]].
     public function chatTurn(array $messages): array {
-        $allMessages = array_merge([$this->systemPrompt], $messages);
+        $allMessages = array_merge([$this->systemPrompt], $this->wire($messages));
 
         // Chat mode: pure conversation, no tools offered or parsed.
         if ($this->chatMode) {
