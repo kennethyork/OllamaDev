@@ -1,0 +1,14 @@
+[data-theme="gruvbox-dark"] {
+    --bg-primary: #282828;
+    --bg-secondary: #32302f;
+    --bg-tertiary: #3c3836;
+    --bg-hover: #504945;
+    --text-primary: #ebdbb2;
+    --text-secondary: #d5c4a1;
+    --text-muted: #a89984;
+    --border-color: #3c3836;
+    --accent: #83a598;
+    --accent-success: #b8bb26;
+    --accent-warning: #fabd2f;
+    --accent-error: #fb4934;
+}

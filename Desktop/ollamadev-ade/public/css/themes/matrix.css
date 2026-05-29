@@ -1,0 +1,14 @@
+[data-theme="matrix"] {
+    --bg-primary: #000000;
+    --bg-secondary: #0a0f0a;
+    --bg-tertiary: #0f1a0f;
+    --bg-hover: #143314;
+    --text-primary: #00ff41;
+    --text-secondary: #00cc33;
+    --text-muted: #008f11;
+    --border-color: #143314;
+    --accent: #00ff41;
+    --accent-success: #00ff41;
+    --accent-warning: #9aff9a;
+    --accent-error: #ff3131;
+}

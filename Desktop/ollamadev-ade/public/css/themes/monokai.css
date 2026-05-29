@@ -1,0 +1,14 @@
+[data-theme="monokai"] {
+    --bg-primary: #272822;
+    --bg-secondary: #2e2f28;
+    --bg-tertiary: #3e3d32;
+    --bg-hover: #49483e;
+    --text-primary: #f8f8f2;
+    --text-secondary: #cfcfc2;
+    --text-muted: #75715e;
+    --border-color: #49483e;
+    --accent: #a6e22e;
+    --accent-success: #a6e22e;
+    --accent-warning: #e6db74;
+    --accent-error: #f92672;
+}

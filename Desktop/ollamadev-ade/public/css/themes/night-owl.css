@@ -1,0 +1,14 @@
+[data-theme="night-owl"] {
+    --bg-primary: #011627;
+    --bg-secondary: #0b2942;
+    --bg-tertiary: #0e3052;
+    --bg-hover: #13395f;
+    --text-primary: #d6deeb;
+    --text-secondary: #a2aabc;
+    --text-muted: #637777;
+    --border-color: #0e3052;
+    --accent: #82aaff;
+    --accent-success: #addb67;
+    --accent-warning: #ecc48d;
+    --accent-error: #ef5350;
+}

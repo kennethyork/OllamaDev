@@ -66,9 +66,17 @@ class App {
     }
 
     loadTheme() {
+        // Populate the dropdown from all available (inlined) themes.
+        const select = document.getElementById('themeSelect');
+        const themes = window.OLLAMADEV_THEMES ? Object.keys(window.OLLAMADEV_THEMES).sort() : [];
+        if (select && themes.length) {
+            select.innerHTML = themes.map(t =>
+                `<option value="${t}">${t.charAt(0).toUpperCase() + t.slice(1).replace(/-/g, ' ')}</option>`
+            ).join('');
+        }
         const saved = localStorage.getItem('ollamadev-theme') || 'void';
         this.setTheme(saved);
-        document.getElementById('themeSelect').value = saved;
+        if (select) select.value = saved;
     }
 
     setTheme(theme) {
@@ -195,7 +203,63 @@ class App {
         if (!task) return;
 
         await this.updateTask(id, { status: 'inprogress' });
-        this.createTerminal();
+
+        // Open a terminal and dispatch the task to the agent running in it.
+        const model = document.getElementById('modelSelect')?.value || 'llama3.2:latest';
+        const tid = await window.createSession(model);
+        this.terminals.set(tid, new TerminalPane(tid, model));
+        this.switchTab('terminals');
+        this.renderTerminalGrid();
+        const prompt = task.title + (task.description ? ': ' + task.description : '');
+        // Give the PTY daemon a moment to start before dispatching the agent.
+        setTimeout(() => { try { window.agentRun(tid, prompt); } catch (e) { console.error(e); } }, 900);
+        await this.loadSessions();
+    }
+
+    async openInEditor(path) {
+        try {
+            const r = await window.readFile(path);
+            if (!r || r.error) { console.error(r && r.error); return; }
+            this.switchTab('editor');
+            const view = document.getElementById('editor-content');
+            view.innerHTML = `
+                <div class="editor-bar">
+                    <span class="editor-path">${path}</span>
+                    <span class="editor-status" id="editorStatus"></span>
+                    <button class="editor-save" id="editorSave">Save</button>
+                </div>
+                <textarea class="editor-area" id="editorArea" spellcheck="false"></textarea>
+            `;
+            const area = document.getElementById('editorArea');
+            area.value = r.content || '';
+            this._editorPath = path;
+            const markDirty = () => { document.getElementById('editorStatus').textContent = '● unsaved'; };
+            area.addEventListener('input', markDirty);
+            // Tab inserts a tab character instead of moving focus.
+            area.addEventListener('keydown', (e) => {
+                if (e.key === 'Tab') {
+                    e.preventDefault();
+                    const s = area.selectionStart, en = area.selectionEnd;
+                    area.value = area.value.slice(0, s) + '    ' + area.value.slice(en);
+                    area.selectionStart = area.selectionEnd = s + 4;
+                    markDirty();
+                } else if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+                    e.preventDefault();
+                    this.saveEditor();
+                }
+            });
+            document.getElementById('editorSave').addEventListener('click', () => this.saveEditor());
+        } catch (e) { console.error('openInEditor failed', e); }
+    }
+
+    async saveEditor() {
+        const area = document.getElementById('editorArea');
+        if (!area || !this._editorPath) return;
+        const status = document.getElementById('editorStatus');
+        try {
+            const r = await window.writeFile(this._editorPath, area.value);
+            status.textContent = (r && r.error) ? '✗ ' + r.error : '✓ saved';
+        } catch (e) { status.textContent = '✗ save failed'; }
     }
 
     showTaskModal(status = 'todo') {
@@ -403,6 +467,8 @@ class App {
                     item.addEventListener('click', () => {
                         if (item.classList.contains('dir')) {
                             this.renderFileTree(item.dataset.path);
+                        } else {
+                            this.openInEditor(item.dataset.path);
                         }
                     });
                 });

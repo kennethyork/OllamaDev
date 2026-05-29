@@ -266,3 +266,25 @@
 .block.fail .block-icon { color: var(--accent-error, #f85149); }
 .block.running .block-icon { color: var(--accent-warning, #d29922); }
 .blocks-empty { color: var(--text-muted); padding: 8px; text-align: center; }
+
+/* Code editor */
+#editor-content { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.editor-bar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+}
+.editor-path { flex: 1; font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); }
+.editor-status { font-size: 12px; color: var(--text-muted); }
+.editor-save {
+    background: var(--accent); color: #fff; border: none;
+    border-radius: var(--radius-md); padding: 6px 14px; font-size: 13px; cursor: pointer;
+}
+.editor-save:hover { opacity: 0.9; }
+.editor-area {
+    flex: 1; width: 100%; min-height: 0; resize: none;
+    background: var(--bg-primary); color: var(--text-primary);
+    border: none; outline: none; padding: 12px;
+    font-family: var(--font-mono); font-size: 13px; line-height: 1.5;
+    tab-size: 4; white-space: pre; overflow: auto;
+}

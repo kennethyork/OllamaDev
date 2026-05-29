@@ -1,0 +1,14 @@
+[data-theme="rose-pine"] {
+    --bg-primary: #191724;
+    --bg-secondary: #1f1d2e;
+    --bg-tertiary: #26233a;
+    --bg-hover: #403d52;
+    --text-primary: #e0def4;
+    --text-secondary: #908caa;
+    --text-muted: #6e6a86;
+    --border-color: #26233a;
+    --accent: #c4a7e7;
+    --accent-success: #9ccfd8;
+    --accent-warning: #f6c177;
+    --accent-error: #eb6f92;
+}

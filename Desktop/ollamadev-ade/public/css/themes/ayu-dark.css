@@ -1,0 +1,14 @@
+[data-theme="ayu-dark"] {
+    --bg-primary: #0a0e14;
+    --bg-secondary: #0d1017;
+    --bg-tertiary: #11151c;
+    --bg-hover: #1c212b;
+    --text-primary: #b3b1ad;
+    --text-secondary: #828a96;
+    --text-muted: #565b66;
+    --border-color: #11151c;
+    --accent: #39bae6;
+    --accent-success: #aad94c;
+    --accent-warning: #ffb454;
+    --accent-error: #f07178;
+}

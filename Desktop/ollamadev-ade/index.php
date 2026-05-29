@@ -144,6 +144,14 @@ $app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $
         return $sessions->getBlocks($id);
     });
 
+    $bindings->bind('readFile', function (string $path) use ($files): array {
+        return $files->readFile($path);
+    });
+
+    $bindings->bind('writeFile', function (string $path, string $content) use ($files): array {
+        return $files->writeFile($path, $content);
+    });
+
     $bindings->bind('listFiles', function (?string $path = null) use ($files): array {
         return $files->listDir($path);
     });
