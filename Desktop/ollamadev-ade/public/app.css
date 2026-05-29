@@ -60,9 +60,8 @@ body {
 .ed-status { position: absolute; right: 10px; bottom: 6px; font-size: 11px; color: var(--dim);
     background: var(--bg2); border: 1px solid var(--border); border-radius: 5px; padding: 2px 8px; pointer-events: none; }
 
-#terminals { flex: 1 1 40%; display: grid; gap: 6px; padding: 6px; min-height: 0; grid-auto-rows: 1fr; }
-#terminals.cols-1 { grid-template-columns: 1fr; }
-#terminals.cols-2 { grid-template-columns: 1fr 1fr; }
+/* Columns are set inline by App.render() to tile 1–16 terminals (up to 4×4). */
+#terminals { flex: 1 1 40%; display: grid; gap: 6px; padding: 6px; min-height: 0; grid-auto-rows: minmax(0, 1fr); grid-template-columns: 1fr; }
 .term-pane { display: flex; flex-direction: column; min-height: 0; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .term-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--bg2); border-bottom: 1px solid var(--border); font-size: 12px; }
 .term-head .id { color: var(--dim); }

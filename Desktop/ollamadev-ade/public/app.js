@@ -258,7 +258,9 @@ var App = {
             self.markActiveFile(Editor.cur() ? Editor.cur().path : null);
         }).catch(function (e) { banner('list error: ' + e, 'err'); });
     },
+    MAX_TERMINALS: 16,
     newTerminal: function () {
+        if (this.terminals.length >= this.MAX_TERMINALS) { banner('maximum of ' + this.MAX_TERMINALS + ' terminals', 'err'); return; }
         var model = $('#modelSelect').value || 'llama3.2:latest';
         var id = rid();
         var t = new Terminal(id, model);
@@ -274,7 +276,11 @@ var App = {
     },
     render: function () {
         var wrap = $('#terminals');
-        wrap.className = this.terminals.length > 1 ? 'cols-2' : 'cols-1';
+        // Auto-tile into a near-square grid: ceil(sqrt(n)) columns, up to 4×4 (16).
+        var n = this.terminals.length;
+        var cols = n <= 1 ? 1 : Math.min(4, Math.ceil(Math.sqrt(n)));
+        wrap.className = '';
+        wrap.style.gridTemplateColumns = 'repeat(' + cols + ', minmax(0, 1fr))';
         wrap.innerHTML = '';
         var self = this;
         this.terminals.forEach(function (t) {
