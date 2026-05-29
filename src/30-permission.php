@@ -19,6 +19,7 @@ class Permission {
     }
     public static function getMode(): string { return self::$mode; }
     public static function setInteractive(bool $v): void { self::$interactive = $v; }
+    public static function isInteractive(): bool { return self::$interactive; }
 
     // Legacy compatibility shims.
     public static function autoAllow(): void { self::$mode = 'auto'; }

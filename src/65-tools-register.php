@@ -120,8 +120,11 @@ Tools::register('write', function($p) {
     $path = $p['file_path'] ?? ''; $content = $p['content'] ?? '';
     if (empty($path)) return "missing file_path";
     if ($content === '') return "missing content";
+    $old = file_exists($path) ? (file_get_contents($path) ?: '') : '';
+    if (!DiffView::confirm($path, $old, $content)) return "Write to $path cancelled by user";
     $dir = dirname($path);
     if (!empty($dir) && !is_dir($dir)) mkdir($dir, 0755, true);
+    Checkpoints::save($path);
     return file_put_contents($path, $content) !== false ? "FILE_WRITE:$path" : "Error writing file: $path";
 });
 
@@ -133,7 +136,10 @@ Tools::register('edit', function($p) {
     if ($content === false) return "Error reading file: $path";
     $pos = strpos($content, $oldStr);
     if ($pos === false) return "old_string not found in file";
-    return file_put_contents($path, substr_replace($content, $newStr, $pos, strlen($oldStr))) !== false ? "FILE_EDIT:$path" : "Error writing file: $path";
+    $newContent = substr_replace($content, $newStr, $pos, strlen($oldStr));
+    if (!DiffView::confirm($path, $content, $newContent)) return "Edit of $path cancelled by user";
+    Checkpoints::save($path);
+    return file_put_contents($path, $newContent) !== false ? "FILE_EDIT:$path" : "Error writing file: $path";
 });
 
 Tools::register('glob', function($p) {

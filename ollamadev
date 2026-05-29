@@ -351,6 +351,7 @@ class Permission {
     }
     public static function getMode(): string { return self::$mode; }
     public static function setInteractive(bool $v): void { self::$interactive = $v; }
+    public static function isInteractive(): bool { return self::$interactive; }
 
     // Legacy compatibility shims.
     public static function autoAllow(): void { self::$mode = 'auto'; }
@@ -802,6 +803,8 @@ class OllamaClient {
             // Parse Ollama's NDJSON stream line-by-line, emitting content deltas.
             $content = ''; $buf = '';
             $opts[CURLOPT_WRITEFUNCTION] = function($ch, $data) use (&$content, &$buf, $handler) {
+                // Ctrl-C during streaming: return 0 to make curl abort the transfer.
+                if (class_exists('Interrupt') && Interrupt::aborted()) return 0;
                 $buf .= $data;
                 while (($nl = strpos($buf, "\n")) !== false) {
                     $line = trim(substr($buf, 0, $nl));
@@ -812,6 +815,7 @@ class OllamaClient {
                     $delta = $j['message']['content'] ?? '';
                     if ($delta === '' && !empty($j['message']['thinking'])) $delta = $j['message']['thinking'];
                     if ($delta !== '') { $content .= $delta; if ($handler) $handler($delta); }
+                    if (!empty($j['done'])) Usage::record($j);
                 }
                 return strlen($data);
             };
@@ -826,6 +830,7 @@ class OllamaClient {
         curl_close($ch);
         if ($resp) {
             $j = json_decode($resp, true);
+            Usage::record($j);
             if ($j && isset($j['message'])) {
                 $content = $j['message']['content'] ?? '';
                 $thinking = $j['message']['thinking'] ?? '';
@@ -854,6 +859,7 @@ class OllamaClient {
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
         $j = json_decode((string)$resp, true);
+        Usage::record($j);
         if ($code !== 200) {
             $err = is_array($j) ? ($j['error'] ?? '') : (string)$resp;
             return ['ok' => false, 'unsupported' => stripos($err, 'tool') !== false || stripos($err, 'does not support') !== false, 'error' => $err];
@@ -937,6 +943,11 @@ class Tools {
             $fn('fetch', 'Fetch the raw contents of a URL.', [
                 'url' => $str('The URL to fetch'),
             ], ['url']),
+            $fn('task', 'Delegate a focused sub-task to a fresh nested agent (its own short context, same model, full tools, bounded iterations). Returns a concise result string. Use for self-contained work you want handled in isolation.', [
+                'prompt' => $str('The sub-task to perform, described fully and self-contained'),
+                'context' => $str('Optional extra context the sub-agent needs'),
+                'max_iterations' => $int('Max tool/think iterations (default 6, capped at 12)'),
+            ], ['prompt']),
         ];
     }
 }
@@ -1174,8 +1185,11 @@ Tools::register('write', function($p) {
     $path = $p['file_path'] ?? ''; $content = $p['content'] ?? '';
     if (empty($path)) return "missing file_path";
     if ($content === '') return "missing content";
+    $old = file_exists($path) ? (file_get_contents($path) ?: '') : '';
+    if (!DiffView::confirm($path, $old, $content)) return "Write to $path cancelled by user";
     $dir = dirname($path);
     if (!empty($dir) && !is_dir($dir)) mkdir($dir, 0755, true);
+    Checkpoints::save($path);
     return file_put_contents($path, $content) !== false ? "FILE_WRITE:$path" : "Error writing file: $path";
 });
 
@@ -1187,7 +1201,10 @@ Tools::register('edit', function($p) {
     if ($content === false) return "Error reading file: $path";
     $pos = strpos($content, $oldStr);
     if ($pos === false) return "old_string not found in file";
-    return file_put_contents($path, substr_replace($content, $newStr, $pos, strlen($oldStr))) !== false ? "FILE_EDIT:$path" : "Error writing file: $path";
+    $newContent = substr_replace($content, $newStr, $pos, strlen($oldStr));
+    if (!DiffView::confirm($path, $content, $newContent)) return "Edit of $path cancelled by user";
+    Checkpoints::save($path);
+    return file_put_contents($path, $newContent) !== false ? "FILE_EDIT:$path" : "Error writing file: $path";
 });
 
 Tools::register('glob', function($p) {
@@ -2013,6 +2030,208 @@ Tools::register('git_merge', function($p) {
     return shell_exec($cmd . " 2>&1") ?: "Merge failed";
 });
 
+// DiffView: unified diff computation + colorized rendering, and an apply-with-preview
+// gate used by the write/edit tools. Vanilla PHP only (no libraries).
+class DiffView {
+    // Produce a unified-diff string (old vs new). $label is shown in the @@ header.
+    public static function unified(string $old, string $new, string $label = ''): string {
+        if ($old === $new) return '';
+        $a = $old === '' ? [] : explode("\n", $old);
+        $b = $new === '' ? [] : explode("\n", $new);
+        $n = count($a); $m = count($b);
+        // LCS table.
+        $lcs = array_fill(0, $n + 1, array_fill(0, $m + 1, 0));
+        for ($i = $n - 1; $i >= 0; $i--) {
+            for ($j = $m - 1; $j >= 0; $j--) {
+                $lcs[$i][$j] = ($a[$i] === $b[$j])
+                    ? $lcs[$i + 1][$j + 1] + 1
+                    : max($lcs[$i + 1][$j], $lcs[$i][$j + 1]);
+            }
+        }
+        // Walk to build an edit script of [op, line] where op is ' ', '-', '+'.
+        $ops = [];
+        $i = 0; $j = 0;
+        while ($i < $n && $j < $m) {
+            if ($a[$i] === $b[$j]) { $ops[] = [' ', $a[$i]]; $i++; $j++; }
+            elseif ($lcs[$i + 1][$j] >= $lcs[$i][$j + 1]) { $ops[] = ['-', $a[$i]]; $i++; }
+            else { $ops[] = ['+', $b[$j]]; $j++; }
+        }
+        while ($i < $n) { $ops[] = ['-', $a[$i]]; $i++; }
+        while ($j < $m) { $ops[] = ['+', $b[$j]]; $j++; }
+
+        $head = '--- a' . ($label !== '' ? '/' . $label : '') . "\n";
+        $head .= '+++ b' . ($label !== '' ? '/' . $label : '') . "\n";
+        $head .= '@@ -1,' . $n . ' +1,' . $m . " @@\n";
+        $body = '';
+        foreach ($ops as [$op, $line]) {
+            $body .= ($op === ' ' ? ' ' : $op) . $line . "\n";
+        }
+        return $head . $body;
+    }
+
+    // Colorize a unified-diff string for terminal output.
+    public static function colorize(string $diff): string {
+        if ($diff === '') return '';
+        $out = '';
+        foreach (explode("\n", $diff) as $line) {
+            if ($line === '' ) { $out .= "\n"; continue; }
+            $c = $line[0];
+            if (str_starts_with($line, '@@')) $out .= "\033[36m$line\033[0m\n";
+            elseif (str_starts_with($line, '+++') || str_starts_with($line, '---')) $out .= "\033[1m$line\033[0m\n";
+            elseif ($c === '+') $out .= "\033[32m$line\033[0m\n";
+            elseif ($c === '-') $out .= "\033[31m$line\033[0m\n";
+            else $out .= "$line\n";
+        }
+        return rtrim($out, "\n") . "\n";
+    }
+
+    // Show the diff, then decide whether to apply. Returns true if the write should proceed.
+    // - Prints the colorized diff in every mode (when there is a change).
+    // - Prompts for confirmation ONLY when interactive AND mode is not 'auto'.
+    // - Never prompts in non-interactive/daemon runs (Permission::isInteractive() false).
+    public static function confirm(string $path, string $old, string $new): bool {
+        $diff = self::unified($old, $new, $path);
+        if ($diff === '') return true; // no change; nothing to preview, allow no-op write
+        echo "\n\033[1mDiff preview for " . $path . "\033[0m\n";
+        echo self::colorize($diff);
+        $interactive = method_exists('Permission', 'isInteractive') ? Permission::isInteractive() : false;
+        $mode = method_exists('Permission', 'getMode') ? Permission::getMode() : 'auto';
+        if (!$interactive || $mode === 'auto') return true;
+        echo "\n   Apply this change? [y]es / [n]o: ";
+        $input = strtolower(trim((string)fgets(STDIN)));
+        if ($input === 'y' || $input === 'yes' || $input === '') return true;
+        echo "   \033[31m\u{2717} change discarded\033[0m\n";
+        return false;
+    }
+}
+// Checkpoint / undo of file mutations. Before a write/edit changes a file we
+// snapshot the prior contents into Config::checkpointsDir() as a small JSON
+// record. /undo restores the most recent snapshot; /checkpoints lists them.
+// Vanilla PHP only (file_get_contents/file_put_contents/unlink).
+class Checkpoints {
+    private static function dir(): string {
+        $dir = Config::checkpointsDir();
+        if (!is_dir($dir)) @mkdir($dir, 0755, true);
+        return $dir;
+    }
+
+    // Snapshot the current state of $path before it is mutated. Records whether
+    // the file already existed so undo can delete a newly-created file.
+    public static function save(string $path): void {
+        if ($path === '') return;
+        $existed = is_file($path);
+        $prior = $existed ? (string)@file_get_contents($path) : '';
+        $record = [
+            'path' => $path,
+            'existed' => $existed,
+            'content' => $prior,
+            'created_at' => date('c'),
+        ];
+        $name = 'ckpt_' . sprintf('%012d', (int)(microtime(true) * 1000)) . '_' . substr(md5($path . mt_rand()), 0, 6) . '.json';
+        @file_put_contents(self::dir() . '/' . $name, json_encode($record, JSON_PRETTY_PRINT));
+    }
+
+    // Newest-first list of checkpoint files with decoded metadata.
+    public static function list(): array {
+        $dir = self::dir();
+        $files = glob($dir . '/ckpt_*.json') ?: [];
+        rsort($files); // names are zero-padded ms timestamps, so lexical desc == newest first
+        $out = [];
+        foreach ($files as $f) {
+            $data = json_decode((string)@file_get_contents($f), true);
+            if (!is_array($data)) continue;
+            $out[] = [
+                'file' => $f,
+                'path' => $data['path'] ?? '?',
+                'existed' => (bool)($data['existed'] ?? true),
+                'created_at' => $data['created_at'] ?? '',
+            ];
+        }
+        return $out;
+    }
+
+    // Restore the most recent checkpoint and remove it, so repeated calls walk
+    // back through edit history. Returns a human-readable status string.
+    public static function undoLast(): string {
+        $list = self::list();
+        if (empty($list)) return "Nothing to undo.\n";
+        $top = $list[0];
+        $record = json_decode((string)@file_get_contents($top['file']), true);
+        if (!is_array($record)) { @unlink($top['file']); return "Skipped a corrupt checkpoint.\n"; }
+        $path = $record['path'] ?? '';
+        if ($path === '') { @unlink($top['file']); return "Skipped an empty checkpoint.\n"; }
+        if (!empty($record['existed'])) {
+            $ok = @file_put_contents($path, (string)($record['content'] ?? '')) !== false;
+            @unlink($top['file']);
+            return $ok ? "Reverted: $path\n" : "Failed to revert: $path\n";
+        }
+        // File did not exist before the mutation; undo means delete it.
+        if (is_file($path)) @unlink($path);
+        @unlink($top['file']);
+        return "Removed (was newly created): $path\n";
+    }
+}
+// Cooperative Ctrl-C interruption of an in-flight model response / tool loop.
+//
+// pcntl is optional (not present on all PHP builds, e.g. some Windows ones), so
+// every pcntl call is guarded with function_exists(). When pcntl is missing this
+// whole class is a no-op: armed() stays false, the streaming/agentic checks below
+// never fire, and Ctrl-C keeps its old behaviour (handled by the line editor /
+// default signal disposition). This keeps the build dependency-free and vanilla.
+class Interrupt {
+    private static bool $aborted = false;   // set by the SIGINT handler
+    private static bool $armed = false;     // true while a handler is installed
+    private static int $depth = 0;          // nesting guard for begin()/end()
+    private static $prev = null;            // previous SIGINT handler, to restore
+
+    private static function hasPcntl(): bool {
+        return function_exists('pcntl_signal') && function_exists('pcntl_async_signals');
+    }
+
+    // Install the SIGINT handler and clear the abort flag. Safe to nest: only the
+    // outermost begin() touches the signal disposition. No-op without pcntl.
+    public static function begin(): void {
+        if (!self::hasPcntl()) return;
+        if (self::$depth++ > 0) return;
+        self::$aborted = false;
+        self::$armed = true;
+        // Deliver signals between PHP VM ticks without needing declare(ticks=1).
+        @pcntl_async_signals(true);
+        // Remember whatever was installed before so we can put it back exactly.
+        self::$prev = function_exists('pcntl_signal_get_handler')
+            ? @pcntl_signal_get_handler(SIGINT) : null;
+        @pcntl_signal(SIGINT, function () { Interrupt::trip(); });
+    }
+
+    // Restore the previous handler (or the default) and clear armed state. Safe to
+    // call unbalanced. No-op without pcntl.
+    public static function end(): void {
+        if (!self::hasPcntl()) return;
+        if (self::$depth > 0) self::$depth--;
+        if (self::$depth > 0) return;
+        self::$armed = false;
+        $prev = self::$prev;
+        self::$prev = null;
+        if ($prev !== null && $prev !== 0 && (is_string($prev) ? is_callable($prev) : true)) {
+            @pcntl_signal(SIGINT, $prev);
+        } else {
+            @pcntl_signal(SIGINT, SIG_DFL);
+        }
+    }
+
+    // The signal handler body: just flip the flag. The streaming transfer and the
+    // agentic loop poll aborted() at safe points and unwind cooperatively.
+    public static function trip(): void { self::$aborted = true; }
+
+    // True once Ctrl-C has been pressed within the current begin()/end() scope.
+    public static function aborted(): bool { return self::$aborted; }
+
+    // True while a handler is installed (i.e. interruption is possible at all).
+    public static function armed(): bool { return self::$armed; }
+
+    // Clear the flag (e.g. after reporting the interruption to the user).
+    public static function reset(): void { self::$aborted = false; }
+}
 class SystemPrompts {
     // A single balanced prompt: converse naturally, use tools only when the
     // task actually needs them. (Previously every prompt forced tool-only
@@ -2043,6 +2262,387 @@ result and explain it to the user in plain language.";
 
     public static function listFamilies(): array {
         return ['default'];
+    }
+}
+// @FILE MENTIONS: expand @path tokens in a user message by inlining the
+// referenced file's contents. Pure/offline; safe to call on every input.
+class Mentions {
+    // Max bytes of any single file to inline before truncating.
+    const MAX_BYTES = 20000;
+
+    // Returns $text unchanged when it contains no @mentions; otherwise returns
+    // the original text followed by a block per mentioned file.
+    public static function expand(string $text): string {
+        $paths = self::extract($text);
+        if (empty($paths)) return $text;
+
+        $blocks = '';
+        $seen = [];
+        foreach ($paths as $path) {
+            if (isset($seen[$path])) continue; // de-dupe repeated mentions
+            $seen[$path] = true;
+            $blocks .= self::renderFile($path);
+        }
+        if ($blocks === '') return $text;
+        return rtrim($text) . "\n" . $blocks;
+    }
+
+    // Find @tokens that look like file paths. Accepts letters, digits and the
+    // usual path punctuation; stops at whitespace. Skips bare "@" and emails
+    // (a token immediately preceded by a word char, e.g. user@host).
+    public static function extract(string $text): array {
+        $out = [];
+        if (!preg_match_all('/(?<![\w@])@([^\s@]+)/u', $text, $m)) return $out;
+        foreach ($m[1] as $tok) {
+            // Strip trailing punctuation that usually isn't part of a path.
+            $tok = rtrim($tok, '.,;:!?)\'"');
+            if ($tok === '') continue;
+            $out[] = $tok;
+        }
+        return $out;
+    }
+
+    private static function renderFile(string $path): string {
+        if (is_dir($path)) {
+            return "\n[@$path is a directory — not inlined]\n";
+        }
+        if (!is_file($path) || !is_readable($path)) {
+            return "\n[@$path not found]\n";
+        }
+        $data = @file_get_contents($path);
+        if ($data === false) {
+            return "\n[@$path could not be read]\n";
+        }
+        $note = '';
+        if (strlen($data) > self::MAX_BYTES) {
+            $cut = strlen($data) - self::MAX_BYTES;
+            $data = substr($data, 0, self::MAX_BYTES);
+            $note = "\n…[truncated $cut bytes]";
+        }
+        return "\n--- contents of $path ---\n" . $data . $note . "\n--- end of $path ---\n";
+    }
+}
+// Real token / context usage meter. Ollama's /api/chat responses carry
+// prompt_eval_count (tokens in the prompt the model just processed) and
+// eval_count (tokens it generated). We capture the latest values at the
+// client layer and expose them here, plus cumulative per-session totals that
+// are persisted under Config::costsDir() so they survive turns and resumes.
+class Usage {
+    // Latest single-turn counts (from the most recent /api/chat response).
+    private static int $lastPrompt = 0;
+    private static int $lastEval = 0;
+    private static bool $haveReal = false;
+
+    // Cumulative totals for the active session.
+    private static int $totalPrompt = 0;
+    private static int $totalEval = 0;
+    private static ?string $sessionId = null;
+
+    // Called by OllamaClient after every chat response. $j is the decoded
+    // final JSON object (the 'done' line for streams, or the whole body for
+    // non-streaming). No-ops gracefully when the counts are absent.
+    public static function record($j): void {
+        if (!is_array($j)) return;
+        $p = isset($j['prompt_eval_count']) ? (int)$j['prompt_eval_count'] : 0;
+        $e = isset($j['eval_count']) ? (int)$j['eval_count'] : 0;
+        if ($p <= 0 && $e <= 0) return;
+        self::$lastPrompt = $p;
+        self::$lastEval = $e;
+        self::$haveReal = true;
+        self::$totalPrompt += $p;
+        self::$totalEval += $e;
+        self::persist();
+    }
+
+    public static function haveReal(): bool { return self::$haveReal; }
+    public static function lastPrompt(): int { return self::$lastPrompt; }
+    public static function lastEval(): int { return self::$lastEval; }
+    public static function totalPrompt(): int { return self::$totalPrompt; }
+    public static function totalEval(): int { return self::$totalEval; }
+
+    public static function contextWindow(): int {
+        return (int)Config::get('ollama.contextWindow', 16384);
+    }
+
+    // A 10-cell ASCII fill bar for the given fraction (0..1).
+    public static function bar(float $frac, int $cells = 10): string {
+        if ($frac < 0) $frac = 0; if ($frac > 1) $frac = 1;
+        $filled = (int)round($frac * $cells);
+        return '[' . str_repeat('#', $filled) . str_repeat('-', $cells - $filled) . ']';
+    }
+
+    // "4210/16384 tokens (26%) [###-------]" using real prompt tokens when
+    // available; otherwise the caller's estimate, flagged with a leading ~.
+    public static function contextMeter(int $estimate): string {
+        $ctx = self::contextWindow();
+        $used = self::$haveReal ? self::$lastPrompt : $estimate;
+        $approx = self::$haveReal ? '' : '~';
+        $frac = $ctx > 0 ? $used / $ctx : 0.0;
+        $pct = (int)round($frac * 100);
+        return sprintf('%s%d/%d tokens (%d%%) %s', $approx, $used, $ctx, $pct, self::bar($frac));
+    }
+
+    // Bind the active session so persisted totals load and subsequent records
+    // accumulate against the right file.
+    public static function bindSession(string $id): void {
+        if (self::$sessionId === $id) return;
+        self::$sessionId = $id;
+        self::$totalPrompt = 0; self::$totalEval = 0;
+        $path = self::path($id);
+        if ($path !== null && is_file($path)) {
+            $d = json_decode((string)file_get_contents($path), true);
+            if (is_array($d)) {
+                self::$totalPrompt = (int)($d['total_prompt'] ?? 0);
+                self::$totalEval = (int)($d['total_eval'] ?? 0);
+            }
+        }
+    }
+
+    private static function path(?string $id): ?string {
+        if ($id === null || $id === '') return null;
+        return Config::costsDir() . '/' . $id . '.json';
+    }
+
+    private static function persist(): void {
+        $path = self::path(self::$sessionId);
+        if ($path === null) return;
+        $dir = dirname($path);
+        if (!is_dir($dir)) @mkdir($dir, 0755, true);
+        @file_put_contents($path, json_encode([
+            'id' => self::$sessionId,
+            'total_prompt' => self::$totalPrompt,
+            'total_eval' => self::$totalEval,
+            'updated_at' => date('c'),
+        ], JSON_PRETTY_PRINT));
+    }
+}
+// Streaming model pull via Ollama POST /api/pull. Vanilla curl + NDJSON.
+class Puller {
+    public static function pull(string $model, ?string $host = null): bool {
+        $model = trim($model);
+        if ($model === '') { echo "\033[33m  pull: no model given\033[0m\n"; return false; }
+        $host = $host ?: Config::get('ollama.host', 'http://localhost:11434');
+        $isTty = function_exists('posix_isatty') ? @posix_isatty(STDOUT) : false;
+        $ch = curl_init($host . '/api/pull');
+        $buf = ''; $ok = false; $errMsg = ''; $lastPct = -1; $lastDrawn = '';
+        $render = function(string $line) use ($isTty, &$lastDrawn) {
+            if ($isTty) { echo "\r\033[K\033[2m  " . $line . "\033[0m"; }
+            else { if ($line === $lastDrawn) return; echo "  " . $line . "\n"; }
+            $lastDrawn = $line;
+        };
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode(['model' => $model, 'stream' => true]),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_TIMEOUT => 0,
+            CURLOPT_WRITEFUNCTION => function($ch, $data) use (&$buf, &$ok, &$errMsg, &$lastPct, $render, $model) {
+                $buf .= $data;
+                while (($nl = strpos($buf, "\n")) !== false) {
+                    $line = trim(substr($buf, 0, $nl));
+                    $buf = substr($buf, $nl + 1);
+                    if ($line === '') continue;
+                    $j = json_decode($line, true);
+                    if (!is_array($j)) continue;
+                    if (!empty($j['error'])) { $errMsg = (string)$j['error']; continue; }
+                    $status = (string)($j['status'] ?? '');
+                    if (stripos($status, 'success') !== false) { $ok = true; continue; }
+                    $total = (int)($j['total'] ?? 0);
+                    $completed = (int)($j['completed'] ?? 0);
+                    if ($total > 0) {
+                        $pct = (int)floor($completed * 100 / $total);
+                        if ($pct !== $lastPct) { $lastPct = $pct; $render(sprintf('pulling %s  %3d%%  (%s / %s)', $model, $pct, Puller::bytes($completed), Puller::bytes($total))); }
+                    } else {
+                        $render('pulling ' . $model . '  ' . ($status !== '' ? $status : '...'));
+                    }
+                }
+                return strlen($data);
+            },
+        ]);
+        curl_exec($ch);
+        $curlErr = curl_error($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($isTty) echo "\r\033[K";
+        if ($ok) { echo "\033[32m  + pulled " . $model . "\033[0m\n"; return true; }
+        if ($errMsg === '' && $curlErr !== '') $errMsg = $curlErr;
+        if ($errMsg === '' && $code !== 200 && $code !== 0) $errMsg = 'HTTP ' . $code;
+        if ($errMsg === '') $errMsg = 'pull failed';
+        echo "\033[33m  pull failed: " . $errMsg . "\033[0m\n";
+        return false;
+    }
+    public static function bytes(int $b): string {
+        if ($b >= 1073741824) return round($b / 1073741824, 1) . ' GB';
+        if ($b >= 1048576) return round($b / 1048576, 1) . ' MB';
+        if ($b >= 1024) return round($b / 1024, 1) . ' KB';
+        return $b . ' B';
+    }
+}
+// Project-memory generator behind the `/init` command and the `init` top-level
+// command. Scans the current project into a compact, deterministic digest
+// (offline, no model) and then asks the active model to turn that digest into
+// an OLLAMADEV.md file, which Agent::buildSystemPrompt() auto-loads as project
+// context on subsequent runs.
+class ProjectInit {
+    // The memory file we generate. buildSystemPrompt() looks for this name first.
+    const MEMORY_FILE = 'OLLAMADEV.md';
+
+    // Directories never worth scanning (vendored / generated / VCS noise).
+    private static array $skipDirs = [
+        '.git', 'node_modules', 'vendor', '.svn', '.hg', 'dist', 'build',
+        '.idea', '.vscode', '__pycache__', '.cache', 'target', '.next',
+        'venv', '.venv', 'coverage',
+    ];
+
+    // Extension -> language label, used to summarise the codebase composition.
+    private static array $langByExt = [
+        'php' => 'PHP', 'js' => 'JavaScript', 'ts' => 'TypeScript', 'jsx' => 'JavaScript',
+        'tsx' => 'TypeScript', 'py' => 'Python', 'go' => 'Go', 'rs' => 'Rust',
+        'rb' => 'Ruby', 'java' => 'Java', 'kt' => 'Kotlin', 'c' => 'C', 'h' => 'C',
+        'cpp' => 'C++', 'cc' => 'C++', 'cs' => 'C#', 'swift' => 'Swift',
+        'sh' => 'Shell', 'html' => 'HTML', 'css' => 'CSS', 'scss' => 'CSS',
+        'sql' => 'SQL', 'md' => 'Markdown',
+    ];
+
+    // Filenames that strongly signal the project's stack / tooling.
+    private static array $keyFiles = [
+        'composer.json', 'package.json', 'Cargo.toml', 'go.mod', 'pom.xml',
+        'build.gradle', 'requirements.txt', 'pyproject.toml', 'Pipfile',
+        'Gemfile', 'Makefile', 'Dockerfile', 'docker-compose.yml',
+        '.editorconfig', 'tsconfig.json', 'build.sh', 'CMakeLists.txt',
+    ];
+
+    // Build a compact, human-readable digest of the project rooted at $dir.
+    // Pure and offline so it can be unit-tested without a model or network.
+    public static function scan(string $dir): string {
+        $dir = rtrim($dir, '/');
+        if ($dir === '') $dir = '.';
+        $out = [];
+        $out[] = 'PROJECT: ' . basename(realpath($dir) ?: $dir);
+
+        // Language composition by file count (top entries only).
+        $langCounts = [];
+        $tree = [];
+        $fileTotal = 0;
+        self::walk($dir, $dir, 0, $langCounts, $tree, $fileTotal);
+        arsort($langCounts);
+        if (!empty($langCounts)) {
+            $parts = [];
+            foreach (array_slice($langCounts, 0, 8, true) as $lang => $n) $parts[] = "$lang ($n)";
+            $out[] = 'LANGUAGES: ' . implode(', ', $parts);
+        }
+        $out[] = 'FILE COUNT (scanned): ' . $fileTotal;
+
+        // Key/config files present at the root or nearby.
+        $found = [];
+        foreach (self::$keyFiles as $kf) {
+            if (is_file($dir . '/' . $kf)) $found[] = $kf;
+        }
+        if (!empty($found)) $out[] = 'KEY FILES: ' . implode(', ', $found);
+
+        // Git remote, if any (read-only, best-effort).
+        $gitConfig = $dir . '/.git/config';
+        if (is_file($gitConfig)) {
+            $cfg = (string)@file_get_contents($gitConfig);
+            if (preg_match('/url\s*=\s*(\S+)/', $cfg, $m)) $out[] = 'GIT REMOTE: ' . $m[1];
+            else $out[] = 'GIT: repository (no remote)';
+        }
+
+        // Top-level structure (directories + a sample of files).
+        if (!empty($tree)) {
+            sort($tree);
+            $out[] = "STRUCTURE:\n" . implode("\n", array_slice($tree, 0, 60));
+        }
+
+        // README excerpt gives the model the project's own description.
+        foreach (['README.md', 'README', 'README.txt', 'readme.md'] as $rd) {
+            if (is_file($dir . '/' . $rd)) {
+                $txt = trim((string)@file_get_contents($dir . '/' . $rd));
+                if ($txt !== '') {
+                    if (strlen($txt) > 4000) $txt = substr($txt, 0, 4000) . "\n…[truncated]";
+                    $out[] = "README ($rd):\n" . $txt;
+                }
+                break;
+            }
+        }
+
+        return implode("\n\n", $out);
+    }
+
+    // Recursive directory walk: tallies languages, collects a shallow structure
+    // listing, and counts files. Depth-limited and skip-listed so huge trees and
+    // vendored dirs don't blow up the digest.
+    private static function walk(string $root, string $dir, int $depth, array &$langCounts, array &$tree, int &$fileTotal): void {
+        if ($depth > 3) return;
+        $entries = @scandir($dir);
+        if ($entries === false) return;
+        foreach ($entries as $e) {
+            if ($e === '.' || $e === '..') continue;
+            $path = $dir . '/' . $e;
+            $rel = ltrim(substr($path, strlen($root)), '/');
+            if (is_dir($path)) {
+                if (in_array($e, self::$skipDirs, true) || $e[0] === '.') continue;
+                if ($depth <= 1) $tree[] = $rel . '/';
+                self::walk($root, $path, $depth + 1, $langCounts, $tree, $fileTotal);
+            } elseif (is_file($path)) {
+                $fileTotal++;
+                $ext = strtolower(pathinfo($e, PATHINFO_EXTENSION));
+                if (isset(self::$langByExt[$ext])) {
+                    $lang = self::$langByExt[$ext];
+                    $langCounts[$lang] = ($langCounts[$lang] ?? 0) + 1;
+                }
+                if ($depth === 0) $tree[] = $rel;
+            }
+        }
+    }
+
+    // Ask the model to turn the digest into a concise OLLAMADEV.md. Returns the
+    // generated markdown, or '' on failure so the caller can report an error.
+    public static function generate(Agent $agent, string $digest): string {
+        $sys = ['role' => 'system', 'content' =>
+            "You write a project-memory file (OLLAMADEV.md) for an AI coding assistant. " .
+            "Given a scan of a codebase, produce concise Markdown that captures: what the " .
+            "project is, its primary language(s) and stack, how it is built/run/tested, the " .
+            "important directories and entry points, and any conventions a contributor must " .
+            "follow. Be specific and terse. Use headings and bullet points. Do NOT invent " .
+            "facts not supported by the scan, and do NOT call tools or ask questions — output " .
+            "only the Markdown document."];
+        $user = ['role' => 'user', 'content' => "Project scan:\n\n" . $digest .
+            "\n\nWrite OLLAMADEV.md now."];
+        try {
+            return trim($agent->run([$sys, $user]));
+        } catch (\Throwable $e) {
+            return '';
+        }
+    }
+
+    // Orchestrate the whole flow for a given working directory.
+    // $interactive controls whether we prompt before overwriting an existing
+    // file. Returns a status string to print. $emit (optional) streams progress.
+    public static function run(Agent $agent, string $dir, bool $interactive): string {
+        $target = rtrim($dir, '/') . '/' . self::MEMORY_FILE;
+        if ($target[0] !== '/' && !preg_match('#^[A-Za-z]:#', $target)) {
+            // Relative dir: resolve against cwd for the message only.
+        }
+        if (is_file($target)) {
+            if (!$interactive) {
+                return "\033[33m" . self::MEMORY_FILE . " already exists.\033[0m Run interactively or remove it first to regenerate.\n";
+            }
+            echo self::MEMORY_FILE . " already exists. Overwrite? [y/N] ";
+            $ans = strtolower(trim((string)fgets(STDIN)));
+            if ($ans !== 'y' && $ans !== 'yes') return "Cancelled — kept existing " . self::MEMORY_FILE . ".\n";
+        }
+
+        echo "\033[2m  scanning project…\033[0m\n";
+        $digest = self::scan($dir);
+        echo "\033[2m  generating " . self::MEMORY_FILE . " with the model…\033[0m\n";
+        $md = self::generate($agent, $digest);
+        if ($md === '') {
+            return "\033[31mCould not generate " . self::MEMORY_FILE . " (is Ollama running?).\033[0m\n";
+        }
+        $ok = @file_put_contents($target, $md);
+        if ($ok === false) return "\033[31mFailed to write " . self::MEMORY_FILE . ".\033[0m\n";
+        return "\033[32m  ✓ wrote " . self::MEMORY_FILE . " (" . $ok . " bytes)\033[0m\n" .
+            "  \033[2mIt will be loaded as project context on the next turn.\033[0m\n";
     }
 }
 class Agent {
@@ -2170,6 +2770,7 @@ User: run the tests
             $w = ['role' => $m['role'] ?? 'user', 'content' => (string)($m['content'] ?? '')];
             if (!empty($m['tool_calls'])) $w['tool_calls'] = $m['tool_calls'];
             if (!empty($m['tool_name'])) $w['tool_name'] = $m['tool_name'];
+            if (!empty($m['images']) && is_array($m['images'])) $w['images'] = $m['images'];
             $out[] = $w;
         }
         return $out;
@@ -2197,6 +2798,9 @@ User: run the tests
             $this->client->chatWithModel($this->model, $allMessages, function($c) use (&$resp) { $resp .= $c; });
             return ['content' => $resp, 'calls' => []];
         }
+
+        // Bail out before issuing another request if the user pressed Ctrl-C.
+        if (class_exists('Interrupt') && Interrupt::aborted()) return ['content' => '', 'calls' => []];
 
         // Try native tools unless we've already learned this model lacks support.
         if (($GLOBALS['nativeTools'][$this->model] ?? null) !== false) {
@@ -2445,6 +3049,299 @@ if (empty($calls)) {
     }
 }
 
+// Custom user-defined slash commands + optional config-driven shell hooks.
+//
+// Custom commands live as prompt-template files in a `commands/` directory under
+// either the project data dir (./.ollamadev/commands) or the user's home
+// (~/.ollamadev/commands). Each file is named <command>.md (or .txt/.prompt) and
+// its contents are a prompt template. Typing /<command> [args] in a session
+// expands the template ($ARGS = whole arg string, $1 $2 ... = positional words)
+// and feeds the result to the model as if the user had typed it.
+//
+// Hooks are best-effort shell commands read from config (hooks.beforePrompt,
+// hooks.afterEdit). They are entirely opt-in: with nothing configured these are
+// no-ops, and any failure is swallowed so a bad hook never breaks the session.
+class UserCmds {
+    // Directories searched for command files, project dir first so a repo can
+    // override a personal command of the same name.
+    private static function dirs(): array {
+        $dirs = [];
+        $proj = getcwd() . '/.ollamadev/commands';
+        $dirs[] = $proj;
+        $home = getenv('HOME') ?: '';
+        if ($home !== '') $dirs[] = $home . '/.ollamadev/commands';
+        return $dirs;
+    }
+
+    private static array $exts = ['md', 'txt', 'prompt'];
+
+    // Locate the template file for a command name, or null if none exists.
+    private static function findFile(string $name): ?string {
+        if ($name === '' || !preg_match('/^[A-Za-z0-9_.-]+$/', $name)) return null;
+        foreach (self::dirs() as $dir) {
+            if (!is_dir($dir)) continue;
+            foreach (self::$exts as $ext) {
+                $path = $dir . '/' . $name . '.' . $ext;
+                if (is_file($path)) return $path;
+            }
+        }
+        return null;
+    }
+
+    // Does a custom command with this name exist?
+    public static function exists(string $name): bool {
+        return self::findFile($name) !== null;
+    }
+
+    // Expand the template for $name with $args, returning the final prompt text,
+    // or null if no such command. $ARGS -> full arg string; $1.. -> positional.
+    public static function expand(string $name, string $args): ?string {
+        $path = self::findFile($name);
+        if ($path === null) return null;
+        $tpl = file_get_contents($path);
+        if ($tpl === false) return null;
+        $words = preg_split('/\s+/', trim($args), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        // Replace $ARGS first (longest token), then numbered positionals.
+        $out = str_replace('$ARGS', trim($args), $tpl);
+        // Replace from highest index down so $12 isn't eaten by $1.
+        $out = preg_replace_callback('/\$(\d+)/', function ($m) use ($words) {
+            $i = (int)$m[1];
+            return $i >= 1 && $i <= count($words) ? $words[$i - 1] : '';
+        }, $out);
+        return rtrim($out, "\n");
+    }
+
+    // Discovered custom command names (deduped, project shadowing home).
+    public static function listAll(): array {
+        $seen = [];
+        foreach (self::dirs() as $dir) {
+            if (!is_dir($dir)) continue;
+            foreach (scandir($dir) ?: [] as $f) {
+                $ext = strtolower(pathinfo($f, PATHINFO_EXTENSION));
+                if (!in_array($ext, self::$exts, true)) continue;
+                $base = pathinfo($f, PATHINFO_FILENAME);
+                if ($base !== '' && !isset($seen[$base])) $seen[$base] = true;
+            }
+        }
+        $names = array_keys($seen);
+        sort($names);
+        return $names;
+    }
+
+    // Human-readable listing for the /commands built-in.
+    public static function render(): string {
+        $names = self::listAll();
+        $d = "\033[2m"; $c = "\033[36m"; $r = "\033[0m";
+        if (empty($names)) {
+            return "\n  {$d}No custom commands found.{$r}\n"
+                . "  {$d}Create one at ~/.ollamadev/commands/NAME.md (a prompt template;{$r}\n"
+                . "  {$d}use \$ARGS or \$1 \$2 for arguments), then run /NAME.{$r}\n";
+        }
+        $out = "\n  Custom commands (" . count($names) . "):\n";
+        foreach ($names as $n) $out .= "  {$c}/{$n}{$r}\n";
+        $out .= "  {$d}Edit them under ~/.ollamadev/commands or ./.ollamadev/commands{$r}\n";
+        return $out;
+    }
+}
+
+// Optional shell hooks fired at well-defined points. All opt-in via config.
+class Hooks {
+    // Run the shell command configured at hooks.<event>, if any. Extra args are
+    // appended (shell-escaped) and also exposed via $OLLAMADEV_EDITED_FILES for
+    // afterEdit. Failures are swallowed; output is shown only in verbose mode.
+    public static function run(string $event, array $args = []): void {
+        $cmd = Config::get('hooks.' . $event, null);
+        if (!is_string($cmd) || trim($cmd) === '') return;
+        $full = trim($cmd);
+        foreach ($args as $a) $full .= ' ' . escapeshellarg((string)$a);
+        $env = '';
+        if ($event === 'afterEdit' && !empty($args)) {
+            $env = 'OLLAMADEV_EDITED_FILES=' . escapeshellarg(implode(' ', $args)) . ' ';
+        }
+        $output = @shell_exec($env . $full . ' 2>&1');
+        if (!empty($GLOBALS['verbose']) && is_string($output) && trim($output) !== '') {
+            echo "\033[2m  [hook:$event] " . trim($output) . "\033[0m\n";
+        }
+    }
+}
+// Vision input helper: parse image attachments out of a user prompt and
+// base64-encode them for Ollama's multimodal /api/chat message shape
+// (the 'images' array on a user message). Degrades gracefully: on a
+// non-vision model Ollama just ignores the images, and the prompt text
+// (with the @path left as a readable filename) still goes through.
+class Vision {
+    // Extensions we treat as attachable images.
+    private static array $exts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'];
+
+    // Does this path look like a readable image file? Checks extension and,
+    // when possible, the leading magic bytes so a mislabelled file is skipped.
+    public static function isImage(string $path): bool {
+        if ($path === '' || !is_file($path) || !is_readable($path)) return false;
+        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        if (!in_array($ext, self::$exts, true)) return false;
+        $fh = @fopen($path, 'rb');
+        if ($fh === false) return false;
+        $head = (string)fread($fh, 12);
+        fclose($fh);
+        if ($head === '') return false;
+        // Magic-byte sniff for the common formats; fall back to trusting the ext.
+        if (str_starts_with($head, "\x89PNG")) return true;            // PNG
+        if (str_starts_with($head, "\xFF\xD8\xFF")) return true;        // JPEG
+        if (str_starts_with($head, 'GIF8')) return true;                  // GIF
+        if (str_starts_with($head, 'BM')) return true;                    // BMP
+        if (substr($head, 0, 4) === 'RIFF' && substr($head, 8, 4) === 'WEBP') return true; // WEBP
+        return true; // recognised extension, unrecognised header: still attach
+    }
+
+    // Base64-encode an image file, or '' on failure.
+    public static function encode(string $path): string {
+        $data = @file_get_contents($path);
+        if ($data === false || $data === '') return '';
+        return base64_encode($data);
+    }
+
+    // Parse a raw user prompt for image attachments. Recognises:
+    //   - a leading '/image <path>' command (the rest of the line is the prompt)
+    //   - one or more '@<path>' tokens anywhere in the text
+    // Returns ['text' => cleaned prompt, 'images' => [base64, ...], 'paths' => [...]].
+    // The '@<path>' token is replaced in the visible text by the bare filename
+    // so the prompt still reads naturally if the model can't see the image.
+    public static function extract(string $input): array {
+        $images = [];
+        $paths = [];
+        $text = $input;
+
+        // '/image <path> [rest]' form.
+        if (preg_match('/^\/image\s+(\S+)\s*(.*)$/s', trim($input), $m)) {
+            $p = self::unquote($m[1]);
+            if (self::isImage($p)) {
+                $b64 = self::encode($p);
+                if ($b64 !== '') { $images[] = $b64; $paths[] = $p; }
+            }
+            $text = trim($m[2]);
+            if ($text === '') $text = 'Describe this image.';
+            return ['text' => $text, 'images' => $images, 'paths' => $paths];
+        }
+
+        // '@<path>' tokens. Capture a non-space run after @.
+        $text = preg_replace_callback('/(?<![\w@])@(\S+)/', function($mm) use (&$images, &$paths) {
+            $p = self::unquote($mm[1]);
+            if (self::isImage($p)) {
+                $b64 = self::encode($p);
+                if ($b64 !== '') { $images[] = $b64; $paths[] = $p; }
+                return basename($p);
+            }
+            return $mm[0]; // not an image: leave the token untouched
+        }, $input);
+
+        return ['text' => trim($text), 'images' => $images, 'paths' => $paths];
+    }
+
+    private static function unquote(string $s): string {
+        $s = trim($s);
+        if (strlen($s) >= 2) {
+            $f = $s[0]; $l = $s[strlen($s) - 1];
+            if (($f === '"' && $l === '"') || ($f === "'" && $l === "'")) $s = substr($s, 1, -1);
+        }
+        return $s;
+    }
+}// Helper for the /retry (/regenerate) command. Pure, side-effect-free message
+// surgery so it can be unit-tested offline. Given the full message array, it
+// rewinds to just before the last assistant turn: it finds the last 'user'
+// message and discards everything after it (the previous assistant reply and
+// any tool result messages it produced). The returned array ends with that
+// last user message, ready to feed back into the agentic loop for a fresh run.
+class Regenerate {
+    // Returns null when there is no user message to regenerate from. Otherwise
+    // returns the message array truncated to end at (and including) the last
+    // user message.
+    public static function rewind(array $messages): ?array {
+        $lastUser = -1;
+        foreach ($messages as $i => $m) {
+            if (($m['role'] ?? '') === 'user') $lastUser = $i;
+        }
+        if ($lastUser < 0) return null;
+        return array_slice($messages, 0, $lastUser + 1);
+    }
+}
+// SUBAGENT / TASK DELEGATION
+// Runs a focused sub-task in a fresh nested Agent with its own short message
+// list, the parent session's model, full tool access, and bounded iterations.
+// Reuses Agent::chatTurn()/executeCalls() (the real agentic loop) and guards
+// against runaway recursion with a depth counter.
+class SubAgent {
+    public static int $depth = 0;        // current nesting level
+    public static int $maxDepth = 2;     // hard recursion cap
+
+    // Run one delegated task. Returns a concise result string for the caller.
+    public static function run(array $p): string {
+        $prompt = trim((string)($p['prompt'] ?? $p['task'] ?? ''));
+        if ($prompt === '') return "missing prompt (need 'prompt' or 'task' parameter)";
+
+        if (self::$depth >= self::$maxDepth) {
+            return "Sub-agent depth limit reached (max " . self::$maxDepth . "); refusing to nest further. Complete this task directly.";
+        }
+
+        $context = trim((string)($p['context'] ?? ''));
+        $maxIterations = (int)($p['max_iterations'] ?? $p['iterations'] ?? 6);
+        if ($maxIterations < 1) $maxIterations = 1;
+        if ($maxIterations > 12) $maxIterations = 12;
+
+        $model = $GLOBALS['currentSessionModel'] ?? Config::get('ollama.defaultModel', 'llama3.2:latest');
+
+        $sub = new Agent();
+        if (!empty($model)) {
+            $resolved = $sub->resolveModel($model);
+            $sub->setModel($resolved ?: $model);
+        }
+
+        $userContent = "Task: $prompt";
+        if ($context !== '') $userContent .= "\n\nContext:\n$context";
+        $userContent .= "\n\nWork through this using tools as needed, then give a concise final answer in plain text.";
+        $messages = [['role' => 'user', 'content' => $userContent]];
+
+        $lastText = '';
+        $toolTail = [];
+
+        self::$depth++;
+        try {
+            for ($i = 0; $i < $maxIterations; $i++) {
+                $turn = $sub->chatTurn($messages);
+                $content = (string)($turn['content'] ?? '');
+                $calls = $turn['calls'] ?? [];
+
+                $assistant = ['role' => 'assistant', 'content' => $content];
+                $messages[] = $assistant;
+
+                if (empty($calls)) {
+                    $clean = $sub->stripToolMarkup($content);
+                    if ($clean !== '') $lastText = $clean;
+                    break; // no more actions: the sub-agent is done
+                }
+
+                $results = $sub->executeCalls($calls);
+                foreach ($results as $r) {
+                    $messages[] = $r;
+                    $toolTail[] = '[' . ($r['name'] ?? 'tool') . '] ' . substr((string)($r['content'] ?? ''), 0, 200);
+                }
+            }
+        } catch (\Throwable $e) {
+            return 'Sub-agent error: ' . $e->getMessage();
+        } finally {
+            self::$depth--;
+        }
+
+        if ($lastText !== '') return $lastText;
+        if (!empty($toolTail)) {
+            return "Sub-agent did not produce a final summary. Tool activity:\n" . implode("\n", array_slice($toolTail, -8));
+        }
+        return 'Sub-agent produced no output.';
+    }
+}
+
+Tools::register('task', function($p) { return SubAgent::run(is_array($p) ? $p : ['prompt' => (string)$p]); });
+Tools::register('subagent', function($p) { return SubAgent::run(is_array($p) ? $p : ['prompt' => (string)$p]); });
+Tools::register('delegate', function($p) { return SubAgent::run(is_array($p) ? $p : ['prompt' => (string)$p]); });
 class TUI {
     const CLEAR = "\033[2J";
     const HOME = "\033[H";
@@ -2639,6 +3536,127 @@ class TUI {
     }
 }
 
+// Render: a tiny, dependency-free Markdown -> ANSI renderer for model output.
+// ANSI escapes only; vanilla PHP. Designed to be SAFE on arbitrary text: any
+// line that is not recognized markdown is emitted verbatim, so plain prose and
+// code that happens to contain markdown-ish characters is never corrupted.
+class Render {
+    private const R   = "\033[0m";   // reset
+    private const B   = "\033[1m";   // bold
+    private const DIM = "\033[2m";   // dim
+    private const ITAL= "\033[3m";   // italic
+    private const CY  = "\033[36m";  // cyan (headings/markers)
+    private const REV = "\033[7m";   // reverse (inline code)
+    private const GRN = "\033[32m";  // green (code keywords)
+
+    // Whether styled output should be produced. Off when piped/non-TTY, when
+    // NO_COLOR is set, or when disabled via config (ui.markdown=false).
+    public static function enabled(): bool {
+        if (!Config::get('ui.markdown', true)) return false;
+        if (getenv('NO_COLOR') !== false) return false;
+        if (function_exists('posix_isatty')) return @posix_isatty(STDOUT);
+        return function_exists('stream_isatty') ? @stream_isatty(STDOUT) : false;
+    }
+
+    // Render markdown text to an ANSI-styled string. No trailing newline added.
+    // Returns the input unchanged on any internal error.
+    public static function md(string $text): string {
+        try { return self::renderBlocks($text); }
+        catch (\Throwable $e) { return $text; }
+    }
+
+    private static function renderBlocks(string $text): string {
+        $text = str_replace(["\r\n", "\r"], "\n", $text);
+        $lines = explode("\n", $text);
+        $out = [];
+        $n = count($lines);
+        for ($i = 0; $i < $n; $i++) {
+            $line = $lines[$i];
+
+            // Fenced code block: ``` or ~~~ optionally followed by a language.
+            if (preg_match('/^\s*(```|~~~)(.*)$/', $line, $m)) {
+                $fence = $m[1];
+                $code = [];
+                $closed = false;
+                for ($j = $i + 1; $j < $n; $j++) {
+                    if (preg_match('/^\s*' . preg_quote($fence, '/') . '\s*$/', $lines[$j])) {
+                        $closed = true; $i = $j; break;
+                    }
+                    $code[] = $lines[$j];
+                }
+                if (!$closed) { $i = $n; } // unterminated: consume rest as code
+                $out[] = self::renderCode($code);
+                continue;
+            }
+
+            // ATX heading: # .. ######
+            if (preg_match('/^\s*(#{1,6})\s+(.*)$/', $line, $m)) {
+                $out[] = self::CY . self::B . self::inline(rtrim($m[2])) . self::R;
+                continue;
+            }
+
+            // Horizontal rule.
+            if (preg_match('/^\s*([-*_])(\s*\1){2,}\s*$/', $line)) {
+                $out[] = self::DIM . str_repeat('-', 40) . self::R;
+                continue;
+            }
+
+            // Bullet list: -, *, + then space.
+            if (preg_match('/^(\s*)[-*+]\s+(.*)$/', $line, $m)) {
+                $out[] = $m[1] . self::CY . "\xe2\x80\xa2 " . self::R . self::inline($m[2]);
+                continue;
+            }
+
+            // Numbered list: 1. or 2)
+            if (preg_match('/^(\s*)(\d+)[.)]\s+(.*)$/', $line, $m)) {
+                $out[] = $m[1] . self::CY . $m[2] . '. ' . self::R . self::inline($m[3]);
+                continue;
+            }
+
+            // Blockquote.
+            if (preg_match('/^\s*>\s?(.*)$/', $line, $m)) {
+                $out[] = self::DIM . "\xe2\x94\x82 " . self::R . self::inline($m[1]);
+                continue;
+            }
+
+            // Plain line: inline styling only.
+            $out[] = self::inline($line);
+        }
+        return implode("\n", $out);
+    }
+
+    // Fenced code block: dim left bar + very light keyword tint.
+    private static function renderCode(array $code): string {
+        $bar = self::DIM . "\xe2\x94\x82 " . self::R;
+        $kw = '/\b(function|class|return|if|else|elseif|for|foreach|while|public|private|protected|static|const|var|let|def|import|from|new|use|namespace|echo|print|true|false|null|void|int|string|bool|float|array)\b/';
+        $lines = [];
+        foreach ($code as $c) {
+            $hi = preg_replace_callback($kw, fn($m) => self::GRN . $m[1] . self::DIM, $c);
+            $lines[] = $bar . self::DIM . $hi . self::R;
+        }
+        return implode("\n", $lines);
+    }
+
+    // Inline spans: `code`, **bold**, __bold__, *italic*, _italic_.
+    // Inline code is extracted first and protected so emphasis markers inside
+    // it are not reinterpreted. Unmatched markers are left untouched.
+    private static function inline(string $s): string {
+        $codes = [];
+        $s = preg_replace_callback('/`([^`]+)`/', function($m) use (&$codes) {
+            $token = "\x00C" . count($codes) . "\x00";
+            $codes[$token] = self::REV . ' ' . $m[1] . ' ' . self::R;
+            return $token;
+        }, $s);
+
+        $s = preg_replace('/\*\*([^*\n]+?)\*\*/', self::B . '$1' . self::R, $s);
+        $s = preg_replace('/__([^_\n]+?)__/', self::B . '$1' . self::R, $s);
+        $s = preg_replace('/(?<![\*\w])\*([^*\n]+?)\*(?![\*\w])/', self::ITAL . '$1' . self::R, $s);
+        $s = preg_replace('/(?<![_\w])_([^_\n]+?)_(?![_\w])/', self::ITAL . '$1' . self::R, $s);
+
+        if (!empty($codes)) $s = strtr($s, $codes);
+        return $s;
+    }
+}
 
 // A small raw-mode line editor that renders a Claude-Code-style bordered input
 // box you type *inside*, with the session status (model · mode · cwd) embedded
@@ -3123,6 +4141,7 @@ class Session {
             'help' => $this->renderBanner(),
             'models' => $this->listModels($args),
             'model' => $this->switchModel($args),
+            'pull' => $this->pullModel($args),
             'new' => $this->newSession(),
             'exit', 'quit' => $this->exitCli(),
             'clear' => $this->clearScreen(),
@@ -3131,15 +4150,20 @@ class Session {
             'save' => $this->saveSession(),
             'session' => $this->showSession(),
             'git' => $this->runGit($args),
-            'status' => "[Model: {$this->model} | Tokens: ~" . $this->countTokens() . " | Messages: " . count($this->messages) . "]\n",
+            'status' => $this->renderStatusLine(),
             'tools' => $this->listTools(),
-            'context' => "📁 " . getcwd() . "\nMessages: " . count($this->messages) . " | Model: {$this->model}\n",
+            'context' => "📁 " . getcwd() . "\nContext: " . Usage::contextMeter($this->countTokens()) . "\nMessages: " . count($this->messages) . " | Model: {$this->model}\n",
             'pwd' => getcwd() . "\n",
             'cd' => $this->changeDir($args),
             'ls' => crossPlatformLs($args ?: '.') . "\n",
             'permission', 'permissions' => $this->managePermission($args),
             'chat', 'agent' => $this->toggleChatMode($cmd, $args),
-            default => false
+            'undo' => Checkpoints::undoLast(),
+            'checkpoints' => $this->listCheckpoints(),
+            'init' => ProjectInit::run($this->agent, getcwd(), Permission::isInteractive()),
+            'retry', 'regenerate' => $this->retryLast(),
+            'commands' => UserCmds::render(),
+            default => UserCmds::exists($cmd) ? ('PROMPT:' . UserCmds::expand($cmd, $args)) : false
         };
     }
 
@@ -3174,6 +4198,18 @@ class Session {
             default:
                 return "Usage: /permission [mode <auto|ask|readonly> | allow <tool> | deny <tool> | status]\n";
         }
+    }
+
+    private function listCheckpoints(): string {
+        $list = Checkpoints::list();
+        if (empty($list)) return "No checkpoints.\n";
+        $out = "\nCheckpoints (newest first):\n";
+        foreach ($list as $i => $c) {
+            $tag = $c['existed'] ? 'edit' : 'new';
+            $out .= sprintf("  %2d  [%s]  %s  %s\n", $i + 1, $tag, $c['created_at'], $c['path']);
+        }
+        $out .= "  Use /undo to revert the most recent change.\n";
+        return $out;
     }
 
     private function listTools(): string {
@@ -3255,14 +4291,32 @@ ART;
             : "\033[36mAgent mode\033[0m — tools enabled.\n";
     }
 
+    private function pullModel(string $name): string {
+        $name = trim($name);
+        if ($name === '') return "Usage: /pull <model>\n";
+        if (Puller::pull($name)) { echo $this->switchModel($name); }
+        return '';
+    }
+
     private function switchModel(string $name): string {
         if (empty($name)) return "Usage: /model <name>\n";
         $resolved = $this->agent->resolveModel($name);
         if ($resolved === null) {
             $installed = $this->agent->listModels();
+            if (!empty($installed) && Permission::isInteractive() && LineEditor::supported()) {
+                echo "\033[33m  Model '$name' is not installed.\033[0m Pull it now? [y/N] ";
+                $ans = strtolower(trim((string)fgets(STDIN)));
+                if ($ans === 'y' || $ans === 'yes') {
+                    if (Puller::pull($name)) { $resolved = $this->agent->resolveModel($name) ?? $name; }
+                    else { return ''; }
+                }
+            }
+        }
+        if ($resolved === null) {
+            $installed = $this->agent->listModels();
             return "\033[33mModel '$name' is not installed.\033[0m\n"
                 . "  Installed: " . (empty($installed) ? '(none — is Ollama running?)' : implode(', ', $installed)) . "\n"
-                . "  Pull it with: ollama pull $name\n";
+                . "  Pull it with: /pull $name\n";
         }
         $this->agent->setModel($resolved);
         $this->model = $resolved;
@@ -3272,6 +4326,30 @@ ART;
         // Clear the screen and redraw the banner so the header always reflects
         // the current model (the original banner is frozen in scrollback).
         return "\033[2J\033[H" . $this->renderBanner() . "\033[32m  ✓ switched to $resolved\033[0m\n";
+    }
+
+    private function retryLast(): string {
+        $rewound = Regenerate::rewind($this->messages);
+        if ($rewound === null) {
+            return "\033[2m  Nothing to regenerate — no previous message.\033[0m\n";
+        }
+        $this->messages = $rewound;
+        $this->save();
+        echo "\033[2m  regenerating…\033[0m";
+        $cleared = false;
+        $this->agenticLoop(function($chunk) use (&$cleared) {
+            if (!$cleared) { echo "\r\033[K"; $cleared = true; }
+            echo $chunk;
+        });
+        if (!$cleared) echo "\r\033[K";
+        echo "\n";
+        $edited = $GLOBALS['editedFiles'] ?? [];
+        if (!empty($edited)) {
+            echo "\033[2m  \xe2\x9c\x8e " . implode(', ', array_unique($edited)) . "\033[0m\n";
+            $GLOBALS['editedFiles'] = [];
+        }
+        $this->save();
+        return '';
     }
 
     private function newSession(): string {
@@ -3333,6 +4411,14 @@ return "Available: " . implode(', ', array_keys($gitAliases)) . "\n";
     }
 
     private function countTokens(): int { $total = 0; foreach ($this->messages as $msg) $total += strlen($msg['content'] ?? '') / 4; return (int)$total; }
+    private function renderStatusLine(): string {
+        $meter = Usage::contextMeter($this->countTokens());
+        $turn = Usage::haveReal()
+            ? " | last turn: " . Usage::lastPrompt() . " in + " . Usage::lastEval() . " out"
+              . " | session total: " . Usage::totalPrompt() . " in + " . Usage::totalEval() . " out"
+            : "";
+        return "[Model: {$this->model} | Context: " . $meter . $turn . " | Messages: " . count($this->messages) . "]\n";
+    }
     private function renderStatus(): void { echo "\n[Model: {$this->model} | Tokens: ~" . $this->countTokens() . " | Messages: " . count($this->messages) . "]\n"; }
     // Best-effort terminal width for drawing the prompt box.
     private function termWidth(): int {
@@ -3364,17 +4450,17 @@ return "Available: " . implode(', ', array_keys($gitAliases)) . "\n";
 
         $cands = [];
         if ($firstWord) {
-            $base = ['/help', '/model', '/models', '/chat', '/agent', '/new', '/clear', '/compact',
+            $base = ['/help', '/model', '/models', '/pull', '/chat', '/agent', '/retry', '/regenerate', '/new', '/clear', '/compact',
                 '/save', '/session', '/git', '/status', '/tools', '/context', '/pwd', '/cd', '/ls',
-                '/permission', '/verbose', '/exit', '/quit',
-                'help', 'exit', 'quit', 'clear', 'model', 'models', 'tools', 'git', 'status', 'compact', 'context', 'new', 'cd', 'ls'];
+                '/permission', '/verbose', '/undo', '/checkpoints', '/exit', '/quit',
+                'help', 'exit', 'quit', 'clear', 'model', 'models', 'tools', 'git', 'status', 'compact', 'context', 'new', 'cd', 'ls', '/init', 'init'];
             foreach ($base as $c) if ($token === '' || str_starts_with($c, $token)) $cands[] = $c;
         } else {
             $cmd = ltrim($parts[0], '/');
             if ($cmd === 'git') {
                 foreach (['status', 'diff', 'log', 'branch', 'commit', 'push', 'pull', 'stash', 'checkout', 'add', 'fetch', 'merge', 'rebase'] as $g)
                     if (str_starts_with($g, $token)) $cands[] = $g;
-            } elseif ($cmd === 'model' || $cmd === 'models') {
+            } elseif ($cmd === 'model' || $cmd === 'models' || $cmd === 'pull') {
                 foreach ($this->agent->listModels() as $mn) if ($token === '' || str_starts_with($mn, $token)) $cands[] = $mn;
             } elseif ($cmd === 'cd' || in_array($cmd, ['view', 'cat', 'edit', 'write', 'grep', 'find', 'ls', 'diff', 'rm', 'cp', 'mv'])) {
                 $cands = $this->completePath($token);
@@ -3489,6 +4575,7 @@ $GLOBALS['currentSessionModel'] = null;
         }
 
         while (true) {
+            Hooks::run('beforePrompt');
             $raw = $this->readInput();
             if ($raw === null) { echo "\n"; break; } // EOF / Ctrl-D
             $input = trim($raw);
@@ -3500,31 +4587,58 @@ $GLOBALS['currentSessionModel'] = null;
                 $result = $this->handleSlashCommand($input);
                 if ($result === false) {
                     echo "Unknown command: {$input}\nType /help for available commands.\n";
+                    continue;
+                }
+                // Custom commands expand to a prompt that runs through the model.
+                if (is_string($result) && str_starts_with($result, 'PROMPT:')) {
+                    $input = substr($result, 7);
+                    if (trim($input) === '') continue;
                 } else {
                     echo $result;
+                    continue;
                 }
-                continue;
             }
 
             if ($this->handleCommand($input)) break;
 
-            $this->addMessage('user', $input);
+            // Image attachments (@image / /image) are captured first; the
+            // remaining text then has any non-image @path mentions inlined.
+            $vin = Vision::extract($input);
+            if (!empty($vin['images'])) {
+                $this->addMessage('user', Mentions::expand($vin['text']), ['images' => $vin['images']]);
+                echo "\033[2m  \xF0\x9F\x96\xBC attached " . count($vin['images']) . " image(s)\033[0m\n";
+            } else {
+                $this->addMessage('user', Mentions::expand($input));
+            }
 
             // Minimal "thinking" indicator that is erased as soon as output
             // arrives, so a plain reply just appears under the prompt.
             echo "\n\033[2m  thinking…\033[0m";
             $cleared = false;
-            $this->agenticLoop(function($chunk) use (&$cleared) {
+            $renderMd = Render::enabled();
+            $finalBuf = '';
+            $final = $this->agenticLoop(function($chunk) use (&$cleared, &$finalBuf, $renderMd) {
                 if (!$cleared) { echo "\r\033[K"; $cleared = true; }
+                if ($renderMd) { $finalBuf .= $chunk; }
                 echo $chunk;
             });
             if (!$cleared) echo "\r\033[K";
+            $fTrim = trim($final);
+            if ($renderMd && $fTrim !== '' && str_ends_with(rtrim($finalBuf), $fTrim)) {
+                $styled = Render::md($fTrim);
+                if ($styled !== $fTrim) {
+                    $back = substr_count($fTrim, "\n") + 1;
+                    echo "\033[" . $back . "A\r\033[J" . $styled;
+                }
+            }
+            if (class_exists('Interrupt') && Interrupt::aborted()) { Interrupt::reset(); echo "\033[2m  interrupted\033[0m"; }
             echo "\n";
 
             // Quietly note any files that were changed this turn.
             $edited = $GLOBALS['editedFiles'] ?? [];
             if (!empty($edited)) {
                 echo "\033[2m  ✎ " . implode(', ', array_unique($edited)) . "\033[0m\n";
+                Hooks::run('afterEdit', array_values(array_unique($edited)));
                 $GLOBALS['editedFiles'] = [];
             }
 
@@ -3577,11 +4691,20 @@ $GLOBALS['currentSessionModel'] = null;
 
         $cmdResult = $this->handleSlashCommand($prompt);
         if ($cmdResult !== false) {
-            echo $cmdResult;
-            return '';
+            if (is_string($cmdResult) && str_starts_with($cmdResult, 'PROMPT:')) {
+                $prompt = substr($cmdResult, 7);
+            } else {
+                echo $cmdResult;
+                return '';
+            }
         }
 
-        $this->addMessage('user', $prompt);
+        $vin = Vision::extract($prompt);
+        if (!empty($vin['images'])) {
+            $this->addMessage('user', Mentions::expand($vin['text']), ['images' => $vin['images']]);
+        } else {
+            $this->addMessage('user', Mentions::expand($prompt));
+        }
         echo "Thinking...\n";
         $final = $this->agenticLoop(null);
         echo "\n" . $final . "\n";
@@ -3596,7 +4719,10 @@ $GLOBALS['currentSessionModel'] = null;
     private function agenticLoop(?callable $emit): string {
         $maxIter = (int)Config::get('agents.maxIterations', 8);
         $final = '';
+        if (class_exists('Interrupt')) Interrupt::begin();
+        try {
         for ($i = 0; $i < $maxIter; $i++) {
+            if (class_exists('Interrupt') && Interrupt::aborted()) break;
             $turn = $this->agent->chatTurn($this->getMessages());
             $response = $turn['content'];
             $calls = $turn['calls'];
@@ -3648,7 +4774,10 @@ $GLOBALS['currentSessionModel'] = null;
             }
             $final = $clean;
         }
-        if ($emit) $emit("\n(reached max tool iterations)\n");
+        if (!(class_exists('Interrupt') && Interrupt::aborted()) && $emit) $emit("\n(reached max tool iterations)\n");
+        } finally {
+            if (class_exists('Interrupt')) Interrupt::end();
+        }
         return $final;
     }
 }
@@ -4196,6 +5325,14 @@ if ($argc >= 2 && $argv[1] === 'debug') {
     exit(0);
 }
 
+// Hidden render subcommand: `ollamadev render` reads markdown on stdin and
+// writes the ANSI-rendered output. Deterministic and offline; used by tests.
+if ($argc >= 2 && $argv[1] === 'render') {
+    $in = stream_get_contents(STDIN);
+    echo Render::md((string)$in) . "\n";
+    exit(0);
+}
+
 // Uninstall Command
 if ($argc >= 2 && $argv[1] === 'uninstall') {
     echo "⚠️  This will remove OllamaDev and all data.\n";
@@ -4252,6 +5389,15 @@ if ($argc >= 2 && $argv[1] === 'upgrade') {
     exit(0);
 }
 
+// Pull Command - stream a model pull from Ollama.
+if ($argc >= 2 && $argv[1] === 'pull') {
+    $config = Config::load();
+    $model = $argv[2] ?? '';
+    if ($model === '') { echo "Usage: ollamadev pull <model>\n"; exit(1); }
+    $ok = Puller::pull($model, $config['ollama']['host'] ?? 'http://localhost:11434');
+    exit($ok ? 0 : 1);
+}
+
 // Models Command
 if ($argc >= 2 && $argv[1] === 'models') {
     $config = Config::load();
@@ -4301,8 +5447,16 @@ if (!empty($flags['model'])) {
     // Warn (but don't fail) if the requested model isn't pulled locally.
     $installed = (new OllamaClient($config['ollama']['host'] ?? 'http://localhost:11434'))->listModels();
     if (!empty($installed) && !in_array($flags['model'], $installed, true)) {
-        fwrite(STDERR, "⚠️  Model '{$flags['model']}' is not installed. Pull it with: ollama pull {$flags['model']}\n");
-        fwrite(STDERR, "   Falling back to an available model.\n");
+        $offered = false;
+        if (function_exists('posix_isatty') && @posix_isatty(STDIN)) {
+            fwrite(STDERR, "⚠️  Model '{$flags['model']}' is not installed. Pull it now? [y/N] ");
+            $ans = strtolower(trim((string)fgets(STDIN)));
+            if ($ans === 'y' || $ans === 'yes') { Puller::pull($flags['model'], $config['ollama']['host'] ?? 'http://localhost:11434'); $offered = true; }
+        }
+        if (!$offered) {
+            fwrite(STDERR, "⚠️  Model '{$flags['model']}' is not installed. Pull it with: ollamadev pull {$flags['model']}\n");
+            fwrite(STDERR, "   Falling back to an available model.\n");
+        }
     }
 }
 
@@ -4617,6 +5771,10 @@ if ($cmd === 'chat') {
     elseif ($sub === 'stash') { echo shell_exec("cd " . escapeshellarg($path) . " && git stash 2>&1"); }
     elseif ($sub === 'stash' && $arg2 === 'pop') { echo shell_exec("cd " . escapeshellarg($path) . " && git stash pop 2>&1"); }
     else { echo "Git commands: status, diff, log, branch, commit <msg>, push, pull, stash\n"; }
+} elseif ($cmd === 'init') {
+    // Generate OLLAMADEV.md project memory from a scan + the active model.
+    $agent = new Agent();
+    echo ProjectInit::run($agent, $flags['cwd'] ?? getcwd(), posix_isatty(STDIN));
 } elseif ($cmd === 'load' && $arg1) {
     $session = new Session($config, $arg1);
     if (!file_exists(Config::sessionsDir() . '/' . $arg1 . '.json')) { echo "Session not found: $arg1\n"; exit(1); }

@@ -154,6 +154,7 @@ class Session {
             'help' => $this->renderBanner(),
             'models' => $this->listModels($args),
             'model' => $this->switchModel($args),
+            'pull' => $this->pullModel($args),
             'new' => $this->newSession(),
             'exit', 'quit' => $this->exitCli(),
             'clear' => $this->clearScreen(),
@@ -162,15 +163,20 @@ class Session {
             'save' => $this->saveSession(),
             'session' => $this->showSession(),
             'git' => $this->runGit($args),
-            'status' => "[Model: {$this->model} | Tokens: ~" . $this->countTokens() . " | Messages: " . count($this->messages) . "]\n",
+            'status' => $this->renderStatusLine(),
             'tools' => $this->listTools(),
-            'context' => "📁 " . getcwd() . "\nMessages: " . count($this->messages) . " | Model: {$this->model}\n",
+            'context' => "📁 " . getcwd() . "\nContext: " . Usage::contextMeter($this->countTokens()) . "\nMessages: " . count($this->messages) . " | Model: {$this->model}\n",
             'pwd' => getcwd() . "\n",
             'cd' => $this->changeDir($args),
             'ls' => crossPlatformLs($args ?: '.') . "\n",
             'permission', 'permissions' => $this->managePermission($args),
             'chat', 'agent' => $this->toggleChatMode($cmd, $args),
-            default => false
+            'undo' => Checkpoints::undoLast(),
+            'checkpoints' => $this->listCheckpoints(),
+            'init' => ProjectInit::run($this->agent, getcwd(), Permission::isInteractive()),
+            'retry', 'regenerate' => $this->retryLast(),
+            'commands' => UserCmds::render(),
+            default => UserCmds::exists($cmd) ? ('PROMPT:' . UserCmds::expand($cmd, $args)) : false
         };
     }
 
@@ -205,6 +211,18 @@ class Session {
             default:
                 return "Usage: /permission [mode <auto|ask|readonly> | allow <tool> | deny <tool> | status]\n";
         }
+    }
+
+    private function listCheckpoints(): string {
+        $list = Checkpoints::list();
+        if (empty($list)) return "No checkpoints.\n";
+        $out = "\nCheckpoints (newest first):\n";
+        foreach ($list as $i => $c) {
+            $tag = $c['existed'] ? 'edit' : 'new';
+            $out .= sprintf("  %2d  [%s]  %s  %s\n", $i + 1, $tag, $c['created_at'], $c['path']);
+        }
+        $out .= "  Use /undo to revert the most recent change.\n";
+        return $out;
     }
 
     private function listTools(): string {
@@ -286,14 +304,32 @@ ART;
             : "\033[36mAgent mode\033[0m — tools enabled.\n";
     }
 
+    private function pullModel(string $name): string {
+        $name = trim($name);
+        if ($name === '') return "Usage: /pull <model>\n";
+        if (Puller::pull($name)) { echo $this->switchModel($name); }
+        return '';
+    }
+
     private function switchModel(string $name): string {
         if (empty($name)) return "Usage: /model <name>\n";
         $resolved = $this->agent->resolveModel($name);
         if ($resolved === null) {
             $installed = $this->agent->listModels();
+            if (!empty($installed) && Permission::isInteractive() && LineEditor::supported()) {
+                echo "\033[33m  Model '$name' is not installed.\033[0m Pull it now? [y/N] ";
+                $ans = strtolower(trim((string)fgets(STDIN)));
+                if ($ans === 'y' || $ans === 'yes') {
+                    if (Puller::pull($name)) { $resolved = $this->agent->resolveModel($name) ?? $name; }
+                    else { return ''; }
+                }
+            }
+        }
+        if ($resolved === null) {
+            $installed = $this->agent->listModels();
             return "\033[33mModel '$name' is not installed.\033[0m\n"
                 . "  Installed: " . (empty($installed) ? '(none — is Ollama running?)' : implode(', ', $installed)) . "\n"
-                . "  Pull it with: ollama pull $name\n";
+                . "  Pull it with: /pull $name\n";
         }
         $this->agent->setModel($resolved);
         $this->model = $resolved;
@@ -303,6 +339,30 @@ ART;
         // Clear the screen and redraw the banner so the header always reflects
         // the current model (the original banner is frozen in scrollback).
         return "\033[2J\033[H" . $this->renderBanner() . "\033[32m  ✓ switched to $resolved\033[0m\n";
+    }
+
+    private function retryLast(): string {
+        $rewound = Regenerate::rewind($this->messages);
+        if ($rewound === null) {
+            return "\033[2m  Nothing to regenerate — no previous message.\033[0m\n";
+        }
+        $this->messages = $rewound;
+        $this->save();
+        echo "\033[2m  regenerating…\033[0m";
+        $cleared = false;
+        $this->agenticLoop(function($chunk) use (&$cleared) {
+            if (!$cleared) { echo "\r\033[K"; $cleared = true; }
+            echo $chunk;
+        });
+        if (!$cleared) echo "\r\033[K";
+        echo "\n";
+        $edited = $GLOBALS['editedFiles'] ?? [];
+        if (!empty($edited)) {
+            echo "\033[2m  \xe2\x9c\x8e " . implode(', ', array_unique($edited)) . "\033[0m\n";
+            $GLOBALS['editedFiles'] = [];
+        }
+        $this->save();
+        return '';
     }
 
     private function newSession(): string {
@@ -364,6 +424,14 @@ return "Available: " . implode(', ', array_keys($gitAliases)) . "\n";
     }
 
     private function countTokens(): int { $total = 0; foreach ($this->messages as $msg) $total += strlen($msg['content'] ?? '') / 4; return (int)$total; }
+    private function renderStatusLine(): string {
+        $meter = Usage::contextMeter($this->countTokens());
+        $turn = Usage::haveReal()
+            ? " | last turn: " . Usage::lastPrompt() . " in + " . Usage::lastEval() . " out"
+              . " | session total: " . Usage::totalPrompt() . " in + " . Usage::totalEval() . " out"
+            : "";
+        return "[Model: {$this->model} | Context: " . $meter . $turn . " | Messages: " . count($this->messages) . "]\n";
+    }
     private function renderStatus(): void { echo "\n[Model: {$this->model} | Tokens: ~" . $this->countTokens() . " | Messages: " . count($this->messages) . "]\n"; }
     // Best-effort terminal width for drawing the prompt box.
     private function termWidth(): int {
@@ -395,17 +463,17 @@ return "Available: " . implode(', ', array_keys($gitAliases)) . "\n";
 
         $cands = [];
         if ($firstWord) {
-            $base = ['/help', '/model', '/models', '/chat', '/agent', '/new', '/clear', '/compact',
+            $base = ['/help', '/model', '/models', '/pull', '/chat', '/agent', '/retry', '/regenerate', '/new', '/clear', '/compact',
                 '/save', '/session', '/git', '/status', '/tools', '/context', '/pwd', '/cd', '/ls',
-                '/permission', '/verbose', '/exit', '/quit',
-                'help', 'exit', 'quit', 'clear', 'model', 'models', 'tools', 'git', 'status', 'compact', 'context', 'new', 'cd', 'ls'];
+                '/permission', '/verbose', '/undo', '/checkpoints', '/exit', '/quit',
+                'help', 'exit', 'quit', 'clear', 'model', 'models', 'tools', 'git', 'status', 'compact', 'context', 'new', 'cd', 'ls', '/init', 'init'];
             foreach ($base as $c) if ($token === '' || str_starts_with($c, $token)) $cands[] = $c;
         } else {
             $cmd = ltrim($parts[0], '/');
             if ($cmd === 'git') {
                 foreach (['status', 'diff', 'log', 'branch', 'commit', 'push', 'pull', 'stash', 'checkout', 'add', 'fetch', 'merge', 'rebase'] as $g)
                     if (str_starts_with($g, $token)) $cands[] = $g;
-            } elseif ($cmd === 'model' || $cmd === 'models') {
+            } elseif ($cmd === 'model' || $cmd === 'models' || $cmd === 'pull') {
                 foreach ($this->agent->listModels() as $mn) if ($token === '' || str_starts_with($mn, $token)) $cands[] = $mn;
             } elseif ($cmd === 'cd' || in_array($cmd, ['view', 'cat', 'edit', 'write', 'grep', 'find', 'ls', 'diff', 'rm', 'cp', 'mv'])) {
                 $cands = $this->completePath($token);
@@ -520,6 +588,7 @@ $GLOBALS['currentSessionModel'] = null;
         }
 
         while (true) {
+            Hooks::run('beforePrompt');
             $raw = $this->readInput();
             if ($raw === null) { echo "\n"; break; } // EOF / Ctrl-D
             $input = trim($raw);
@@ -531,31 +600,58 @@ $GLOBALS['currentSessionModel'] = null;
                 $result = $this->handleSlashCommand($input);
                 if ($result === false) {
                     echo "Unknown command: {$input}\nType /help for available commands.\n";
+                    continue;
+                }
+                // Custom commands expand to a prompt that runs through the model.
+                if (is_string($result) && str_starts_with($result, 'PROMPT:')) {
+                    $input = substr($result, 7);
+                    if (trim($input) === '') continue;
                 } else {
                     echo $result;
+                    continue;
                 }
-                continue;
             }
 
             if ($this->handleCommand($input)) break;
 
-            $this->addMessage('user', $input);
+            // Image attachments (@image / /image) are captured first; the
+            // remaining text then has any non-image @path mentions inlined.
+            $vin = Vision::extract($input);
+            if (!empty($vin['images'])) {
+                $this->addMessage('user', Mentions::expand($vin['text']), ['images' => $vin['images']]);
+                echo "\033[2m  \xF0\x9F\x96\xBC attached " . count($vin['images']) . " image(s)\033[0m\n";
+            } else {
+                $this->addMessage('user', Mentions::expand($input));
+            }
 
             // Minimal "thinking" indicator that is erased as soon as output
             // arrives, so a plain reply just appears under the prompt.
             echo "\n\033[2m  thinking…\033[0m";
             $cleared = false;
-            $this->agenticLoop(function($chunk) use (&$cleared) {
+            $renderMd = Render::enabled();
+            $finalBuf = '';
+            $final = $this->agenticLoop(function($chunk) use (&$cleared, &$finalBuf, $renderMd) {
                 if (!$cleared) { echo "\r\033[K"; $cleared = true; }
+                if ($renderMd) { $finalBuf .= $chunk; }
                 echo $chunk;
             });
             if (!$cleared) echo "\r\033[K";
+            $fTrim = trim($final);
+            if ($renderMd && $fTrim !== '' && str_ends_with(rtrim($finalBuf), $fTrim)) {
+                $styled = Render::md($fTrim);
+                if ($styled !== $fTrim) {
+                    $back = substr_count($fTrim, "\n") + 1;
+                    echo "\033[" . $back . "A\r\033[J" . $styled;
+                }
+            }
+            if (class_exists('Interrupt') && Interrupt::aborted()) { Interrupt::reset(); echo "\033[2m  interrupted\033[0m"; }
             echo "\n";
 
             // Quietly note any files that were changed this turn.
             $edited = $GLOBALS['editedFiles'] ?? [];
             if (!empty($edited)) {
                 echo "\033[2m  ✎ " . implode(', ', array_unique($edited)) . "\033[0m\n";
+                Hooks::run('afterEdit', array_values(array_unique($edited)));
                 $GLOBALS['editedFiles'] = [];
             }
 
@@ -608,11 +704,20 @@ $GLOBALS['currentSessionModel'] = null;
 
         $cmdResult = $this->handleSlashCommand($prompt);
         if ($cmdResult !== false) {
-            echo $cmdResult;
-            return '';
+            if (is_string($cmdResult) && str_starts_with($cmdResult, 'PROMPT:')) {
+                $prompt = substr($cmdResult, 7);
+            } else {
+                echo $cmdResult;
+                return '';
+            }
         }
 
-        $this->addMessage('user', $prompt);
+        $vin = Vision::extract($prompt);
+        if (!empty($vin['images'])) {
+            $this->addMessage('user', Mentions::expand($vin['text']), ['images' => $vin['images']]);
+        } else {
+            $this->addMessage('user', Mentions::expand($prompt));
+        }
         echo "Thinking...\n";
         $final = $this->agenticLoop(null);
         echo "\n" . $final . "\n";
@@ -627,7 +732,10 @@ $GLOBALS['currentSessionModel'] = null;
     private function agenticLoop(?callable $emit): string {
         $maxIter = (int)Config::get('agents.maxIterations', 8);
         $final = '';
+        if (class_exists('Interrupt')) Interrupt::begin();
+        try {
         for ($i = 0; $i < $maxIter; $i++) {
+            if (class_exists('Interrupt') && Interrupt::aborted()) break;
             $turn = $this->agent->chatTurn($this->getMessages());
             $response = $turn['content'];
             $calls = $turn['calls'];
@@ -679,7 +787,10 @@ $GLOBALS['currentSessionModel'] = null;
             }
             $final = $clean;
         }
-        if ($emit) $emit("\n(reached max tool iterations)\n");
+        if (!(class_exists('Interrupt') && Interrupt::aborted()) && $emit) $emit("\n(reached max tool iterations)\n");
+        } finally {
+            if (class_exists('Interrupt')) Interrupt::end();
+        }
         return $final;
     }
 }

@@ -111,6 +111,8 @@ class OllamaClient {
             // Parse Ollama's NDJSON stream line-by-line, emitting content deltas.
             $content = ''; $buf = '';
             $opts[CURLOPT_WRITEFUNCTION] = function($ch, $data) use (&$content, &$buf, $handler) {
+                // Ctrl-C during streaming: return 0 to make curl abort the transfer.
+                if (class_exists('Interrupt') && Interrupt::aborted()) return 0;
                 $buf .= $data;
                 while (($nl = strpos($buf, "\n")) !== false) {
                     $line = trim(substr($buf, 0, $nl));
@@ -121,6 +123,7 @@ class OllamaClient {
                     $delta = $j['message']['content'] ?? '';
                     if ($delta === '' && !empty($j['message']['thinking'])) $delta = $j['message']['thinking'];
                     if ($delta !== '') { $content .= $delta; if ($handler) $handler($delta); }
+                    if (!empty($j['done'])) Usage::record($j);
                 }
                 return strlen($data);
             };
@@ -135,6 +138,7 @@ class OllamaClient {
         curl_close($ch);
         if ($resp) {
             $j = json_decode($resp, true);
+            Usage::record($j);
             if ($j && isset($j['message'])) {
                 $content = $j['message']['content'] ?? '';
                 $thinking = $j['message']['thinking'] ?? '';
@@ -163,6 +167,7 @@ class OllamaClient {
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
         $j = json_decode((string)$resp, true);
+        Usage::record($j);
         if ($code !== 200) {
             $err = is_array($j) ? ($j['error'] ?? '') : (string)$resp;
             return ['ok' => false, 'unsupported' => stripos($err, 'tool') !== false || stripos($err, 'does not support') !== false, 'error' => $err];

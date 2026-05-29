@@ -541,6 +541,14 @@ if ($argc >= 2 && $argv[1] === 'debug') {
     exit(0);
 }
 
+// Hidden render subcommand: `ollamadev render` reads markdown on stdin and
+// writes the ANSI-rendered output. Deterministic and offline; used by tests.
+if ($argc >= 2 && $argv[1] === 'render') {
+    $in = stream_get_contents(STDIN);
+    echo Render::md((string)$in) . "\n";
+    exit(0);
+}
+
 // Uninstall Command
 if ($argc >= 2 && $argv[1] === 'uninstall') {
     echo "⚠️  This will remove OllamaDev and all data.\n";
@@ -597,6 +605,15 @@ if ($argc >= 2 && $argv[1] === 'upgrade') {
     exit(0);
 }
 
+// Pull Command - stream a model pull from Ollama.
+if ($argc >= 2 && $argv[1] === 'pull') {
+    $config = Config::load();
+    $model = $argv[2] ?? '';
+    if ($model === '') { echo "Usage: ollamadev pull <model>\n"; exit(1); }
+    $ok = Puller::pull($model, $config['ollama']['host'] ?? 'http://localhost:11434');
+    exit($ok ? 0 : 1);
+}
+
 // Models Command
 if ($argc >= 2 && $argv[1] === 'models') {
     $config = Config::load();
@@ -646,8 +663,16 @@ if (!empty($flags['model'])) {
     // Warn (but don't fail) if the requested model isn't pulled locally.
     $installed = (new OllamaClient($config['ollama']['host'] ?? 'http://localhost:11434'))->listModels();
     if (!empty($installed) && !in_array($flags['model'], $installed, true)) {
-        fwrite(STDERR, "⚠️  Model '{$flags['model']}' is not installed. Pull it with: ollama pull {$flags['model']}\n");
-        fwrite(STDERR, "   Falling back to an available model.\n");
+        $offered = false;
+        if (function_exists('posix_isatty') && @posix_isatty(STDIN)) {
+            fwrite(STDERR, "⚠️  Model '{$flags['model']}' is not installed. Pull it now? [y/N] ");
+            $ans = strtolower(trim((string)fgets(STDIN)));
+            if ($ans === 'y' || $ans === 'yes') { Puller::pull($flags['model'], $config['ollama']['host'] ?? 'http://localhost:11434'); $offered = true; }
+        }
+        if (!$offered) {
+            fwrite(STDERR, "⚠️  Model '{$flags['model']}' is not installed. Pull it with: ollamadev pull {$flags['model']}\n");
+            fwrite(STDERR, "   Falling back to an available model.\n");
+        }
     }
 }
 
@@ -962,6 +987,10 @@ if ($cmd === 'chat') {
     elseif ($sub === 'stash') { echo shell_exec("cd " . escapeshellarg($path) . " && git stash 2>&1"); }
     elseif ($sub === 'stash' && $arg2 === 'pop') { echo shell_exec("cd " . escapeshellarg($path) . " && git stash pop 2>&1"); }
     else { echo "Git commands: status, diff, log, branch, commit <msg>, push, pull, stash\n"; }
+} elseif ($cmd === 'init') {
+    // Generate OLLAMADEV.md project memory from a scan + the active model.
+    $agent = new Agent();
+    echo ProjectInit::run($agent, $flags['cwd'] ?? getcwd(), posix_isatty(STDIN));
 } elseif ($cmd === 'load' && $arg1) {
     $session = new Session($config, $arg1);
     if (!file_exists(Config::sessionsDir() . '/' . $arg1 . '.json')) { echo "Session not found: $arg1\n"; exit(1); }

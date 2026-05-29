@@ -123,6 +123,7 @@ User: run the tests
             $w = ['role' => $m['role'] ?? 'user', 'content' => (string)($m['content'] ?? '')];
             if (!empty($m['tool_calls'])) $w['tool_calls'] = $m['tool_calls'];
             if (!empty($m['tool_name'])) $w['tool_name'] = $m['tool_name'];
+            if (!empty($m['images']) && is_array($m['images'])) $w['images'] = $m['images'];
             $out[] = $w;
         }
         return $out;
@@ -150,6 +151,9 @@ User: run the tests
             $this->client->chatWithModel($this->model, $allMessages, function($c) use (&$resp) { $resp .= $c; });
             return ['content' => $resp, 'calls' => []];
         }
+
+        // Bail out before issuing another request if the user pressed Ctrl-C.
+        if (class_exists('Interrupt') && Interrupt::aborted()) return ['content' => '', 'calls' => []];
 
         // Try native tools unless we've already learned this model lacks support.
         if (($GLOBALS['nativeTools'][$this->model] ?? null) !== false) {

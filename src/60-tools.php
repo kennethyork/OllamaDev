@@ -62,6 +62,11 @@ class Tools {
             $fn('fetch', 'Fetch the raw contents of a URL.', [
                 'url' => $str('The URL to fetch'),
             ], ['url']),
+            $fn('task', 'Delegate a focused sub-task to a fresh nested agent (its own short context, same model, full tools, bounded iterations). Returns a concise result string. Use for self-contained work you want handled in isolation.', [
+                'prompt' => $str('The sub-task to perform, described fully and self-contained'),
+                'context' => $str('Optional extra context the sub-agent needs'),
+                'max_iterations' => $int('Max tool/think iterations (default 6, capped at 12)'),
+            ], ['prompt']),
         ];
     }
 }

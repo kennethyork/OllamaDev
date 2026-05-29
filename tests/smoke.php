@@ -227,6 +227,97 @@ shell_exec('rm -rf ' . escapeshellarg($tmpHome));
 [$out] = run_bin([], "/model definitely-not-real-model-xyz\n/exit\n");
 ok('/model rejects an uninstalled model', stripos($out, 'not installed') !== false);
 
+echo "\n== Workflow features (12) ==\n";
+
+// Pure-helper unit checks: extract each standalone class from the binary source
+// and exercise it in-process. (Classes with only filesystem/self deps.)
+$extract = function(string $cls) use ($src) {
+    return preg_match('/class ' . $cls . ' \{.*?\n\}/s', $src, $m) ? $m[0] : null;
+};
+
+// 1. diff preview — unified() emits +/- lines.
+if ($c = $extract('DiffView')) { eval($c);
+    $d = DiffView::unified("a\nb\nc\n", "a\nX\nc\n");
+    ok('DiffView shows +/- changes', strpos($d, '-') !== false && strpos($d, '+') !== false);
+} else ok('DiffView extractable', false);
+
+// 3. interrupt — trip/aborted/reset state machine.
+if ($c = $extract('Interrupt')) { eval($c);
+    Interrupt::reset();
+    ok('Interrupt starts not-aborted', Interrupt::aborted() === false);
+    Interrupt::trip();
+    ok('Interrupt trips', Interrupt::aborted() === true);
+    Interrupt::reset();
+    ok('Interrupt resets', Interrupt::aborted() === false);
+} else ok('Interrupt extractable', false);
+
+// 4. @file mentions — inline a real file's contents.
+if ($c = $extract('Mentions')) { eval($c);
+    $tmpf = sys_get_temp_dir() . '/mention_' . getmypid() . '.txt';
+    file_put_contents($tmpf, 'HELLO_MENTION_BODY');
+    $exp = Mentions::expand("see @$tmpf please");
+    ok('Mentions inlines file contents', strpos($exp, 'HELLO_MENTION_BODY') !== false);
+    @unlink($tmpf);
+} else ok('Mentions extractable', false);
+
+// 6. vision — extract() flags an image path and strips it from text.
+if ($c = $extract('Vision')) { eval($c);
+    $img = sys_get_temp_dir() . '/v_' . getmypid() . '.png';
+    file_put_contents($img, "\x89PNG\r\n\x1a\n");
+    $v = Vision::extract("look at @$img");
+    ok('Vision captures image attachments', !empty($v['images']) && is_array($v['images']));
+    @unlink($img);
+} else ok('Vision extractable', false);
+
+// 10. regenerate — rewind() drops the last assistant turn.
+if ($c = $extract('Regenerate')) { eval($c);
+    $msgs = [
+        ['role' => 'user', 'content' => 'hi'],
+        ['role' => 'assistant', 'content' => 'hello'],
+    ];
+    $rw = Regenerate::rewind($msgs);
+    ok('Regenerate rewinds to last user msg', is_array($rw) && end($rw)['role'] === 'user');
+    ok('Regenerate returns null when nothing to redo', Regenerate::rewind([]) === null);
+} else ok('Regenerate extractable', false);
+
+// 5. markdown render — via the real binary (deterministic, offline).
+[$out] = run_bin(['render'], "# Heading\n\n- item\n");
+ok('render styles markdown (ANSI)', strpos($out, "\033[") !== false && stripos($out, 'Heading') !== false);
+
+// 7. token meter — Usage records real counts and renders a context meter.
+if (!class_exists('Config')) { require_once __DIR__ . '/../src/10-config.php'; }
+if ($c = $extract('Usage')) { eval($c);
+    Usage::record(['prompt_eval_count' => 100, 'eval_count' => 25, 'done' => true]);
+    ok('Usage captures real token counts', Usage::haveReal() && Usage::lastPrompt() === 100 && Usage::lastEval() === 25);
+    ok('Usage renders a context meter', is_string(Usage::contextMeter(500)) && Usage::contextMeter(500) !== '');
+} else ok('Usage extractable', false);
+
+// 2. checkpoint/undo — save snapshot then undoLast restores (real Config, temp cwd).
+$ckRoot = sys_get_temp_dir() . '/ollamadev_ck_' . getmypid();
+@mkdir($ckRoot, 0755, true);
+$prevCwd = getcwd(); chdir($ckRoot);
+if ($c = $extract('Checkpoints')) { eval($c);
+    $tf = $ckRoot . '/target.txt';
+    file_put_contents($tf, 'V1');
+    Checkpoints::save($tf);
+    file_put_contents($tf, 'V2');
+    $msg = Checkpoints::undoLast();
+    ok('Checkpoints undo restores prior content', file_get_contents($tf) === 'V1', $msg);
+} else ok('Checkpoints extractable', false);
+chdir($prevCwd);
+shell_exec('rm -rf ' . escapeshellarg($ckRoot));
+
+// 11. subagent delegation — wiring present in the built source.
+ok('task tool registered', strpos($src, "Tools::register('task'") !== false);
+ok('task schema exposed to model', strpos($src, "\$fn('task'") !== false);
+ok('subagent has a recursion depth guard', stripos($src, 'depth') !== false && strpos($src, 'SubAgent') !== false);
+
+// 8/9/12. command wiring present in the built source.
+ok('init command wired', strpos($src, 'ProjectInit::run') !== false);
+ok('custom-command fallthrough wired', strpos($src, 'UserCmds::exists') !== false);
+ok('pull command wired', strpos($src, 'Puller::pull') !== false);
+ok('hooks fire in the loop', strpos($src, "Hooks::run('beforePrompt')") !== false);
+
 echo "\n========================\n";
 echo "Results: $pass passed, $fail failed\n";
 if ($fail > 0) { echo "FAILED: " . implode(', ', $fails) . "\n"; exit(1); }
