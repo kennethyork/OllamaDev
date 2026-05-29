@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '3.9.2');
+define('OLLAMADEV_VERSION', '4.0.0');
 $GLOBALS['editedFiles'] = [];
 
 function isWindows(): bool { return stripos(PHP_OS, 'WIN') === 0; }
@@ -371,6 +371,9 @@ class Permission {
         if (self::$mode === 'auto') return true;
         if (self::isReadonly($tool)) return true;     // read-only is always fine
         if (self::$mode === 'readonly') return false;  // block all mutating tools
+        // file edits show their own diff-based confirmation (DiffView::confirm),
+        // so don't also fire the generic prompt here — that would double-ask.
+        if ($tool === 'write' || $tool === 'edit') return true;
         // mode 'ask': prompt when interactive, otherwise allow (one-shot = user-driven).
         if (!self::$interactive) return true;
         return self::prompt($tool, $params);
@@ -4026,6 +4029,8 @@ class Session {
         // Keep the agent and session pointed at the same model.
         $this->agent->setModel($this->model);
         $GLOBALS['currentSessionModel'] = $this->model;
+        // Load this session's cumulative token totals so /status survives resumes.
+        Usage::bindSession($this->id);
         // Small models do tool-calling poorly; default them to pure chat.
         $this->agent->setChatMode($this->agent->isSmallModel());
     }
@@ -4683,8 +4688,13 @@ $GLOBALS['currentSessionModel'] = null;
             if ($renderMd && $fTrim !== '' && str_ends_with(rtrim($finalBuf), $fTrim)) {
                 $styled = Render::md($fTrim);
                 if ($styled !== $fTrim) {
-                    $back = substr_count($fTrim, "\n") + 1;
-                    echo "\033[" . $back . "A\r\033[J" . $styled;
+                    // Move to the first line of the just-streamed answer, then clear
+                    // and reprint it styled. $back = number of line breaks (not +1;
+                    // the cursor is already on the last line, and \033[0A would move
+                    // up 1, so only emit the up-sequence when there's a line to climb).
+                    $back = substr_count($fTrim, "\n");
+                    if ($back > 0) echo "\033[" . $back . "A";
+                    echo "\r\033[J" . $styled;
                 }
             }
             if (class_exists('Interrupt') && Interrupt::aborted()) { Interrupt::reset(); echo "\033[2m  interrupted\033[0m"; }
@@ -5441,10 +5451,8 @@ if ($argc >= 2 && $argv[1] === 'acp') {
 
 // Upgrade Command
 if ($argc >= 2 && $argv[1] === 'upgrade') {
-    echo "Checking for updates...\n";
-    $version = OLLAMADEV_VERSION;
-    echo "Current: v$version\n";
-    echo "Latest check not implemented - rebuild with: bash build.sh\n";
+    echo "Current: v" . OLLAMADEV_VERSION . "\n";
+    echo "Run 'ollamadev update' to check for and install the latest release.\n";
     exit(0);
 }
 

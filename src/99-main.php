@@ -601,10 +601,8 @@ if ($argc >= 2 && $argv[1] === 'acp') {
 
 // Upgrade Command
 if ($argc >= 2 && $argv[1] === 'upgrade') {
-    echo "Checking for updates...\n";
-    $version = OLLAMADEV_VERSION;
-    echo "Current: v$version\n";
-    echo "Latest check not implemented - rebuild with: bash build.sh\n";
+    echo "Current: v" . OLLAMADEV_VERSION . "\n";
+    echo "Run 'ollamadev update' to check for and install the latest release.\n";
     exit(0);
 }
 

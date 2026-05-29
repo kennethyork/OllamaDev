@@ -19,6 +19,8 @@ class Session {
         // Keep the agent and session pointed at the same model.
         $this->agent->setModel($this->model);
         $GLOBALS['currentSessionModel'] = $this->model;
+        // Load this session's cumulative token totals so /status survives resumes.
+        Usage::bindSession($this->id);
         // Small models do tool-calling poorly; default them to pure chat.
         $this->agent->setChatMode($this->agent->isSmallModel());
     }
@@ -676,8 +678,13 @@ $GLOBALS['currentSessionModel'] = null;
             if ($renderMd && $fTrim !== '' && str_ends_with(rtrim($finalBuf), $fTrim)) {
                 $styled = Render::md($fTrim);
                 if ($styled !== $fTrim) {
-                    $back = substr_count($fTrim, "\n") + 1;
-                    echo "\033[" . $back . "A\r\033[J" . $styled;
+                    // Move to the first line of the just-streamed answer, then clear
+                    // and reprint it styled. $back = number of line breaks (not +1;
+                    // the cursor is already on the last line, and \033[0A would move
+                    // up 1, so only emit the up-sequence when there's a line to climb).
+                    $back = substr_count($fTrim, "\n");
+                    if ($back > 0) echo "\033[" . $back . "A";
+                    echo "\r\033[J" . $styled;
                 }
             }
             if (class_exists('Interrupt') && Interrupt::aborted()) { Interrupt::reset(); echo "\033[2m  interrupted\033[0m"; }

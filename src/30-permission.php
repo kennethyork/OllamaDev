@@ -39,6 +39,9 @@ class Permission {
         if (self::$mode === 'auto') return true;
         if (self::isReadonly($tool)) return true;     // read-only is always fine
         if (self::$mode === 'readonly') return false;  // block all mutating tools
+        // file edits show their own diff-based confirmation (DiffView::confirm),
+        // so don't also fire the generic prompt here — that would double-ask.
+        if ($tool === 'write' || $tool === 'edit') return true;
         // mode 'ask': prompt when interactive, otherwise allow (one-shot = user-driven).
         if (!self::$interactive) return true;
         return self::prompt($tool, $params);

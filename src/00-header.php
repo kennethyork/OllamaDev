@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '3.9.2');
+define('OLLAMADEV_VERSION', '4.0.0');
 $GLOBALS['editedFiles'] = [];
 
 function isWindows(): bool { return stripos(PHP_OS, 'WIN') === 0; }
