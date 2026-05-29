@@ -42,11 +42,16 @@ class AssetInliner
 
         $themesJson = json_encode($this->themes);
 
+        // Bundle xterm locally (vendored) so the app works fully offline.
+        $vendorDir = $this->baseDir . '/public/vendor';
+        $xtermCss = @file_get_contents($vendorDir . '/xterm.css') ?: '';
+        $xtermJs = @file_get_contents($vendorDir . '/xterm.js') ?: '';
+        $xtermFit = @file_get_contents($vendorDir . '/xterm-addon-fit.js') ?: '';
+
         $script = <<<HTML
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
-<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js"></script>
+<style id="ollamadev-xterm-css">{$xtermCss}</style>
+<script>{$xtermJs}</script>
+<script>{$xtermFit}</script>
 <style id="ollamadev-inlined-css">{$allCss}</style>
 <style id="ollamadev-theme"></style>
 <script>

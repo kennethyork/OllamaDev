@@ -120,12 +120,16 @@ $app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $
         return $sessions->createTerminal($model);
     });
 
-    $bindings->bind('getSessionOutput', function (string $id, int $lines = 100) use ($sessions): string {
-        return $sessions->getTerminalOutput($id, $lines);
+    $bindings->bind('readSession', function (string $id, int $offset = 0) use ($sessions): array {
+        return $sessions->readTerminal($id, $offset);
     });
 
-    $bindings->bind('writeToSession', function (string $id, string $input) use ($sessions): bool {
-        return $sessions->writeToTerminal($id, $input);
+    $bindings->bind('writeToSession', function (string $id, string $data) use ($sessions): bool {
+        return $sessions->writeToTerminal($id, $data);
+    });
+
+    $bindings->bind('resizeSession', function (string $id, int $cols, int $rows) use ($sessions): bool {
+        return $sessions->resizeTerminal($id, $cols, $rows);
     });
 
     $bindings->bind('killSession', function (string $id) use ($sessions): bool {

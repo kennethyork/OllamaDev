@@ -66,6 +66,69 @@ if ($argc >= 2 && $argv[1] === '__terminal-daemon__') {
     exit(0);
 }
 
+// Real PTY daemon: runs an interactive shell in a pseudo-terminal (via the
+// `script` utility) and bridges it to the desktop through two files - pty-in
+// (keystrokes appended by the UI) and pty-out (raw terminal output, incl. ANSI).
+if ($argc >= 2 && $argv[1] === '__pty-daemon__') {
+    $id = $argv[2] ?? '';
+    $startCwd = $argv[3] ?? getcwd();
+    if ($id === '') { fwrite(STDERR, "pty daemon: missing terminal id\n"); exit(1); }
+
+    $home = getenv('HOME') ?: '/tmp';
+    $dir = "$home/.ollamadev/terminals/$id";
+    if (!is_dir($dir)) mkdir($dir, 0755, true);
+    $inFile = "$dir/pty-in";
+    $outFile = "$dir/pty-out";
+    file_put_contents($inFile, '');   // fresh input queue per launch
+    file_put_contents($outFile, '');  // fresh output buffer
+
+    $shell = getenv('SHELL') ?: 'bash';
+    $inner = 'cd ' . escapeshellarg($startCwd) . '; exec ' . escapeshellarg($shell) . ' -i';
+    // Linux util-linux `script`; allocates a real PTY for the shell.
+    $cmd = 'script -qfc ' . escapeshellarg($inner) . ' /dev/null';
+    $descr = [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']];
+    $proc = @proc_open($cmd, $descr, $pipes);
+    if (!is_resource($proc)) { fwrite(STDERR, "pty: failed to start shell\n"); exit(1); }
+    stream_set_blocking($pipes[1], false);
+    stream_set_blocking($pipes[2], false);
+
+    $inOffset = 0;
+    $running = true;
+    if (function_exists('pcntl_async_signals')) {
+        pcntl_async_signals(true);
+        pcntl_signal(SIGTERM, function() use (&$running) { $running = false; });
+        pcntl_signal(SIGINT, function() use (&$running) { $running = false; });
+    }
+    $out = fopen($outFile, 'ab');
+
+    while ($running) {
+        $chunk = fread($pipes[1], 65536);
+        if ($chunk !== '' && $chunk !== false) { fwrite($out, $chunk); fflush($out); }
+        $errc = fread($pipes[2], 65536);
+        if ($errc !== '' && $errc !== false) { fwrite($out, $errc); fflush($out); }
+
+        clearstatcache(true, $inFile);
+        $size = @filesize($inFile);
+        if ($size !== false && $size > $inOffset) {
+            $fh = fopen($inFile, 'rb');
+            fseek($fh, $inOffset);
+            $data = fread($fh, $size - $inOffset);
+            fclose($fh);
+            if ($data !== '' && $data !== false) { fwrite($pipes[0], $data); fflush($pipes[0]); }
+            $inOffset = $size;
+        }
+
+        $st = proc_get_status($proc);
+        if (!$st['running']) break;
+        usleep(15000); // ~66 Hz
+    }
+    fclose($out);
+    foreach ($pipes as $p) { if (is_resource($p)) fclose($p); }
+    @proc_terminate($proc);
+    @proc_close($proc);
+    exit(0);
+}
+
 // Git CLI Command
 if ($argc >= 2 && $argv[1] === 'git') {
     $config = Config::load();

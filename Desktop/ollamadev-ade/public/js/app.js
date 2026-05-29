@@ -294,23 +294,33 @@ class App {
         const model = document.getElementById('modelSelect')?.value || 'llama3.2:latest';
         try {
             const id = await window.createSession(model);
-
-            const term = new Terminal(id, this.paneCount > 1);
-            this.terminals.set(id, term);
+            this.terminals.set(id, new TerminalPane(id, model));
             this.renderTerminalGrid();
-            term.start();
-
             await this.loadSessions();
         } catch (e) {
             console.error('Failed to create terminal:', e);
         }
     }
 
-    setPaneCount(count) {
-        this.paneCount = count;
-        const grid = document.getElementById('terminalGrid');
-        grid.className = 'terminal-grid ' + this.getGridClass(count);
+    closeTerminal(id) {
+        const pane = this.terminals.get(id);
+        if (pane) pane.close();
+        this.terminals.delete(id);
         this.renderTerminalGrid();
+    }
+
+    async setPaneCount(count) {
+        // Layout templates spawn terminals up to the requested count.
+        this.paneCount = count;
+        const model = document.getElementById('modelSelect')?.value || 'llama3.2:latest';
+        while (this.terminals.size < count) {
+            try {
+                const id = await window.createSession(model);
+                this.terminals.set(id, new TerminalPane(id, model));
+            } catch (e) { console.error('Failed to create terminal:', e); break; }
+        }
+        this.renderTerminalGrid();
+        await this.loadSessions();
     }
 
     getGridClass(count) {
@@ -323,20 +333,30 @@ class App {
 
     renderTerminalGrid() {
         const grid = document.getElementById('terminalGrid');
+        const ids = [...this.terminals.keys()];
+        grid.className = 'terminal-grid ' + this.getGridClass(Math.max(1, ids.length));
         grid.innerHTML = '';
 
-        for (let i = 0; i < this.paneCount; i++) {
-            const pane = document.createElement('div');
-            pane.className = 'terminal-pane';
-            pane.innerHTML = `
-                <div class="terminal-header">
-                    <span>Terminal ${i + 1}</span>
-                    <button class="terminal-close">×</button>
-                </div>
-                <div class="terminal-body" id="terminal-body-${i}"></div>
-            `;
-            grid.appendChild(pane);
+        if (ids.length === 0) {
+            grid.innerHTML = '<div class="terminal-empty">No terminals. Click “+ New Terminal”.</div>';
+            return;
         }
+
+        ids.forEach((id) => {
+            const pane = this.terminals.get(id);
+            const el = document.createElement('div');
+            el.className = 'terminal-pane';
+            el.innerHTML = `
+                <div class="terminal-header">
+                    <span>${pane.model} · ${id.slice(-6)}</span>
+                    <button class="terminal-close" data-id="${id}">×</button>
+                </div>
+                <div class="terminal-body"></div>
+            `;
+            grid.appendChild(el);
+            el.querySelector('.terminal-close').addEventListener('click', () => this.closeTerminal(id));
+            pane.mount(el.querySelector('.terminal-body'));
+        });
     }
 
     async renderFileTree(path = null) {
@@ -411,65 +431,73 @@ class App {
     }
 }
 
-class Terminal {
-    constructor(id, splitscreen = false) {
+// Encode a JS string (incl. UTF-8) to base64 for the binding boundary.
+function strToB64(s) { return btoa(unescape(encodeURIComponent(s))); }
+// Decode base64 to raw bytes for xterm (handles binary/ANSI/UTF-8 output).
+function b64ToBytes(b64) {
+    const bin = atob(b64);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return arr;
+}
+
+// A real shell terminal backed by the CLI's __pty-daemon__ (bash in a PTY).
+// xterm renders output; keystrokes stream to the daemon's input queue.
+class TerminalPane {
+    constructor(id, model) {
         this.id = id;
-        this.splitscreen = splitscreen;
+        this.model = model;
         this.term = null;
-        this.lastOutput = '';
+        this.fit = null;
+        this.offset = 0;   // bytes consumed from pty-out
+        this.polling = false;
+        this._ro = null;
     }
 
-    async start() {
-        const container = document.querySelector('.terminal-body');
-        if (!container) return;
+    mount(container) {
+        if (!window.Terminal) { container.textContent = 'xterm.js failed to load'; return; }
+        if (this.term) { try { this.term.dispose(); } catch (e) {} }
+        this.offset = 0; // replay full PTY output into the fresh element
 
-        this.term = new Terminal({
-            theme: { background: '#0d1117', foreground: '#e6edf3' },
+        this.term = new window.Terminal({
+            cursorBlink: true,
             fontSize: 13,
             fontFamily: "'SF Mono', 'Fira Code', monospace",
+            theme: { background: '#0d1117', foreground: '#e6edf3' },
         });
-
-        const fitAddon = new FitAddon.FitAddon();
-        this.term.loadAddon(fitAddon);
-        this.term.loadAddon(new WebLinksAddon.WebLinksAddon());
-
+        this.fit = new FitAddon.FitAddon();
+        this.term.loadAddon(this.fit);
         this.term.open(container);
-        fitAddon.fit();
+        try { this.fit.fit(); } catch (e) {}
 
-        this.term.writeln('Starting OllamaDev...');
-        this.term.writeln('');
+        this.term.onData(d => window.writeToSession(this.id, strToB64(d)));
+        this.term.onResize(({ cols, rows }) => { try { window.resizeSession(this.id, cols, rows); } catch (e) {} });
 
-        this.pollOutput();
+        if (window.ResizeObserver) {
+            this._ro = new ResizeObserver(() => { try { this.fit.fit(); } catch (e) {} });
+            this._ro.observe(container);
+        }
+        if (!this.polling) this.startPolling();
     }
 
-    async pollOutput() {
+    startPolling() {
+        this.polling = true;
         const poll = async () => {
-            if (!this.term) return;
-
+            if (!this.polling) return;
             try {
-                const output = await window.getSessionOutput(this.id);
-
-                if (output && output !== this.lastOutput) {
-                    this.term.write(output.replace(this.lastOutput || '', ''));
-                    this.lastOutput = output;
-                }
+                const r = await window.readSession(this.id, this.offset);
+                if (r && r.data) { this.term.write(b64ToBytes(r.data)); this.offset = r.offset; }
             } catch (e) {}
-
-            if (this.term) {
-                setTimeout(poll, 500);
-            }
+            if (this.polling) setTimeout(poll, 60);
         };
-
         poll();
     }
 
-    writeInput(text) {
-        window.writeToSession(this.id, text);
-    }
-
     close() {
-        window.killSession(this.id);
-        this.term = null;
+        this.polling = false;
+        if (this._ro) { this._ro.disconnect(); this._ro = null; }
+        try { window.killSession(this.id); } catch (e) {}
+        if (this.term) { try { this.term.dispose(); } catch (e) {} this.term = null; }
     }
 }
 

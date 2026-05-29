@@ -43,14 +43,15 @@ class SessionManager
         return true;
     }
 
-    public function writeToTerminal(string $id, string $input): bool
+    public function writeToTerminal(string $id, string $b64): bool
     {
-        return $this->pty->write($id, $input);
+        return $this->pty->write($id, $b64);
     }
 
-    public function getTerminalOutput(string $id, int $lines = 100): string
+    // Returns ['data' => base64 of new output, 'offset' => new byte offset].
+    public function readTerminal(string $id, int $offset = 0): array
     {
-        return $this->pty->getOutput($id, $lines);
+        return $this->pty->read($id, $offset);
     }
 
     public function resizeTerminal(string $id, int $cols, int $rows): bool
