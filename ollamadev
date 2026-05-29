@@ -2862,18 +2862,34 @@ ART;
         return $out;
     }
 
+    // Models known to do tool-calling / agentic work well locally. Marked with
+    // a star when listing, and suggested when the current model is weak.
+    private static array $recommended = [
+        'qwen2.5-coder', 'qwen3-coder', 'qwen2.5', 'mistral', 'codestral',
+        'llama3.1', 'llama3.3', 'deepseek-coder-v2', 'devstral', 'gpt-oss',
+    ];
+
+    private function isRecommended(string $name): bool {
+        foreach (self::$recommended as $r) {
+            if (stripos($name, $r) !== false) return true;
+        }
+        return false;
+    }
+
     private function listModels(string $args = ''): string {
         if (!empty($args)) return $this->switchModel($args);
         $models = $this->agent->listModelsDetailed();
-        $out = "\nAvailable Models:\n" . str_repeat('-', 45) . "\n";
+        $c = "\033[36m"; $d = "\033[2m"; $r = "\033[0m";
+        $out = "\n  Installed models:\n";
         foreach ($models as $m) {
             $name = $m['name'] ?? 'unknown';
-            $size = isset($m['size']) ? $this->formatBytes($m['size']) : 'unknown';
-            $marker = $name === $this->model ? ' *' : '';
-            $out .= sprintf("  %-20s %s%s\n", $name, $size, $marker);
+            $size = isset($m['size']) ? $this->formatBytes($m['size']) : '?';
+            $cur = $name === $this->model ? "{$c} ← current{$r}" : '';
+            $star = $this->isRecommended($name) ? "{$c}★{$r}" : ' ';
+            $out .= sprintf("  %s %-22s %s%s%s\n", $star, $name, $d, $size . $r, $cur);
         }
-        $out .= str_repeat('-', 45) . "\n";
-        $out .= "Current: {$this->model}\n";
+        $out .= "\n  {$c}★{$r} {$d}= recommended for agentic/tool use{$r}\n";
+        $out .= "  {$d}Best local agents: qwen2.5-coder, mistral, codestral — e.g. `ollama pull qwen2.5-coder`{$r}\n";
         return $out;
     }
 
@@ -3026,6 +3042,11 @@ $GLOBALS['currentSessionModel'] = null;
 
         if (!empty($this->messages)) {
             echo "\033[2m  resumed session · " . count($this->messages) . " messages\033[0m\n";
+        }
+
+        // Nudge new users toward a capable model for agentic work.
+        if (!$this->isRecommended($this->model)) {
+            echo "\033[2m  tip: for reliable tool use try a recommended model — \033[0m\033[36mollama pull qwen2.5-coder\033[0m\033[2m, then /model qwen2.5-coder:latest\033[0m\n";
         }
 
         while (true) {
@@ -3915,7 +3936,7 @@ Commands:
   ollamadev load <id>  Load session
   ollamadev git        Git commands (status, diff, commit, etc.)
   ollamadev terminal   Terminal multiplexer
-  ollamadev lsp        LSP server for IDEs
+  ollamadev lsp        LSP server for IDEs (AI completions, linter diagnostics)
   ollamadev help [topic] Show help
 
 See 'ollamadev help <topic>' for detailed help.
@@ -4011,7 +4032,7 @@ Examples:
     ollamadev terminal create dev --model llama3.2:latest
     ollamadev terminal attach dev
 
-  LSP for IDE:
+  LSP for IDE (AI completions + linter diagnostics):
     ollamadev lsp --port 4389
 
   Git operations:

@@ -700,7 +700,7 @@ Commands:
   ollamadev load <id>  Load session
   ollamadev git        Git commands (status, diff, commit, etc.)
   ollamadev terminal   Terminal multiplexer
-  ollamadev lsp        LSP server for IDEs
+  ollamadev lsp        LSP server for IDEs (AI completions, linter diagnostics)
   ollamadev help [topic] Show help
 
 See 'ollamadev help <topic>' for detailed help.
@@ -796,7 +796,7 @@ Examples:
     ollamadev terminal create dev --model llama3.2:latest
     ollamadev terminal attach dev
 
-  LSP for IDE:
+  LSP for IDE (AI completions + linter diagnostics):
     ollamadev lsp --port 4389
 
   Git operations:
