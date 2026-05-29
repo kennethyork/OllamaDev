@@ -216,6 +216,8 @@ body {
 .modal-actions button.primary { background: var(--accent); color: #08111f; border-color: transparent; font-weight: 700; }
 .modal-actions button.primary:hover { filter: brightness(1.1); background: var(--accent); }
 .modal-hint { font-size: 11px; margin-top: 12px; }
+.modal-check { display: flex; align-items: center; gap: 8px; margin-top: 16px; font-size: 12px; color: var(--dim); cursor: pointer; }
+.modal-check input { accent-color: var(--accent); width: 15px; height: 15px; }
 
 /* ===== kanban board ===== */
 #boardView { padding: 14px; overflow: auto; }

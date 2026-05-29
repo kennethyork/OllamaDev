@@ -90,18 +90,21 @@ class Crew {
         echo "\n{$b}▸ Auditor{$r} reviewing…\n";
         foreach ($results as &$res) {
             if ($res['empty']) { $res['audit'] = ['clean' => false, 'summary' => 'no changes', 'issues' => []]; echo "  {$d}#{$res['n']} skipped (empty){$r}\n"; continue; }
-            $res['audit'] = self::audit($agent, $res['title'], $res['diff']);
+            $res['audit'] = self::audit($agent, $res['title'], $res['diff'], $task);
             $vc = $res['audit']['clean'] ? "{$g}clean{$r}" : "{$y}flagged{$r}";
             echo "  #{$res['n']} {$vc} {$d}" . substr((string)($res['audit']['summary'] ?? ''), 0, 80) . "{$r}\n";
             foreach (($res['audit']['issues'] ?? []) as $iss) echo "      {$y}- " . substr((string)$iss, 0, 100) . "{$r}\n";
         }
         unset($res);
 
-        // ---- Landing: auto-merge clean, hold flagged ----
-        echo "\n{$b}▸ Landing{$r}\n";
+        // ---- Landing — gated. 'review': nothing auto-merges (default-safe for
+        // self-modification). 'auto': merge audit-clean, hold flagged.
+        $land = $opts['land'] ?? Config::get('crew.land', 'auto');
+        echo "\n{$b}▸ Landing{$r}" . ($land === 'review' ? " {$d}(review mode — nothing auto-merges){$r}" : '') . "\n";
         $merged = []; $held = [];
         foreach ($results as $res) {
             if ($res['empty']) { $setState($res['n'], 'held'); continue; }
+            if ($land === 'review') { $held[] = $res; $setState($res['n'], 'held'); echo "  {$y}held{$r} #{$res['n']} {$res['branch']} {$d}(review mode){$r}\n"; continue; }
             if (empty($res['audit']['clean'])) { $held[] = $res; $setState($res['n'], 'held'); echo "  {$y}held{$r} #{$res['n']} {$res['branch']} {$d}(audit flagged){$r}\n"; continue; }
             $m = self::sh('git merge --no-ff --no-edit ' . escapeshellarg($res['branch']) . ' 2>&1');
             if (self::sh('git status --porcelain') !== '' && self::sh('git ls-files -u') !== '') {
@@ -214,14 +217,16 @@ class Crew {
     }
 
     // Auditor: review a diff, return ['clean'=>bool,'summary'=>string,'issues'=>[]].
-    private static function audit(Agent $agent, string $title, string $diff): array {
+    private static function audit(Agent $agent, string $title, string $diff, string $goal = ''): array {
         $diff = substr($diff, 0, 16000);
         $sys = ['role' => 'system', 'content' =>
             "You are a meticulous code Auditor. Review the git diff for correctness, security (secrets, injection, " .
-            "unsafe shell), and whether it actually accomplishes the stated subtask. Output ONLY JSON: " .
+            "unsafe shell), and whether it accomplishes the subtask WITHIN the overall goal. Output ONLY JSON: " .
             '{"clean": true|false, "summary": "one line", "issues": ["..."]}. ' .
-            "Mark clean=false if there are real problems; minor style nits do not block."];
-        $user = ['role' => 'user', 'content' => "Subtask: $title\n\nDiff:\n$diff"];
+            "Mark clean=false if there are real problems, OR if the change is OFF-SCOPE: it adds files unrelated to " .
+            "the goal, introduces a language/framework the project doesn't use, or includes scaffolding that wasn't " .
+            "requested. Minor style nits do not block."];
+        $user = ['role' => 'user', 'content' => ($goal !== '' ? "Overall goal: $goal\n" : '') . "Subtask: $title\n\nDiff:\n$diff"];
         $j = (new OllamaClient())->chatJson($agent->getModel(), [$sys, $user]);
         if (!is_array($j)) return ['clean' => false, 'summary' => 'audit unavailable (could not parse review)', 'issues' => []];
         return [

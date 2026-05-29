@@ -474,16 +474,17 @@ var App = {
         if (!task) { $('#crewTask').focus(); return; }
         var max = $('#crewMax').value || '2';
         var model = ($('#crewModel') && $('#crewModel').value) || $('#modelSelect').value || 'llama3.2:latest';
+        var review = $('#crewReview') ? $('#crewReview').checked : true;
         this.closeCrew();
-        this.runCrew(task, max, model);
+        this.runCrew(task, max, model, review);
     },
     // Launch `ollamadev crew "<task>"` in a fresh terminal and show it full-screen.
-    runCrew: function (task, max, model) {
+    runCrew: function (task, max, model, review) {
         if (this.terminals.length >= this.MAX_TERMINALS) { banner('close a terminal first (max ' + this.MAX_TERMINALS + ')', 'err'); return; }
         model = model || $('#modelSelect').value || 'llama3.2:latest';
         var cli = this.cli || 'ollamadev';
         var q = "'" + String(task).replace(/'/g, "'\\''") + "'"; // shell single-quote
-        var cmd = cli + ' crew ' + q + ' --max ' + (parseInt(max, 10) || 2) + ' -m ' + model;
+        var cmd = cli + ' crew ' + q + ' --max ' + (parseInt(max, 10) || 2) + ' -m ' + model + (review ? ' --review' : '');
         var id = rid(); var t = new Terminal(id, 'crew');
         var self = this;
         Promise.resolve(window.termCreate(id, model)).then(function () {

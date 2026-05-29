@@ -255,10 +255,11 @@ class Session {
     // /crew <task> [--max N] — run the OllamaDev Crew bench from inside a session.
     private function runCrew(string $args): string {
         $args = trim($args);
-        if ($args === '') return "Usage: /crew <task> [--max N]\n  Runs a bench of agents (Director/Coders/Auditor) in git worktrees.\n";
-        $max = null;
-        if (preg_match('/\s--max\s+(\d+)/', $args, $m)) { $max = (int)$m[1]; $args = trim(preg_replace('/\s--max\s+\d+/', '', $args)); }
-        Crew::run($args, $max !== null ? ['max' => $max] : []); // prints its own progress
+        if ($args === '') return "Usage: /crew <task> [--max N] [--review]\n  Runs a bench of agents (Director/Coders/Auditor) in git worktrees.\n  --review holds every branch for you to merge (nothing auto-merges).\n";
+        $opts = [];
+        if (preg_match('/\s--max\s+(\d+)/', $args, $m)) { $opts['max'] = (int)$m[1]; $args = trim(preg_replace('/\s--max\s+\d+/', '', $args)); }
+        if (preg_match('/(^|\s)--review(\s|$)/', $args)) { $opts['land'] = 'review'; $args = trim(preg_replace('/(^|\s)--review(\s|$)/', ' ', $args)); }
+        Crew::run(trim($args), $opts); // prints its own progress
         return '';
     }
 

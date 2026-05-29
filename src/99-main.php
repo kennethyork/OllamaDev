@@ -1003,9 +1003,12 @@ if ($cmd === 'chat') {
     echo ProjectInit::run($agent, $flags['cwd'] ?? getcwd(), posix_isatty(STDIN));
 } elseif ($cmd === 'crew') {
     // Bench of agents: Researcher → Director → Coders (git worktrees) → Auditor → land.
+    // --review gates landing: nothing auto-merges, every branch is held for review.
     $taskParts = array_slice($positional, 1);
     $task = $arg1 === '' ? '' : implode(' ', $taskParts);
-    exit(Crew::run($task, ['max' => $flags['max'] ?? null]));
+    $copts = ['max' => $flags['max'] ?? null];
+    if (in_array('--review', $argv, true)) $copts['land'] = 'review';
+    exit(Crew::run($task, $copts));
 } elseif ($cmd === 'load' && $arg1) {
     $session = new Session($config, $arg1);
     if (!file_exists(Config::sessionsDir() . '/' . $arg1 . '.json')) { echo "Session not found: $arg1\n"; exit(1); }
