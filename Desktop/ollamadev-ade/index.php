@@ -140,6 +140,10 @@ $app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $
         return $sessions->agentRun($id, $prompt);
     });
 
+    $bindings->bind('getBlocks', function (string $id) use ($sessions): array {
+        return $sessions->getBlocks($id);
+    });
+
     $bindings->bind('listFiles', function (?string $path = null) use ($files): array {
         return $files->listDir($path);
     });

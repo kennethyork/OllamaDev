@@ -230,3 +230,39 @@
     color: var(--text-muted);
     font-size: 14px;
 }
+
+/* Command blocks panel */
+.terminal-main { display: flex; flex: 1; min-height: 0; }
+.terminal-main .terminal-body { flex: 1; }
+.terminal-header-actions { display: flex; gap: 4px; align-items: center; }
+.blocks-toggle {
+    background: transparent; border: none; color: var(--text-muted);
+    cursor: pointer; font-size: 14px; padding: 0 4px;
+}
+.blocks-toggle:hover { color: var(--text-primary); }
+
+.blocks-panel {
+    width: 280px;
+    flex: 0 0 280px;
+    overflow-y: auto;
+    background: var(--bg-secondary);
+    border-left: 1px solid var(--border-color);
+    padding: 6px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+.block {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 6px; border-radius: var(--radius-md);
+    border-left: 3px solid var(--border-color);
+    margin-bottom: 4px; background: var(--bg-primary);
+}
+.block code { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
+.block-meta { color: var(--text-muted); font-size: 11px; }
+.block.ok { border-left-color: var(--accent-success, #3fb950); }
+.block.fail { border-left-color: var(--accent-error, #f85149); }
+.block.running { border-left-color: var(--accent-warning, #d29922); }
+.block.ok .block-icon { color: var(--accent-success, #3fb950); }
+.block.fail .block-icon { color: var(--accent-error, #f85149); }
+.block.running .block-icon { color: var(--accent-warning, #d29922); }
+.blocks-empty { color: var(--text-muted); padding: 8px; text-align: center; }

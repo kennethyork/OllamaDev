@@ -128,6 +128,15 @@ class PtyManager
         return true;
     }
 
+    // Command blocks captured via shell integration (command, exit code, time).
+    public function blocks(string $id): array
+    {
+        $file = self::$baseDir . '/' . $id . '/blocks.json';
+        if (!is_file($file)) return [];
+        $data = json_decode((string)file_get_contents($file), true);
+        return is_array($data) ? $data : [];
+    }
+
     public function resize(string $id, int $cols, int $rows): bool
     {
         // Best-effort: write the size to a control file the daemon can honor.

@@ -63,4 +63,9 @@ class SessionManager
     {
         return $this->pty->agentRun($id, $prompt);
     }
+
+    public function getBlocks(string $id): array
+    {
+        return $this->pty->blocks($id);
+    }
 }

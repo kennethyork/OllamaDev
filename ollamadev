@@ -3581,9 +3581,20 @@ if ($argc >= 2 && $argv[1] === '__pty-daemon__') {
     file_put_contents($inFile, '');   // fresh input queue per launch
     file_put_contents($outFile, '');  // fresh output buffer
 
-    $shell = getenv('SHELL') ?: 'bash';
-    // Set a sane default window size, then cd into the project and exec the shell.
-    $inner = 'stty rows 32 cols 120 2>/dev/null; cd ' . escapeshellarg($startCwd) . '; exec ' . escapeshellarg($shell) . ' -i';
+    // Shell integration (OSC 133) so we can capture command blocks: each
+    // command's text (via $BASH_COMMAND), exit code, and timing.
+    $rc = "$dir/od_rc.sh";
+    file_put_contents($rc,
+        "[ -f ~/.bashrc ] && source ~/.bashrc\n" .
+        "__od_pc(){ local e=\$?; printf '\\033]133;D;%s\\007' \"\$e\"; }\n" .
+        "PROMPT_COMMAND=\"__od_pc\${PROMPT_COMMAND:+; \$PROMPT_COMMAND}\"\n" .
+        "__od_pre(){ case \"\$BASH_COMMAND\" in __od_*) return;; esac; printf '\\033]133;C;%s\\007' \"\$BASH_COMMAND\"; }\n" .
+        "trap '__od_pre' DEBUG\n"
+    );
+    // Set a sane default window size, then cd into the project and exec bash
+    // with our integration rcfile.
+    $inner = 'stty rows 32 cols 120 2>/dev/null; cd ' . escapeshellarg($startCwd)
+        . '; exec bash --rcfile ' . escapeshellarg($rc) . ' -i';
     // Linux util-linux `script`; allocates a real PTY for the shell.
     $cmd = 'script -qfc ' . escapeshellarg($inner) . ' /dev/null';
     $descr = [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']];
@@ -3594,18 +3605,66 @@ if ($argc >= 2 && $argv[1] === '__pty-daemon__') {
 
     $inOffset = 0;
     $running = true;
+    $sizeFile = "$dir/pty-size";
+    $lastSize = '';
     if (function_exists('pcntl_async_signals')) {
         pcntl_async_signals(true);
         pcntl_signal(SIGTERM, function() use (&$running) { $running = false; });
         pcntl_signal(SIGINT, function() use (&$running) { $running = false; });
     }
     $out = fopen($outFile, 'ab');
+    $blocks = [];        // command blocks parsed from OSC 133
+    $parseBuf = '';
+    $blocksFile = "$dir/blocks.json";
+
+    $parseBlocks = function(string $add) use (&$parseBuf, &$blocks, $blocksFile) {
+        $parseBuf .= $add;
+        while (preg_match('/\x1b\]133;([CD]);([^\x07]*)\x07/', $parseBuf, $mm, PREG_OFFSET_CAPTURE)) {
+            $type = $mm[1][0];
+            $payload = $mm[2][0];
+            $parseBuf = substr($parseBuf, $mm[0][1] + strlen($mm[0][0]));
+            if ($type === 'C') {
+                $blocks[] = ['command' => $payload, 'startedAt' => time(), 'exitCode' => null, 'endedAt' => null];
+            } else {
+                for ($k = count($blocks) - 1; $k >= 0; $k--) {
+                    if ($blocks[$k]['exitCode'] === null) { $blocks[$k]['exitCode'] = (int)$payload; $blocks[$k]['endedAt'] = time(); break; }
+                }
+            }
+            @file_put_contents($blocksFile, json_encode(array_slice($blocks, -200)));
+        }
+        if (strlen($parseBuf) > 8192) $parseBuf = substr($parseBuf, -4096);
+    };
 
     while ($running) {
+        // Honor resize requests by setting the shell's pts window size, which
+        // makes the kernel deliver SIGWINCH to the shell.
+        clearstatcache(true, $sizeFile);
+        if (is_file($sizeFile)) {
+            $sz = trim((string)@file_get_contents($sizeFile));
+            if ($sz !== '' && $sz !== $lastSize && preg_match('/^(\d+)x(\d+)$/', $sz, $sm)) {
+                $lastSize = $sz;
+                // Walk descendants of our proc to find the process whose stdin is
+                // the pts (the interactive shell), then resize that pts.
+                $sp = (int)(proc_get_status($proc)['pid'] ?? 0);
+                $pts = null;
+                $queue = [$sp];
+                while ($queue) {
+                    $p = (int)array_shift($queue);
+                    $link = @readlink("/proc/$p/fd/0");
+                    if ($link && strpos($link, '/dev/pts/') !== false) { $pts = $link; break; }
+                    foreach (preg_split('/\s+/', trim((string)@shell_exec("pgrep -P $p 2>/dev/null"))) as $c) {
+                        if ($c !== '') $queue[] = (int)$c;
+                    }
+                }
+                if ($pts) {
+                    @shell_exec('stty -F ' . escapeshellarg($pts) . ' rows ' . (int)$sm[2] . ' cols ' . (int)$sm[1] . ' 2>/dev/null');
+                }
+            }
+        }
         $chunk = fread($pipes[1], 65536);
-        if ($chunk !== '' && $chunk !== false) { fwrite($out, $chunk); fflush($out); }
+        if ($chunk !== '' && $chunk !== false) { fwrite($out, $chunk); fflush($out); $parseBlocks($chunk); }
         $errc = fread($pipes[2], 65536);
-        if ($errc !== '' && $errc !== false) { fwrite($out, $errc); fflush($out); }
+        if ($errc !== '' && $errc !== false) { fwrite($out, $errc); fflush($out); $parseBlocks($errc); }
 
         clearstatcache(true, $inFile);
         $size = @filesize($inFile);

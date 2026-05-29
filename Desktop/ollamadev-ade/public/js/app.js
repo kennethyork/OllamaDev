@@ -349,9 +349,15 @@ class App {
             el.innerHTML = `
                 <div class="terminal-header">
                     <span>${pane.model} · ${id.slice(-6)}</span>
-                    <button class="terminal-close" data-id="${id}">×</button>
+                    <span class="terminal-header-actions">
+                        <button class="blocks-toggle" title="Command blocks">▤</button>
+                        <button class="terminal-close" data-id="${id}">×</button>
+                    </span>
                 </div>
-                <div class="terminal-body"></div>
+                <div class="terminal-main">
+                    <div class="terminal-body"></div>
+                    <div class="blocks-panel" hidden></div>
+                </div>
                 <form class="agent-bar">
                     <span class="agent-icon">🤖</span>
                     <input class="agent-input" type="text" autocomplete="off"
@@ -361,6 +367,11 @@ class App {
             `;
             grid.appendChild(el);
             el.querySelector('.terminal-close').addEventListener('click', () => this.closeTerminal(id));
+            const blocksPanel = el.querySelector('.blocks-panel');
+            el.querySelector('.blocks-toggle').addEventListener('click', () => {
+                blocksPanel.hidden = !blocksPanel.hidden;
+                pane.setBlocksPanel(blocksPanel.hidden ? null : blocksPanel);
+            });
             const agentForm = el.querySelector('.agent-bar');
             const agentInput = el.querySelector('.agent-input');
             agentForm.addEventListener('submit', (e) => {
@@ -467,6 +478,30 @@ class TerminalPane {
         this.offset = 0;   // bytes consumed from pty-out
         this.polling = false;
         this._ro = null;
+        this.blocksPanel = null;
+    }
+
+    setBlocksPanel(el) {
+        this.blocksPanel = el;
+        if (el) this.refreshBlocks();
+    }
+
+    async refreshBlocks() {
+        if (!this.blocksPanel) return;
+        try {
+            const blocks = await window.getBlocks(this.id);
+            if (!Array.isArray(blocks)) return;
+            this.blocksPanel.innerHTML = blocks.slice().reverse().map(b => {
+                const running = b.exitCode === null || b.exitCode === undefined;
+                const ok = !running && b.exitCode === 0;
+                const icon = running ? '▶' : (ok ? '✓' : '✗');
+                const cls = running ? 'running' : (ok ? 'ok' : 'fail');
+                const dur = (b.endedAt && b.startedAt) ? ` ${b.endedAt - b.startedAt}s` : '';
+                const code = running ? '' : ` exit ${b.exitCode}`;
+                const cmd = (b.command || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+                return `<div class="block ${cls}"><span class="block-icon">${icon}</span><code>${cmd}</code><span class="block-meta">${code}${dur}</span></div>`;
+            }).join('') || '<div class="blocks-empty">No commands yet</div>';
+        } catch (e) {}
     }
 
     mount(container) {
@@ -497,12 +532,14 @@ class TerminalPane {
 
     startPolling() {
         this.polling = true;
+        let tick = 0;
         const poll = async () => {
             if (!this.polling) return;
             try {
                 const r = await window.readSession(this.id, this.offset);
                 if (r && r.data) { this.term.write(b64ToBytes(r.data)); this.offset = r.offset; }
             } catch (e) {}
+            if (this.blocksPanel && (++tick % 16 === 0)) this.refreshBlocks(); // ~1/s
             if (this.polling) setTimeout(poll, 60);
         };
         poll();
