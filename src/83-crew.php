@@ -126,12 +126,14 @@ class Crew {
             $messages = [$sys, ['role' => 'user', 'content' => "Task:\n$task\n\nInvestigate, then summarize your findings."]];
             $last = '';
             for ($i = 0; $i < $maxIter; $i++) {
+                echo "\033[2m·\033[0m"; @flush();   // heartbeat so it never looks hung
                 $turn = $a->chatTurn($messages); $calls = $turn['calls'] ?? [];
                 $clean = $a->stripToolMarkup((string)($turn['content'] ?? ''));
                 $messages[] = ['role' => 'assistant', 'content' => (string)($turn['content'] ?? '')];
                 if (empty($calls)) { if ($clean !== '') $last = $clean; break; }
                 foreach ($a->executeCalls($calls) as $rr) $messages[] = ['role' => 'tool', 'content' => (string)($rr['content'] ?? ''), 'tool_name' => $rr['name'] ?? 'tool'];
             }
+            echo "\n";
             $findings = $last;
         } catch (\Throwable $e) {} finally {
             Permission::setMode($prevMode); Permission::setInteractive($prevInt);
@@ -178,6 +180,7 @@ class Crew {
             $messages = [['role' => 'user', 'content' => $prompt]];
             $dbg = (bool)getenv('CREW_DEBUG');
             for ($i = 0; $i < $maxIter; $i++) {
+                echo "\033[2m·\033[0m"; @flush();   // heartbeat
                 $turn = $agent->chatTurn($messages);
                 $calls = $turn['calls'] ?? [];
                 if ($dbg) fwrite(STDERR, "    [coder iter $i] calls=" . count($calls) . " content=" . substr(preg_replace('/\s+/', ' ', (string)($turn['content'] ?? '')), 0, 120) . "\n");
@@ -188,6 +191,7 @@ class Crew {
                     $messages[] = ['role' => 'tool', 'content' => (string)($rr['content'] ?? ''), 'tool_name' => $rr['name'] ?? 'tool'];
                 }
             }
+            echo "\n";
         } catch (\Throwable $e) {
             echo "  \033[31mcoder error: " . $e->getMessage() . "\033[0m\n";
         } finally {

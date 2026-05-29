@@ -177,6 +177,7 @@ class Session {
             'undo' => Checkpoints::undoLast(),
             'checkpoints' => $this->listCheckpoints(),
             'init' => ProjectInit::run($this->agent, getcwd(), Permission::isInteractive()),
+            'crew' => $this->runCrew($args),
             'retry', 'regenerate' => $this->retryLast(),
             'commands' => UserCmds::render(),
             default => UserCmds::exists($cmd) ? ('PROMPT:' . UserCmds::expand($cmd, $args)) : false
@@ -249,6 +250,16 @@ class Session {
         $out .= $row('/clear · /exit', 'clear screen / quit');
         $out .= "\n  {$d}Tip: Tab completes commands, paths, and model names. Ctrl-C interrupts a response.{$r}\n";
         return $out;
+    }
+
+    // /crew <task> [--max N] — run the OllamaDev Crew bench from inside a session.
+    private function runCrew(string $args): string {
+        $args = trim($args);
+        if ($args === '') return "Usage: /crew <task> [--max N]\n  Runs a bench of agents (Director/Coders/Auditor) in git worktrees.\n";
+        $max = null;
+        if (preg_match('/\s--max\s+(\d+)/', $args, $m)) { $max = (int)$m[1]; $args = trim(preg_replace('/\s--max\s+\d+/', '', $args)); }
+        Crew::run($args, $max !== null ? ['max' => $max] : []); // prints its own progress
+        return '';
     }
 
     private function listCheckpoints(): string {

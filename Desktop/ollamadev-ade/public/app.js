@@ -434,22 +434,42 @@ var App = {
     cycleLayout: function () {
         this.setLayout(this.layout === 'split' ? 'term' : this.layout === 'term' ? 'editor' : 'split');
     },
-    openCrew: function () { var o = $('#modalOverlay'); if (o) { o.hidden = false; var t = $('#crewTask'); if (t) t.focus(); } },
+    // Recommended fast coder models, in preference order, for the crew run.
+    CREW_PREFERRED: ['qwen2.5-coder', 'qwen3-coder', 'codestral', 'deepseek-coder', 'mistral', 'llama3.1'],
+    openCrew: function () {
+        var o = $('#modalOverlay'); if (!o) return;
+        var sel = $('#crewModel');
+        if (sel) {
+            // Populate from installed models; default to a recommended fast one
+            // (a 30B+ model makes the bench painfully slow / look hung).
+            var opts = Array.prototype.slice.call($('#modelSelect').options).map(function (o) { return o.value; });
+            if (opts.length) {
+                var pick = opts[0];
+                for (var i = 0; i < this.CREW_PREFERRED.length; i++) {
+                    var hit = opts.find(function (m) { return m.indexOf(this.CREW_PREFERRED[i]) === 0 || m.indexOf(this.CREW_PREFERRED[i]) !== -1; }, this);
+                    if (hit) { pick = hit; break; }
+                }
+                sel.innerHTML = opts.map(function (m) { return '<option' + (m === pick ? ' selected' : '') + '>' + esc(m) + '</option>'; }).join('');
+            }
+        }
+        o.hidden = false; var t = $('#crewTask'); if (t) t.focus();
+    },
     closeCrew: function () { var o = $('#modalOverlay'); if (o) o.hidden = true; },
     submitCrew: function () {
         var task = ($('#crewTask').value || '').trim();
         if (!task) { $('#crewTask').focus(); return; }
-        var max = $('#crewMax').value || '3';
+        var max = $('#crewMax').value || '2';
+        var model = ($('#crewModel') && $('#crewModel').value) || $('#modelSelect').value || 'llama3.2:latest';
         this.closeCrew();
-        this.runCrew(task, max);
+        this.runCrew(task, max, model);
     },
     // Launch `ollamadev crew "<task>"` in a fresh terminal and show it full-screen.
-    runCrew: function (task, max) {
+    runCrew: function (task, max, model) {
         if (this.terminals.length >= this.MAX_TERMINALS) { banner('close a terminal first (max ' + this.MAX_TERMINALS + ')', 'err'); return; }
-        var model = $('#modelSelect').value || 'llama3.2:latest';
+        model = model || $('#modelSelect').value || 'llama3.2:latest';
         var cli = this.cli || 'ollamadev';
         var q = "'" + String(task).replace(/'/g, "'\\''") + "'"; // shell single-quote
-        var cmd = cli + ' crew ' + q + ' --max ' + (parseInt(max, 10) || 3) + ' -m ' + model;
+        var cmd = cli + ' crew ' + q + ' --max ' + (parseInt(max, 10) || 2) + ' -m ' + model;
         var id = rid(); var t = new Terminal(id, 'crew');
         var self = this;
         Promise.resolve(window.termCreate(id, model)).then(function () {
