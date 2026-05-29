@@ -366,27 +366,27 @@ ok('help commands lists pull/init/resume',
 ok('bash completion includes new commands',
     strpos($out, 'pull') !== false && strpos($out, 'init') !== false && strpos($out, 'resume') !== false);
 
-echo "\n== Forge (bench) ==\n";
+echo "\n== Crew (bench) ==\n";
 // Offline guards
-[$out] = run_bin(['forge']);
-ok('forge with no task prints usage', stripos($out, 'Usage: ollamadev forge') !== false);
-$ngdir = sys_get_temp_dir() . '/forge_nogit_' . getmypid(); @mkdir($ngdir, 0755, true);
-[$out] = run_bin(['forge', 'do a thing'], '', [], $ngdir);
-ok('forge outside a git repo errors', stripos($out, 'needs a git repository') !== false, trim($out));
+[$out] = run_bin(['crew']);
+ok('crew with no task prints usage', stripos($out, 'Usage: ollamadev crew') !== false);
+$ngdir = sys_get_temp_dir() . '/crew_nogit_' . getmypid(); @mkdir($ngdir, 0755, true);
+[$out] = run_bin(['crew', 'do a thing'], '', [], $ngdir);
+ok('crew outside a git repo errors', stripos($out, 'needs a git repository') !== false, trim($out));
 shell_exec('rm -rf ' . escapeshellarg($ngdir));
-// Unit: JSON extraction + slug (extract the Forge class from the binary)
-if (preg_match('/class Forge \{.*?\n\}/s', $src, $fm)) {
+// Unit: JSON extraction + slug (extract the Crew class from the binary)
+if (preg_match('/class Crew \{.*?\n\}/s', $src, $fm)) {
     eval(str_replace('private static function extractJson', 'public static function extractJson', $fm[0]));
-    $j = Forge::extractJson('noise {"subtasks":[{"title":"a","prompt":"b"}]} tail');
-    ok('Forge::extractJson pulls balanced JSON', is_array($j) && ($j['subtasks'][0]['title'] ?? '') === 'a');
-    ok('Forge::extractJson returns null on none', Forge::extractJson('no json here') === null);
-    ok('Forge::slug normalizes titles', Forge::slug('Add /Health Route!') === 'add-health-route');
-} else { ok('Forge class extractable', false); }
+    $j = Crew::extractJson('noise {"subtasks":[{"title":"a","prompt":"b"}]} tail');
+    ok('Crew::extractJson pulls balanced JSON', is_array($j) && ($j['subtasks'][0]['title'] ?? '') === 'a');
+    ok('Crew::extractJson returns null on none', Crew::extractJson('no json here') === null);
+    ok('Crew::slug normalizes titles', Crew::slug('Add /Health Route!') === 'add-health-route');
+} else { ok('Crew class extractable', false); }
 // Source wiring: the four roles + worktree + json-mode are present
-ok('forge has a Researcher role', strpos($src, 'Researcher worker') !== false || strpos($src, 'function research(') !== false);
-ok('forge Director uses JSON mode', strpos($src, 'chatJson(') !== false);
-ok('forge Coder uses git worktrees', strpos($src, 'git worktree add') !== false);
-ok('forge Auditor + auto-merge wired', strpos($src, "git merge --no-ff") !== false && strpos($src, 'function audit(') !== false);
+ok('crew has a Researcher role', strpos($src, 'Researcher worker') !== false || strpos($src, 'function research(') !== false);
+ok('crew Director uses JSON mode', strpos($src, 'chatJson(') !== false);
+ok('crew Coder uses git worktrees', strpos($src, 'git worktree add') !== false);
+ok('crew Auditor + auto-merge wired', strpos($src, "git merge --no-ff") !== false && strpos($src, 'function audit(') !== false);
 
 echo "\n========================\n";
 echo "Results: $pass passed, $fail failed\n";

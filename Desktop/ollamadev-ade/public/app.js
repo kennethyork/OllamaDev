@@ -324,14 +324,14 @@ var App = {
         this.initThemes();
         $('#newTermBtn').onclick = function () { self.newTerminal(); };
         $('#layoutBtn').onclick = function () { self.cycleLayout(); };
-        // Forge modal
-        var fb = $('#forgeBtn'); if (fb) fb.onclick = function () { self.openForge(); };
-        var fc = $('#forgeCancel'); if (fc) fc.onclick = function () { self.closeForge(); };
-        var fr = $('#forgeRun'); if (fr) fr.onclick = function () { self.submitForge(); };
-        var ov = $('#modalOverlay'); if (ov) ov.onclick = function (e) { if (e.target === ov) self.closeForge(); };
-        var ft = $('#forgeTask'); if (ft) ft.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape') self.closeForge();
-            else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') self.submitForge();
+        // Crew modal
+        var fb = $('#crewBtn'); if (fb) fb.onclick = function () { self.openCrew(); };
+        var fc = $('#crewCancel'); if (fc) fc.onclick = function () { self.closeCrew(); };
+        var fr = $('#crewRun'); if (fr) fr.onclick = function () { self.submitCrew(); };
+        var ov = $('#modalOverlay'); if (ov) ov.onclick = function (e) { if (e.target === ov) self.closeCrew(); };
+        var ft = $('#crewTask'); if (ft) ft.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') self.closeCrew();
+            else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') self.submitCrew();
         });
         // Activity rail: switch the sidebar between Files and Tasks.
         document.querySelectorAll('.rail-btn').forEach(function (b) {
@@ -434,29 +434,29 @@ var App = {
     cycleLayout: function () {
         this.setLayout(this.layout === 'split' ? 'term' : this.layout === 'term' ? 'editor' : 'split');
     },
-    openForge: function () { var o = $('#modalOverlay'); if (o) { o.hidden = false; var t = $('#forgeTask'); if (t) t.focus(); } },
-    closeForge: function () { var o = $('#modalOverlay'); if (o) o.hidden = true; },
-    submitForge: function () {
-        var task = ($('#forgeTask').value || '').trim();
-        if (!task) { $('#forgeTask').focus(); return; }
-        var max = $('#forgeMax').value || '3';
-        this.closeForge();
-        this.runForge(task, max);
+    openCrew: function () { var o = $('#modalOverlay'); if (o) { o.hidden = false; var t = $('#crewTask'); if (t) t.focus(); } },
+    closeCrew: function () { var o = $('#modalOverlay'); if (o) o.hidden = true; },
+    submitCrew: function () {
+        var task = ($('#crewTask').value || '').trim();
+        if (!task) { $('#crewTask').focus(); return; }
+        var max = $('#crewMax').value || '3';
+        this.closeCrew();
+        this.runCrew(task, max);
     },
-    // Launch `ollamadev forge "<task>"` in a fresh terminal and show it full-screen.
-    runForge: function (task, max) {
+    // Launch `ollamadev crew "<task>"` in a fresh terminal and show it full-screen.
+    runCrew: function (task, max) {
         if (this.terminals.length >= this.MAX_TERMINALS) { banner('close a terminal first (max ' + this.MAX_TERMINALS + ')', 'err'); return; }
         var model = $('#modelSelect').value || 'llama3.2:latest';
         var cli = this.cli || 'ollamadev';
         var q = "'" + String(task).replace(/'/g, "'\\''") + "'"; // shell single-quote
-        var cmd = cli + ' forge ' + q + ' --max ' + (parseInt(max, 10) || 3) + ' -m ' + model;
-        var id = rid(); var t = new Terminal(id, 'forge');
+        var cmd = cli + ' crew ' + q + ' --max ' + (parseInt(max, 10) || 3) + ' -m ' + model;
+        var id = rid(); var t = new Terminal(id, 'crew');
         var self = this;
         Promise.resolve(window.termCreate(id, model)).then(function () {
             self.terminals.push(t); self.render(); self.setView('code'); self.setLayout('term');
             setTimeout(function () { try { window.termWrite(id, strToB64(cmd + '\n')); } catch (e) {} }, 400);
-            banner('forge running…', 'ok');
-        }).catch(function (e) { banner('forge launch failed: ' + e, 'err'); });
+            banner('crew running…', 'ok');
+        }).catch(function (e) { banner('crew launch failed: ' + e, 'err'); });
     },
     toggleZoom: function (id) {
         this.zoomed = this.zoomed === id ? null : id;

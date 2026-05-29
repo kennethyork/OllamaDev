@@ -153,7 +153,7 @@ class OllamaClient {
     }
 
     // One-shot chat constrained to valid JSON (Ollama's format=json). Returns the
-    // decoded object, or null on failure. Used by Forge's Director/Auditor so
+    // decoded object, or null on failure. Used by Crew's Director/Auditor so
     // local models reliably emit parseable plans/verdicts.
     public function chatJson(string $model, array $messages): ?array {
         $params = ['model' => $model, 'messages' => $messages, 'stream' => false, 'format' => 'json', 'options' => self::chatOptions()];

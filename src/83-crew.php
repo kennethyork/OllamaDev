@@ -1,21 +1,21 @@
-// FORGE — a local "bench" of agents (Plyrium-Forge core idea, Ollama-only).
+// OLLAMADEV CREW — a local "bench" of agents (inspired by Plyrium Forge, Ollama-only).
 // A Director decomposes a task into independent subtasks; each Coder works in its
 // own git worktree/branch via the normal agent loop; an Auditor reviews every
 // diff; audit-clean branches auto-merge, flagged/conflicting ones are held.
 // 100% vanilla PHP + git + the local Ollama model. No parallel inference (one
 // local model serialises anyway), so coders run sequentially in isolation.
-class Forge {
+class Crew {
     public static function run(string $task, array $opts = []): int {
         $task = trim($task);
-        if ($task === '') { echo "Usage: ollamadev forge \"<high-level task>\"\n"; return 1; }
-        if (!self::isGitRepo()) { echo "\033[31mforge needs a git repository.\033[0m  Run `git init` first.\n"; return 1; }
-        if (!self::gitWorktreeSupported()) { echo "\033[31mforge needs `git worktree` (git 2.5+).\033[0m\n"; return 1; }
+        if ($task === '') { echo "Usage: ollamadev crew \"<high-level task>\"\n"; return 1; }
+        if (!self::isGitRepo()) { echo "\033[31mcrew needs a git repository.\033[0m  Run `git init` first.\n"; return 1; }
+        if (!self::gitWorktreeSupported()) { echo "\033[31mcrew needs `git worktree` (git 2.5+).\033[0m\n"; return 1; }
 
         $agent = new Agent();
         if (!$agent->checkConnection()) { echo "\033[31mCannot reach Ollama.\033[0m Start it with: ollama serve\n"; return 1; }
         $model = $agent->getModel();
-        $maxCoders = max(1, min(6, (int)($opts['max'] ?? Config::get('forge.maxCoders', 4))));
-        $maxIter = max(2, (int)($opts['iterations'] ?? Config::get('forge.coderIterations', 10)));
+        $maxCoders = max(1, min(6, (int)($opts['max'] ?? Config::get('crew.maxCoders', 4))));
+        $maxIter = max(2, (int)($opts['iterations'] ?? Config::get('crew.coderIterations', 10)));
 
         $base = self::sh('git rev-parse --abbrev-ref HEAD');
         $baseCommit = self::sh('git rev-parse HEAD');
@@ -24,18 +24,18 @@ class Forge {
         if ($dirty) echo "\033[33m  ⚠ working tree has uncommitted changes — coders branch from the last commit (HEAD), not your working copy.\033[0m\n";
 
         $c = "\033[36m"; $d = "\033[2m"; $b = "\033[1m"; $g = "\033[32m"; $y = "\033[33m"; $r = "\033[0m";
-        $runId = 'forge_' . date('Ymd_His');
-        echo "\n{$b}🛠  Forge{$r}  {$d}model {$c}{$model}{$r}{$d} · base {$base}@" . substr($baseCommit, 0, 7) . "{$r}\n";
+        $runId = 'crew_' . date('Ymd_His');
+        echo "\n{$b}👥 OllamaDev Crew{$r}  {$d}model {$c}{$model}{$r}{$d} · base {$base}@" . substr($baseCommit, 0, 7) . "{$r}\n";
 
         // ---- Researcher: survey the codebase, write a shared findings vault ----
         $research = '';
         if (($opts['research'] ?? true) !== false) {
             echo "\n{$b}▸ Researcher{$r} surveying the codebase…\n";
-            $research = self::research($agent, $task, max(3, (int)Config::get('forge.researchIterations', 6)));
+            $research = self::research($agent, $task, max(3, (int)Config::get('crew.researchIterations', 6)));
             if ($research !== '') {
-                $vaultDir = Config::dataDir() . '/forge/' . $runId;
+                $vaultDir = Config::dataDir() . '/crew/' . $runId;
                 @mkdir($vaultDir, 0755, true);
-                @file_put_contents($vaultDir . '/research.md', "# Forge research\n\nTask: $task\n\n" . $research);
+                @file_put_contents($vaultDir . '/research.md', "# Crew research\n\nTask: $task\n\n" . $research);
                 $brief = trim(preg_replace('/\s+/', ' ', $research));
                 echo "  {$d}" . substr($brief, 0, 110) . (strlen($brief) > 110 ? '…' : '') . "{$r}\n";
             } else {
@@ -51,12 +51,12 @@ class Forge {
         foreach ($subtasks as $i => $st) echo "  {$c}" . ($i + 1) . ".{$r} " . ($st['title'] ?? 'subtask') . "\n";
 
         // ---- Coders: one git worktree/branch each ----
-        $wtRoot = sys_get_temp_dir() . '/ollamadev-forge/' . $runId;
+        $wtRoot = sys_get_temp_dir() . '/ollamadev-crew/' . $runId;
         @mkdir($wtRoot, 0755, true);
         $results = [];
         foreach ($subtasks as $i => $st) {
             $n = $i + 1;
-            $branch = 'forge/' . substr($runId, 6) . '-' . $n . '-' . self::slug($st['title'] ?? ('task' . $n));
+            $branch = 'crew/' . substr($runId, 6) . '-' . $n . '-' . self::slug($st['title'] ?? ('task' . $n));
             $wt = $wtRoot . '/c' . $n;
             echo "\n{$b}▸ Coder {$n}{$r} {$d}{$branch}{$r}\n";
             $add = self::sh('git worktree add -b ' . escapeshellarg($branch) . ' ' . escapeshellarg($wt) . ' ' . escapeshellarg($baseCommit) . ' 2>&1');
@@ -67,7 +67,7 @@ class Forge {
             // .ollamadev state (costs/checkpoints/sessions it wrote in the worktree).
             self::sh('git -C ' . escapeshellarg($wt) . ' add -A -- . ' . escapeshellarg(':(exclude).ollamadev'));
             $changed = self::sh('git -C ' . escapeshellarg($wt) . ' diff --cached --name-only') !== '';
-            if ($changed) self::sh('git -C ' . escapeshellarg($wt) . ' commit -q -m ' . escapeshellarg('forge: ' . ($st['title'] ?? 'task ' . $n)) . ' 2>&1');
+            if ($changed) self::sh('git -C ' . escapeshellarg($wt) . ' commit -q -m ' . escapeshellarg('crew: ' . ($st['title'] ?? 'task ' . $n)) . ' 2>&1');
             $diff = self::sh('git -C ' . escapeshellarg($wt) . ' diff ' . escapeshellarg($baseCommit) . ' HEAD');
             $files = array_filter(explode("\n", self::sh('git -C ' . escapeshellarg($wt) . ' diff --name-only ' . escapeshellarg($baseCommit) . ' HEAD')));
             echo "  " . ($diff === '' ? "{$d}no changes{$r}" : count($files) . " file(s) changed") . "\n";
@@ -176,7 +176,7 @@ class Forge {
                 "files are written, stop.\n\n" . $goalLine .
                 "Your subtask: " . ($st['title'] ?? '') . "\n" . ($st['prompt'] ?? '') . $ctx;
             $messages = [['role' => 'user', 'content' => $prompt]];
-            $dbg = (bool)getenv('FORGE_DEBUG');
+            $dbg = (bool)getenv('CREW_DEBUG');
             for ($i = 0; $i < $maxIter; $i++) {
                 $turn = $agent->chatTurn($messages);
                 $calls = $turn['calls'] ?? [];
