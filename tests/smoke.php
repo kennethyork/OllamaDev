@@ -215,15 +215,22 @@ echo "\n== New features (harness) ==\n";
 
 // chatOptions must set num_ctx well above Ollama's silent 2048 default, or the
 // agent's system prompt + tool history get truncated mid-task.
-if (preg_match('/class Config \{.*?\n\}/s', $src, $cfg)
- && preg_match('/public static function chatOptions\(\): array \{.*?\n    \}/s', $src, $co)) {
-    eval($cfg[0]);
-    eval('class _Opts { ' . $co[0] . ' }');
-    $opts = _Opts::chatOptions();
+if (preg_match('/class Config \{.*?\n\}/s', $src, $cfg) && preg_match('/class OllamaClient \{.*?\n\}/s', $src, $oc)) {
+    if (!class_exists('Config')) eval($cfg[0]);
+    if (!class_exists('OllamaClient')) eval($oc[0]);
+    $opts = OllamaClient::chatOptions(); // no model → baseline, no network
     ok('chatOptions sets num_ctx > 2048', ($opts['num_ctx'] ?? 0) > 2048, 'num_ctx=' . ($opts['num_ctx'] ?? 'unset'));
     ok('chatOptions sets a temperature', isset($opts['temperature']));
+    // lowering the cap below the baseline must pull num_ctx down (weak hardware)
+    Config::set('ollama.maxContextWindow', 4096);
+    ok('maxContextWindow can lower the window', (OllamaClient::chatOptions()['num_ctx'] ?? 0) === 4096);
+    Config::set('ollama.maxContextWindow', 32768);
+    // manual pin: autoContext off uses contextWindow exactly
+    Config::set('ollama.autoContext', false); Config::set('ollama.contextWindow', 6000);
+    ok('autoContext off pins contextWindow', (OllamaClient::chatOptions()['num_ctx'] ?? 0) === 6000);
+    Config::set('ollama.autoContext', true); Config::set('ollama.contextWindow', 16384);
 } else {
-    ok('chatOptions extractable', false, 'Config or chatOptions not found');
+    ok('chatOptions extractable', false, 'Config or OllamaClient not found');
 }
 
 // Tab-completion's common-prefix helper underpins completion behaviour.

@@ -37,7 +37,10 @@ class Usage {
     public static function totalEval(): int { return self::$totalEval; }
 
     public static function contextWindow(): int {
-        return (int)Config::get('ollama.contextWindow', 16384);
+        // Prefer the actual num_ctx last sent (auto-grown to the model's max), so
+        // the meter reflects the real window, not just the configured baseline.
+        $eff = class_exists('OllamaClient') ? OllamaClient::effectiveContext() : 0;
+        return $eff > 0 ? $eff : (int)Config::get('ollama.contextWindow', 16384);
     }
 
     // A 10-cell ASCII fill bar for the given fraction (0..1).
