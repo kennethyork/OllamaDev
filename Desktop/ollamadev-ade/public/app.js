@@ -69,11 +69,9 @@ Terminal.prototype.mount = function (host) {
         '<div class="term-head"><span class="nm">' + esc(this.model) + '</span><span class="id">' + this.id.slice(-6) + '</span>' +
         '<span class="badge ' + this.status + '"><span class="b-dot"></span><span class="b-label">' + this.status + '</span></span>' +
         '<button class="x" title="Close">&times;</button></div>' +
-        '<div class="term-screen" tabindex="0" title="Type here — this is the live ollamadev CLI"></div>' +
-        '<div class="agent-row"><span class="ico">🤖</span><input class="agent-input" placeholder="send a full prompt to the CLI…"><button>Run</button></div>';
+        '<div class="term-screen" tabindex="0" title="Click and type — this is the live ollamadev CLI"></div>';
     this.screen = host.querySelector('.term-screen');
     this.badgeEl = host.querySelector('.badge');
-    var arow = host.querySelector('.agent-row');
     var head = host.querySelector('.term-head');
     head.title = 'Double-click to zoom / restore';
     head.ondblclick = function (e) { if (e.target.classList.contains('x')) return; app.toggleZoom(self.id); };
@@ -87,10 +85,6 @@ Terminal.prototype.mount = function (host) {
         var t = (e.clipboardData || window.clipboardData).getData('text');
         if (t) { e.preventDefault(); try { window.termWrite(self.id, strToB64(t)); } catch (err) {} }
     });
-    arow.querySelector('button').onclick = function () { self.runAgent(arow.querySelector('.agent-input')); };
-    arow.querySelector('.agent-input').addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') self.runAgent(arow.querySelector('.agent-input'));
-    });
     this.screen.onclick = function () { self.screen.focus(); };
     if (!this.polling) this.poll();
     setTimeout(function () { self.screen.focus(); }, 0);
@@ -101,12 +95,6 @@ Terminal.prototype.setStatus = function (s) {
         this.badgeEl.className = 'badge ' + s;
         var lbl = this.badgeEl.querySelector('.b-label'); if (lbl) lbl.textContent = s;
     }
-};
-Terminal.prototype.runAgent = function (el) {
-    var v = (el.value || '').trim(); if (!v) return; el.value = '';
-    this.setStatus('running'); this.lastData = Date.now();
-    // The terminal runs the interactive ollamadev CLI, so just type the prompt in.
-    try { window.termWrite(this.id, strToB64(v + '\n')); } catch (e) {}
 };
 Terminal.prototype.newLine = function () { this.line = document.createElement('div'); this.line.className = 'term-line'; this.screen.appendChild(this.line); };
 Terminal.prototype.emit = function (s) {
