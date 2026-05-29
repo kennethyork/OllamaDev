@@ -83,6 +83,9 @@ $app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $
     });
 
     // --- Files ---
+    $b->bind('getRoot', function () use ($files): string {
+        return $files->getRoot();
+    });
     $b->bind('listFiles', function (?string $path = null) use ($files): array {
         return $files->listDir($path);
     });

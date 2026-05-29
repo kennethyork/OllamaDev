@@ -110,16 +110,115 @@ Terminal.prototype.close = function () { this.polling = false; try { window.term
 
 function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 
+// ---------- code editor (tabs + line-numbered textarea, vanilla) ----------
+var Editor = {
+    tabs: [], active: -1, mounted: null,
+    cur: function () { return this.active >= 0 ? this.tabs[this.active] : null; },
+    open: function (path, name) {
+        var self = this;
+        var i = this.tabs.findIndex(function (t) { return t.path === path; });
+        if (i >= 0) { this.active = i; this.render(); App.markActiveFile(path); return; }
+        Promise.resolve(window.readFile(path)).then(function (r) {
+            if (!r || r.error) { banner('open failed: ' + ((r && r.error) || 'unknown'), 'err'); return; }
+            self.tabs.push({ path: path, name: name || path.split('/').pop(), content: String(r.content == null ? '' : r.content), dirty: false });
+            self.active = self.tabs.length - 1;
+            self.render();
+            App.markActiveFile(path);
+        }).catch(function (e) { banner('open error: ' + e, 'err'); });
+    },
+    save: function () {
+        var t = this.cur(); if (!t) return;
+        var ta = document.querySelector('#editorBody .ed-text'); if (ta) t.content = ta.value;
+        Promise.resolve(window.writeFile(t.path, t.content)).then(function (r) {
+            if (r && r.success) { t.dirty = false; Editor.renderTabs(); Editor.refreshStatus(); banner('saved ' + t.name, 'ok'); }
+            else banner('save failed: ' + ((r && r.error) || 'unknown'), 'err');
+        }).catch(function (e) { banner('save error: ' + e, 'err'); });
+    },
+    close: function (i) {
+        var t = this.tabs[i];
+        if (t && t.dirty && !window.confirm('Discard unsaved changes to ' + t.name + '?')) return;
+        this.tabs.splice(i, 1);
+        if (this.active >= this.tabs.length) this.active = this.tabs.length - 1;
+        this.mounted = null;
+        this.render();
+        var c = this.cur(); App.markActiveFile(c ? c.path : null);
+    },
+    renderTabs: function () {
+        var bar = $('#editorTabs'); var self = this; if (!bar) return;
+        bar.innerHTML = '';
+        this.tabs.forEach(function (t, i) {
+            var el = document.createElement('div');
+            el.className = 'etab' + (i === self.active ? ' active' : '') + (t.dirty ? ' dirty' : '');
+            el.innerHTML = '<span class="dot">•</span><span class="nm">' + esc(t.name) + '</span><button class="xc" title="Close">×</button>';
+            el.querySelector('.nm').onclick = function () { self.active = i; self.render(); App.markActiveFile(t.path); };
+            el.querySelector('.xc').onclick = function (e) { e.stopPropagation(); self.close(i); };
+            bar.appendChild(el);
+        });
+    },
+    refreshStatus: function () {
+        var t = this.cur(); var st = document.querySelector('#editorBody .ed-status'); var ta = document.querySelector('#editorBody .ed-text');
+        if (!t || !st || !ta) return;
+        var n = ta.value.split('\n').length;
+        st.textContent = (t.dirty ? '● ' : '') + t.name + ' — ' + n + ' lines  (Ctrl+S to save)';
+    },
+    render: function () {
+        this.renderTabs();
+        var body = $('#editorBody'); if (!body) return;
+        var t = this.cur();
+        if (!t) { body.innerHTML = '<div id="editorEmpty" class="dim">Select a file from the sidebar to edit it.</div>'; this.mounted = null; return; }
+        if (this.mounted !== t.path) {
+            body.innerHTML = '<div class="ed-gutter"></div><textarea class="ed-text" spellcheck="false" wrap="off"></textarea><div class="ed-status"></div>';
+            var ta = body.querySelector('.ed-text'), gut = body.querySelector('.ed-gutter');
+            ta.value = t.content;
+            var sync = function () {
+                var n = ta.value.split('\n').length, g = '';
+                for (var k = 1; k <= n; k++) g += k + '\n';
+                gut.textContent = g;
+                Editor.refreshStatus();
+            };
+            ta.addEventListener('input', function () {
+                t.content = ta.value;
+                if (!t.dirty) { t.dirty = true; Editor.renderTabs(); }
+                sync();
+            });
+            ta.addEventListener('scroll', function () { gut.scrollTop = ta.scrollTop; });
+            ta.addEventListener('keydown', function (e) {
+                if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); Editor.save(); return; }
+                if (e.key === 'Tab') {
+                    e.preventDefault();
+                    var s = ta.selectionStart, en = ta.selectionEnd;
+                    ta.value = ta.value.slice(0, s) + '    ' + ta.value.slice(en);
+                    ta.selectionStart = ta.selectionEnd = s + 4;
+                    t.content = ta.value; if (!t.dirty) { t.dirty = true; Editor.renderTabs(); } sync();
+                }
+            });
+            this.mounted = t.path;
+            sync(); ta.focus();
+        }
+    }
+};
+
 // ---------- app ----------
 var App = {
-    terminals: [],
+    terminals: [], cwd: '.',
     init: function () {
         var self = this;
         $('#newTermBtn').onclick = function () { self.newTerminal(); };
+        // Global Ctrl/Cmd+S saves the active editor tab from anywhere.
+        document.addEventListener('keydown', function (e) {
+            if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); Editor.save(); }
+        });
         this.loadModels().then(function () {
-            self.loadFiles('.');
+            Promise.resolve(window.getRoot ? window.getRoot() : '.').then(function (root) {
+                self.loadFiles(root || '.');
+            }).catch(function () { self.loadFiles('.'); });
             self.newTerminal();
             banner('ready', 'ok');
+        });
+    },
+    markActiveFile: function (path) {
+        document.querySelectorAll('#fileTree .tree-item').forEach(function (el) {
+            el.classList.toggle('active', !!path && el.dataset.type === 'file' && el.dataset.path === path);
         });
     },
     loadModels: function () {
@@ -133,16 +232,31 @@ var App = {
     loadFiles: function (path) {
         var self = this;
         Promise.resolve(window.listFiles(path)).then(function (items) {
+            if (items && items.error) { banner('list failed: ' + items.error, 'err'); return; }
             if (!Array.isArray(items)) return;
+            self.cwd = path;
+            var cwdEl = $('#cwd'); if (cwdEl) cwdEl.textContent = path;
+            var bc = $('#breadcrumb'); if (bc) bc.textContent = path;
             var tree = $('#fileTree');
-            tree.innerHTML = items.map(function (it) {
-                return '<div class="tree-item" data-path="' + esc(it.path) + '" data-type="' + esc(it.type) + '">' +
+            var html = '';
+            // Parent (".." ) entry, unless we're at the filesystem root.
+            var parent = path.replace(/\/+$/, '').replace(/\/[^\/]*$/, '') || '/';
+            if (parent && parent !== path) {
+                html += '<div class="tree-item up" data-path="' + esc(parent) + '" data-type="dir" data-name="..">📁 ..</div>';
+            }
+            html += items.map(function (it) {
+                return '<div class="tree-item" data-path="' + esc(it.path) + '" data-type="' + esc(it.type) + '" data-name="' + esc(it.name) + '">' +
                     (it.type === 'dir' ? '📁' : '📄') + ' ' + esc(it.name) + '</div>';
             }).join('');
+            tree.innerHTML = html;
             tree.querySelectorAll('.tree-item').forEach(function (el) {
-                el.onclick = function () { if (el.dataset.type === 'dir') self.loadFiles(el.dataset.path); };
+                el.onclick = function () {
+                    if (el.dataset.type === 'dir') self.loadFiles(el.dataset.path);
+                    else Editor.open(el.dataset.path, el.dataset.name);
+                };
             });
-        }).catch(function () {});
+            self.markActiveFile(Editor.cur() ? Editor.cur().path : null);
+        }).catch(function (e) { banner('list error: ' + e, 'err'); });
     },
     newTerminal: function () {
         var model = $('#modelSelect').value || 'llama3.2:latest';
