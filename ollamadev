@@ -4624,7 +4624,10 @@ $GLOBALS['currentSessionModel'] = null;
 
     public function start(): void {
         Permission::setInteractive(true); // enable approval prompts for mutating tools
-        echo $this->renderBanner();
+        // Hosts that show their own model/title chrome (e.g. the desktop ADE) set
+        // OLLAMADEV_NO_BANNER to suppress the ASCII banner and the model tip.
+        $showBanner = !getenv('OLLAMADEV_NO_BANNER');
+        if ($showBanner) echo $this->renderBanner();
         if (!$this->agent->checkConnection()) {
             echo "\033[33m  ⚠ Cannot connect to Ollama at " . Config::get('ollama.host') . "\033[0m\n";
             echo "\033[2m    Start it with: ollama serve\033[0m\n\n";
@@ -4635,7 +4638,7 @@ $GLOBALS['currentSessionModel'] = null;
         }
 
         // Nudge new users toward a capable model for agentic work.
-        if (!$this->isRecommended($this->model)) {
+        if ($showBanner && !$this->isRecommended($this->model)) {
             echo "\033[2m  tip: for reliable tool use try a recommended model — \033[0m\033[36mollama pull qwen2.5-coder\033[0m\033[2m, then /model qwen2.5-coder:latest\033[0m\n";
         }
 

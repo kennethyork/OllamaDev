@@ -97,6 +97,16 @@ Terminal.prototype.setStatus = function (s) {
     }
 };
 Terminal.prototype.newLine = function () { this.line = document.createElement('div'); this.line.className = 'term-line'; this.screen.appendChild(this.line); };
+// Remove the last character of the current line (handles the pty's \b \b erase).
+Terminal.prototype.backspace = function () {
+    if (!this.line) return;
+    var nodes = this.line.childNodes;
+    for (var k = nodes.length - 1; k >= 0; k--) {
+        var sp = nodes[k], t = sp.textContent || '';
+        if (t.length > 0) { sp.textContent = t.slice(0, -1); if (sp.textContent === '') this.line.removeChild(sp); return; }
+        this.line.removeChild(sp);
+    }
+};
 Terminal.prototype.emit = function (s) {
     if (!this.line) this.newLine();
     // A pending carriage return overwrites the current line (e.g. progress bars),
@@ -135,6 +145,7 @@ Terminal.prototype.write = function (text) {
         }
         if (ch === '\r') { this.cr = true; i++; continue; }
         if (ch === '\n') { this.cr = false; this.newLine(); i++; continue; }
+        if (ch === '\x08') { this.backspace(); i++; continue; } // erase (pty echoes \b \b)
         var j = i;
         while (j < text.length && text[j] !== '\x1b' && text[j] !== '\n' && text[j] !== '\r') j++;
         this.emit(text.slice(i, j)); i = j;
@@ -451,7 +462,7 @@ var App = {
     launchCli: function (id, model) {
         // SIMPLE_INPUT: the CLI uses plain line input so the embedded terminal
         // (which the host pty echoes into) renders cleanly without raw-mode escapes.
-        var cmd = 'OLLAMADEV_SIMPLE_INPUT=1 ' + (this.cli || 'ollamadev') + (model ? ' -m ' + model : '') + '\n';
+        var cmd = 'OLLAMADEV_SIMPLE_INPUT=1 OLLAMADEV_NO_BANNER=1 ' + (this.cli || 'ollamadev') + (model ? ' -m ' + model : '') + '\n';
         // Small delay so the pty shell is ready to receive the command.
         setTimeout(function () { try { window.termWrite(id, strToB64(cmd)); } catch (e) {} }, 350);
     },
