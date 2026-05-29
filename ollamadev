@@ -2148,230 +2148,28 @@ public function run(array $messages, callable $handler = null): string {
     }
 
 public function parseToolCalls(string $content): array {
-        $calls = [];
-
-        // Primary: balanced-JSON extraction (most reliable for local models).
+        // Primary: balanced-JSON extraction. Handles every JSON form models
+        // emit - <tool_code>/<tool_call>-wrapped, bare, missing close tags,
+        // nested arguments - covering the overwhelming majority of cases.
         $jsonCalls = self::extractJsonToolCalls($content);
         if (!empty($jsonCalls)) {
             return array_map(fn($c) => ['name' => $c['name'], 'params' => $c['params']], $jsonCalls);
         }
 
-if (preg_match_all('/<tool_code>\s*(\{.*?\})\s*<\/tool_code>/s', $content, $matches, PREG_SET_ORDER)) {
-            foreach ($matches as $m) {
-                $json = json_decode($m[1], true);
-                if ($json && isset($json['name'])) {
-                    $calls[] = ['name' => $json['name'], 'params' => $json['arguments'] ?? []];
-                }
-            }
-            if (!empty($calls)) return $calls;
-        }
-        
-if (preg_match_all('/<tool_call>\s*(\{.*?\})\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
-            foreach ($matches as $m) {
-                $json = json_decode($m[1], true);
-                if ($json && isset($json['name'])) {
-                    $args = $json['arguments'] ?? $json['params'] ?? [];
-                    $calls[] = ['name' => $json['name'], 'params' => $args];
-                }
-            }
-            if (!empty($calls)) return $calls;
-        }
-
-        if (preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*(\{[\s\S]*?\})\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
-            foreach ($matches as $m) {
-                $json = json_decode($m[2], true);
-                if ($json) {
-                    $calls[] = ['name' => $m[1], 'params' => $json];
-                }
-            }
-            if (!empty($calls)) return $calls;
-        }
-
-        if (preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*(\{.*?\})\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
-            foreach ($matches as $m) {
-                $json = json_decode($m[2], true);
-                if ($json) {
-                    $calls[] = ['name' => $m[1], 'params' => $json];
-                }
-            }
-            if (!empty($calls)) return $calls;
-        }
-        
-        if (preg_match_all('/<tool_call>\s*(\{.*?\})\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
-            foreach ($matches as $m) {
-                $json = json_decode($m[1], true);
-                if ($json && isset($json['name'])) {
-                    $calls[] = ['name' => $json['name'], 'params' => $json['arguments'] ?? []];
-                }
-            }
-            if (!empty($calls)) return $calls;
-        }
-
-        if (preg_match_all('/tool_call_code:\s*(\w+)/', $content, $matches, PREG_SET_ORDER)) {
-            foreach ($matches[1] as $name) { $calls[] = ['name' => $name, 'params' => []]; }
-            if (!empty($calls)) return $calls;
-        }
-
-if (preg_match_all('/<tool_code>\s*(\{[\s\S]*?\})\s*<\/tool_code>/', $content, $matches, PREG_SET_ORDER)) {
-            foreach ($matches as $m) {
-                $json = json_decode($m[1], true);
-                if ($json && isset($json['name'])) {
-                    $args = $json['arguments'] ?? $json['params'] ?? [];
-                    $calls[] = ['name' => $json['name'], 'params' => is_array($args) ? $args : []];
-                }
-            }
-            if (!empty($calls)) return $calls;
-        }
-
-        if (preg_match_all('/<tool_call>\s*"server":\s*"([^"]+)",\s*"tool":\s*"([^"]+)"[^}]*\}/s', $content, $matches, PREG_SET_ORDER)) {
-            foreach ($matches as $m) {
-                $server = $m[1];
-                $tool = $m[2];
-                $args = [];
-                if (preg_match('/"args":\s*(\{[^}]+\}|"[^"]*")/', $m[0], $argMatch)) {
-                    $args = json_decode($argMatch[1], true) ?? [];
-                }
-                $calls[] = ['name' => 'mcp', 'params' => ['server' => $server, 'tool' => $tool, 'args' => $args]];
-            }
-            if (!empty($calls)) return $calls;
-        }
-
-        if (preg_match_all('/<\/tool_call>\s*(\{[\s\S]*?\})\s*$/m', $content, $matches, PREG_SET_ORDER)) {
-            foreach ($matches as $m) {
-                $json = json_decode(trim($m[1]), true);
-                if ($json && isset($json['name'])) {
-                    $args = $json['arguments'] ?? $json['params'] ?? [];
-                    $calls[] = ['name' => $json['name'], 'params' => is_array($args) ? $args : []];
-                }
-            }
-            if (!empty($calls)) return $calls;
-        }
-
-        if (empty($calls) && preg_match_all('/\{"name":\s*"(\w+)",\s*"arguments":\s*(\{[^}]+\})\}/', $content, $matches, PREG_SET_ORDER)) {
-            foreach ($matches as $m) {
-                $args = json_decode($m[2], true) ?? [];
-                $calls[] = ['name' => $m[1], 'params' => $args];
-            }
-            if (!empty($calls)) return $calls;
-        }
-
-        if (empty($calls)) {
-            preg_match_all('/<tool_code>\s*(\{[^}]+\})\s*<\/tool_code>/s', $content, $matches, PREG_SET_ORDER);
-            foreach ($matches as $m) {
-                $json = json_decode($m[1], true);
-                if ($json && isset($json['name'])) {
-                    $args = $json['arguments'] ?? $json['params'] ?? [];
-                    if (isset($args[0]) && is_string($args[0])) {
-                        $args = ['path' => $args[0]];
-                    }
-                    $calls[] = ['name' => $json['name'], 'params' => $args];
-                }
-            }
-            if (!empty($calls)) return $calls;
-        }
-
-if (preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*arguments:\s*\{[^}]*\}[\s\n]*/', $content, $matches, PREG_SET_ORDER)) {
-            foreach ($matches as $m) {
-                if (preg_match('/arguments:\s*(\{[^}]*\})/', $m[0], $j)) {
-                    $json = json_decode($j[1], true);
-                    if ($json) {
-                        $calls[] = ['name' => trim($m[1]), 'params' => $json];
-                    }
-                }
-            }
-            if (!empty($calls)) return $calls;
-        }
-
-        if (preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*(?:params|arguments):\s*([^\n]+)\n\s*(.+?)\n\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
+        // Fallback: the documented text format some models emit, e.g.
+        //   name: ls   params: path=/tmp
+        //   name: write arguments: file_path=a.txt content="hi"
+        // (with or without surrounding <tool_call> tags). Best-effort key=value.
+        $calls = [];
+        if (preg_match_all('/name:\s*([a-zA-Z_]\w*)\s*(?:params|arguments):\s*([^\n<]+)/i', $content, $matches, PREG_SET_ORDER)) {
             foreach ($matches as $m) {
                 $params = [];
-                $paramStr = trim($m[3]);
-                preg_match_all('/([a-zA-Z_][a-zA-Z0-9_]*)=("[^"]*"|\'[^\']*\'|[^,\n]+)/', $paramStr, $kvMatches);
-                foreach ($kvMatches[1] as $i => $key) {
-                    $val = trim($kvMatches[2][$i], "\"' ");
-                    $params[$key] = $val;
-                }
-                $toolName = trim($m[1]);
-                if (!empty($params) || !empty($toolName)) {
-                    $calls[] = ['name' => $toolName, 'params' => $params];
-                }
-            }
-            if (!empty($calls)) return $calls;
-        }
-
-        if (preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*(?:params|arguments):\s*(.+?)\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
-            foreach ($matches as $m) {
-                $params = [];
-                $paramStr = trim($m[2]);
-                $paramStr = trim($paramStr, ',');
-                preg_match_all('/([a-zA-Z_][a-zA-Z0-9_]*)=("[^"]*"|\'[^\']*\'|[^,\s]+)/', $paramStr, $kvMatches);
-                foreach ($kvMatches[1] as $i => $key) {
-                    $val = trim($kvMatches[2][$i], "\"' ");
-                    $params[$key] = $val;
-                }
-                $toolName = trim($m[1]);
-                if (!empty($params) || !empty($toolName)) {
-                    $calls[] = ['name' => $toolName, 'params' => $params];
-                }
-            }
-            if (!empty($calls)) return $calls;
-        }
-
-        if (preg_match_all('/<tool_call>\s*(\w+)\s*\n\s*params:\s*(.+?)\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER)) {
-            foreach ($matches as $m) {
-                $params = [];
-                $paramStr = trim($m[2]);
-                preg_match_all('/([a-zA-Z_][a-zA-Z0-9_]*)=("[^"]*"|\'[^\']*\'|[^,\n]+)/', $paramStr, $kvMatches);
-                foreach ($kvMatches[1] as $i => $key) {
-                    $val = trim($kvMatches[2][$i], "\"' ");
-                    $params[$key] = $val;
+                if (preg_match_all('/([a-zA-Z_]\w*)\s*=\s*("[^"]*"|\'[^\']*\'|[^,\s]+)/', $m[2], $kv, PREG_SET_ORDER)) {
+                    foreach ($kv as $p) $params[$p[1]] = trim($p[2], "\"' ");
                 }
                 $calls[] = ['name' => trim($m[1]), 'params' => $params];
             }
-            if (!empty($calls)) return $calls;
         }
-
-        $toolNames = ['ls', 'view', 'read', 'write', 'edit', 'grep', 'glob', 'find', 'cat', 'execute_command', 'list_directory', 'list_files', 'bash', 'shell', 'mkdir', 'mv', 'cp', 'rm', 'touch', 'diff', 'wc', 'git_status', 'git_diff', 'git_log', 'git_commit', 'git_add', 'git_checkout', 'git_branch', 'git_merge', 'git_rebase', 'git_stash', 'git_push', 'git_pull', 'git_clone', 'patch', 'diagnostics', 'goto_definition', 'find_references', 'bg', 'wait_bg'];
-        $pattern = '/\b(' . implode('|', $toolNames) . ')\b/';
-        preg_match_all($pattern, $content, $matches, PREG_SET_ORDER);
-        foreach ($matches as $m) {
-            $tool = $m[1];
-            if (!in_array($tool, array_column($calls, 'name'))) {
-                $calls[] = ['name' => $tool, 'params' => []];
-            }
-        }
-
-        if (preg_match('/`(\w+)`\s*(?:command|tool|function)/i', $content, $m) && !in_array($m[1], array_column($calls, 'name'))) {
-            if (in_array($m[1], $toolNames)) { $calls[] = ['name' => $m[1], 'params' => []]; }
-        }
-
-        if (preg_match('/(?:run|execute|call|use)\s+(?:the\s+)?`?(\w+)`?(?:\s+command|\s+tool)?/i', $content, $m)) {
-            if (in_array($m[1], $toolNames) && !in_array($m[1], array_column($calls, 'name'))) {
-                $calls[] = ['name' => $m[1], 'params' => []];
-            }
-        }
-
-        if (preg_match_all('/"name"\s*:\s*"(\w+)"/', $content, $m) && empty($calls)) {
-            foreach ($m[1] as $name) {
-                if (in_array($name, $toolNames) && !in_array($name, array_column($calls, 'name'))) {
-                    $calls[] = ['name' => $name, 'params' => []];
-                }
-            }
-        }
-
-if (empty($calls)) {
-            preg_match_all('/<tool_call>\s*name:\s*(\w+)\s*params:\s*([^\n<]+)\s*<\/tool_call>/s', $content, $matches, PREG_SET_ORDER);
-            foreach ($matches as $m) {
-                $toolName = trim($m[1]);
-                $rawParams = trim($m[2]);
-                if (!empty($toolName) && !empty($rawParams)) {
-                    $tool = Tools::find($toolName);
-                    $paramName = $tool ? ($tool->params[0] ?? 'command') : 'command';
-                    $calls[] = ['name' => $toolName, 'params' => [$paramName => $rawParams]];
-                }
-            }
-        }
-
         return $calls;
     }
 
@@ -2462,7 +2260,7 @@ if (empty($calls)) {
                 $rawParams = trim($m[2]);
                 if (!empty($toolName) && !empty($rawParams)) {
                     $tool = Tools::find($toolName);
-                    $paramName = $tool ? ($tool->params[0] ?? 'command') : 'command';
+                    $paramName = "command";
                     $calls[] = ['name' => $toolName, 'params' => [$paramName => $rawParams]];
                 }
             }
@@ -2474,7 +2272,7 @@ if (empty($calls)) {
                 $toolName = trim($m[1]);
                 $tool = Tools::find($toolName);
                 if ($tool) {
-                    $paramName = $tool->params[0] ?? 'command';
+                    $paramName = "command";
                     $calls[] = ['name' => $toolName, 'params' => [$paramName => trim($m[2])]];
                 }
             }
@@ -2487,7 +2285,7 @@ if (empty($calls)) {
                 $rawParams = trim($m[2]);
                 $tool = Tools::find($toolName);
                 if ($tool && !empty($rawParams)) {
-                    $paramName = $tool->params[0] ?? 'command';
+                    $paramName = "command";
                     $calls[] = ['name' => $toolName, 'params' => [$paramName => $rawParams]];
                 }
             }

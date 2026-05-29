@@ -98,6 +98,39 @@ if (preg_match('/\/\/ Model Context Protocol client.*?\n\}\n/s', $src, $mM)) {
     ok('MCPClient extractable', false, 'class not found in binary');
 }
 
+echo "\n== Tool-call parser (regression) ==\n";
+// Extract both parser methods into a throwaway class and exercise them.
+if (preg_match('/public static function extractJsonToolCalls\(string \$content\): array \{.*?\n    \}/s', $src, $e1)
+ && preg_match('/public function parseToolCalls\(string \$content\): array \{.*?\n    \}/s', $src, $e2)) {
+    eval('class _PC { ' . $e1[0] . "\n" . $e2[0] . ' }');
+    $pc = new _PC();
+    $a = $pc->parseToolCalls('<tool_code>{"name":"ls","arguments":{"path":"."}}</tool_code>');
+    ok('parses a wrapped JSON tool call', count($a) === 1 && $a[0]['name'] === 'ls');
+    $b = $pc->parseToolCalls("name: write params: file_path=a.txt");
+    ok('parses the text name/params format', count($b) === 1 && $b[0]['name'] === 'write' && ($b[0]['params']['file_path'] ?? '') === 'a.txt');
+    $c = $pc->parseToolCalls("Sure! I'll find the file and list the diff for you.");
+    ok('plain prose does NOT trigger false tool calls', count($c) === 0);
+} else {
+    ok('parser methods extractable', false, 'methods not found');
+}
+
+echo "\n== Permission enforcement ==\n";
+if (preg_match('/class Permission \{.*?\n\}/s', $src, $pm)) {
+    eval($pm[0]);
+    Permission::setMode('auto');
+    ok('auto mode allows mutating tools', Permission::check('write', ['file_path' => 'x']) === true);
+    Permission::setMode('readonly');
+    ok('readonly blocks mutating tools', Permission::check('write', ['file_path' => 'x']) === false);
+    ok('readonly still allows read-only tools', Permission::check('ls', []) === true);
+    Permission::setMode('ask');
+    Permission::setInteractive(false);
+    ok('ask (non-interactive) allows read-only', Permission::check('grep', []) === true);
+    Permission::allow('bash');
+    ok('explicitly-allowed tool passes in any mode', Permission::check('bash', []) === true);
+} else {
+    ok('Permission class extractable', false, 'class not found');
+}
+
 echo "\n== Terminal daemon lifecycle ==\n";
 $tid = 'smoke-' . getmypid();
 $tdir = (getenv('HOME') ?: '/tmp') . '/.ollamadev/terminals/' . $tid;
