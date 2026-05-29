@@ -1988,16 +1988,40 @@ class Agent {
             }
         }
 
+        // Chat mode: no tool instructions at all - pure conversation.
+        if ($this->chatMode) {
+            return ['role' => 'system', 'content' => $prompt . $projectMemory];
+        }
+
 $tools = "You have tools available for acting on the project: read/view files, write/edit files, list/search (ls, glob, grep, find), run shell commands (bash), git operations, and code navigation. When a capable model is used these are provided automatically; otherwise call one with:
 <tool_code>{\"name\": \"TOOL\", \"arguments\": {\"PARAM\": \"VALUE\"}}</tool_code>
 
 Use a tool ONLY when the request needs it. For greetings, questions, or explanations, just reply in plain text - do not call a tool.";
 
+        // Small models can't use native tool-calling, so give them explicit
+        // few-shot examples of the exact format - this makes agent mode work
+        // reliably for them too.
+        if ($this->isSmallModel()) {
+            $tools .= "
+
+When an action IS needed, output ONLY the tool call line in exactly this format - no other text:
+User: list the files here
+<tool_code>{\"name\": \"ls\", \"arguments\": {\"path\": \".\"}}</tool_code>
+User: show me README.md
+<tool_code>{\"name\": \"view\", \"arguments\": {\"file_path\": \"README.md\"}}</tool_code>
+User: create notes.txt containing hello
+<tool_code>{\"name\": \"write\", \"arguments\": {\"file_path\": \"notes.txt\", \"content\": \"hello\"}}</tool_code>
+User: find php files
+<tool_code>{\"name\": \"glob\", \"arguments\": {\"pattern\": \"*.php\"}}</tool_code>
+User: run the tests
+<tool_code>{\"name\": \"bash\", \"arguments\": {\"command\": \"ls -la\"}}</tool_code>";
+        }
+
         return ['role' => 'system', 'content' => $prompt . $projectMemory . "\n\n" . $tools];
     }
 
-    public function setModel(string $model): void { $this->model = $model; }
-    public function setChatMode(bool $on): void { $this->chatMode = $on; }
+    public function setModel(string $model): void { $this->model = $model; $this->systemPrompt = $this->buildSystemPrompt(); }
+    public function setChatMode(bool $on): void { $this->chatMode = $on; $this->systemPrompt = $this->buildSystemPrompt(); }
     public function isChatMode(): bool { return $this->chatMode; }
 
     // Heuristic: treat models <= ~3.5GB as "small" - their tool-calling is
