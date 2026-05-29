@@ -157,16 +157,18 @@ class Session {
     private function renderBanner(): string {
         $models = $this->agent->listModelsDetailed();
         $modelCount = count($models);
-        $out = "\n╔══════════════════════════════════════════════════════════════╗\n";
-        $out .= "║                     OllamaDev                                ║\n";
-        $out .= "║  Local AI coding agent powered by Ollama                     ║\n";
-        $out .= "╠══════════════════════════════════════════════════════════════╣\n";
-        $out .= "║  Current Model: {$this->model}                              ║\n";
-        $out .= "║  {$modelCount} model(s) available                                ║\n";
-        $out .= "╠══════════════════════════════════════════════════════════════╣\n";
-        $out .= "║  Commands: /help /models /model /new /clear /exit            ║\n";
-        $out .= "║            /verbose /compact /save /session /git             ║\n";
-        $out .= "╚══════════════════════════════════════════════════════════════╝\n\n";
+        $c = "\033[36m"; $b = "\033[1m"; $d = "\033[2m"; $r = "\033[0m"; // cyan, bold, dim, reset
+        $art = <<<'ART'
+  ___  _ _                       ____
+ / _ \| | | __ _ _ __ ___   __ _|  _ \  _____   __
+| | | | | |/ _` | '_ ` _ \ / _` | | | |/ _ \ \ / /
+| |_| | | | (_| | | | | | | (_| | |_| |  __/\ V /
+ \___/|_|_|\__,_|_| |_| |_|\__,_|____/ \___| \_/
+ART;
+        $out  = "\n{$c}{$b}{$art}{$r}\n";
+        $out .= "{$d}  Local AI coding assistant · powered by Ollama{$r}\n\n";
+        $out .= "  {$d}model{$r} {$c}{$this->model}{$r}   {$d}· {$modelCount} available{$r}\n";
+        $out .= "  {$d}/help · /model · /exit{$r}\n\n";
         return $out;
     }
 
@@ -308,21 +310,15 @@ $GLOBALS['currentSessionModel'] = null;
 
     public function start(): void {
         Permission::setInteractive(true); // enable approval prompts for mutating tools
-        $this->renderBanner();
+        echo $this->renderBanner();
         if (!$this->agent->checkConnection()) {
-            echo "⚠️  Cannot connect to Ollama at " . Config::get('ollama.host') . "\n";
-            echo "   Make sure Ollama is running: `ollama serve`\n\n";
+            echo "\033[33m  ⚠ Cannot connect to Ollama at " . Config::get('ollama.host') . "\033[0m\n";
+            echo "\033[2m    Start it with: ollama serve\033[0m\n\n";
         }
 
         if (!empty($this->messages)) {
-            echo "📜 Loading previous messages...\n";
-            foreach ($this->messages as $msg) {
-                $icon = match($msg['role']) { 'user' => '👤', 'assistant' => '🤖', 'tool' => '🔧', default => '•' };
-                echo "\n{$icon} [{$msg['role']}]\n{$msg['content']}\n";
-            }
-            echo "\n";
+            echo "\033[2m  resumed session · " . count($this->messages) . " messages\033[0m\n";
         }
-        $this->renderStatus();
 
         while (true) {
             $this->renderPrompt();
@@ -399,31 +395,29 @@ $GLOBALS['currentSessionModel'] = null;
             if ($this->handleCommand($input)) break;
 
             $this->addMessage('user', $input);
-            $thinkingMsgs = [
-                'Thinking...', 'Working on it...', 'Let me check that...', 'Analyzing...',
-                'Processing...', 'figuring it out...', 'On it...', 'Checking...',
-                'Searching...', 'reading...', 'writing...', 'coding...',
-                'hm...', 'let me think...', 'give me a sec...', 'hold on...',
-                'looking into it...', 'brb...', 'considering...', 'working...',
-                'exploring...', 'examining...', 'investigating...', 'digesting...',
-                'computing...', 'calculating...', 'reasoning...', 'thinking through...',
-                'cooking up a response...', 'piecing it together...'
-            ];
-            $thinkMsg = $thinkingMsgs[array_rand($thinkingMsgs)];
-            echo "\n🤖 $thinkMsg\n\n";
 
-            $this->agenticLoop(function($chunk) { echo $chunk; });
+            // Minimal "thinking" indicator that is erased as soon as output
+            // arrives, so a plain reply just appears under the prompt.
+            echo "\n\033[2m  thinking…\033[0m";
+            $cleared = false;
+            $this->agenticLoop(function($chunk) use (&$cleared) {
+                if (!$cleared) { echo "\r\033[K"; $cleared = true; }
+                echo $chunk;
+            });
+            if (!$cleared) echo "\r\033[K";
             echo "\n";
 
-            $this->showContext();
+            // Quietly note any files that were changed this turn.
+            $edited = $GLOBALS['editedFiles'] ?? [];
+            if (!empty($edited)) {
+                echo "\033[2m  ✎ " . implode(', ', array_unique($edited)) . "\033[0m\n";
+                $GLOBALS['editedFiles'] = [];
+            }
 
-            // Auto-compact if too many messages
             if (count($this->messages) > 20) {
                 $this->compactMessages();
             }
-
             $this->save();
-            $this->renderStatus();
         }
     }
 
@@ -493,8 +487,15 @@ $GLOBALS['currentSessionModel'] = null;
             if ($clean !== '' && $emit) $emit($clean . "\n");
             foreach ($toolResults as $result) {
                 $this->addMessage('tool', $result['content']);
-                if ($emit && !preg_match('/^(FILE_WRITE:|FILE_EDIT:)/', $result['content'])) {
-                    $emit("\n🔧 [tool]\n{$result['content']}\n");
+                if ($emit) {
+                    // Compact, dimmed tool line: "⏺ name  result-preview".
+                    $name = $result['name'] ?? 'tool';
+                    $preview = trim(preg_replace('/\s+/', ' ', (string)$result['content']));
+                    if (preg_match('/^FILE_(WRITE|EDIT):(.+)/', $preview, $m)) {
+                        $preview = ($m[1] === 'WRITE' ? 'wrote ' : 'edited ') . $m[2];
+                    }
+                    if (strlen($preview) > 100) $preview = substr($preview, 0, 100) . '…';
+                    $emit("\033[2m  ⏺ {$name}  {$preview}\033[0m\n");
                 }
             }
             $final = $clean;
