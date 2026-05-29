@@ -399,13 +399,14 @@ if ($argc >= 2 && $argv[1] === 'stats') {
 }
 
 // ===== FLAG PARSING (must be before config load) =====
-$flags = ['model' => null, 'continue' => false, 'resume' => false, 'session' => null, 'fork' => false, 'prompt' => null, 'agent' => null, 'pure' => false, 'port' => 0, 'hostname' => '127.0.0.1', 'mdns' => false, 'help' => false, 'version' => false, 'cwd' => null, 'permission' => null];
+$flags = ['model' => null, 'continue' => false, 'resume' => false, 'session' => null, 'fork' => false, 'prompt' => null, 'agent' => null, 'pure' => false, 'port' => 0, 'hostname' => '127.0.0.1', 'mdns' => false, 'help' => false, 'version' => false, 'cwd' => null, 'permission' => null, 'max' => null];
 $positional = [];
 for ($i = 1; $i < $argc; $i++) {
     $a = $argv[$i];
     if ($a === '-m' || $a === '--model') { $flags['model'] = $argv[++$i] ?? null; }
     elseif ($a === '-c' || $a === '--continue') { $flags['continue'] = true; }
     elseif ($a === '-r' || $a === '--resume') { $flags['resume'] = true; }
+    elseif ($a === '--max') { $flags['max'] = (int)($argv[++$i] ?? 0); }
     elseif ($a === '-s' || $a === '--session') { $flags['session'] = $argv[++$i] ?? null; }
     elseif ($a === '--fork') { $flags['fork'] = true; }
     elseif ($a === '-p' || $a === '--prompt') { $flags['prompt'] = $argv[++$i] ?? null; }
@@ -462,7 +463,7 @@ _ollamadev() {
             return 0
             ;;
         *)
-            COMPREPLY=($(compgen -W 'chat new list load resume pull init terminal git lsp models help --help --version --model --prompt --continue --resume --dry-run -h -v' -- "${cur}"))
+            COMPREPLY=($(compgen -W 'chat new list load resume pull init forge terminal git lsp models help --help --version --model --prompt --continue --resume --dry-run -h -v' -- "${cur}"))
             ;;
     esac
     return 0
@@ -483,6 +484,7 @@ _ollamadev() {
         'resume:Resume a recent session'
         'pull:Download a model from Ollama'
         'init:Generate OLLAMADEV.md project memory'
+        'forge:Run the agent bench (Director/Coders/Auditor)'
         'terminal:Terminal multiplexer'
         'git:Git commands'
         'lsp:LSP server for IDEs'
@@ -498,7 +500,7 @@ ZSH;
         echo <<<'FISH'
 # OllamaDev Fish Shell Completion
 
-complete -c ollamadev -n '__fish_use_subcommand' -a 'chat new list load resume pull init terminal git lsp models help' -d 'Command'
+complete -c ollamadev -n '__fish_use_subcommand' -a 'chat new list load resume pull init forge terminal git lsp models help' -d 'Command'
 complete -c ollamadev -n '__fish_seen_subcommand_from terminal' -a 'create spawn list attach start stop pause resume broadcast delete log' -d 'Terminal command'
 complete -c ollamadev -n '__fish_seen_subcommand_from git' -a 'status diff log branch commit push pull stash checkout add' -d 'Git command'
 complete -c ollamadev -s h -l help -d 'Show help'
@@ -738,6 +740,7 @@ Commands:
   ollamadev resume     Pick a recent session to resume
   ollamadev pull <m>   Download a model from Ollama
   ollamadev init       Generate OLLAMADEV.md project memory
+  ollamadev forge <task> Run the agent bench (Director/Coders/Auditor)
   ollamadev git        Git commands (status, diff, commit, etc.)
   ollamadev terminal   Terminal multiplexer
   ollamadev lsp        LSP server for IDEs (AI completions, linter diagnostics)
@@ -998,6 +1001,11 @@ if ($cmd === 'chat') {
     // Generate OLLAMADEV.md project memory from a scan + the active model.
     $agent = new Agent();
     echo ProjectInit::run($agent, $flags['cwd'] ?? getcwd(), posix_isatty(STDIN));
+} elseif ($cmd === 'forge') {
+    // Bench of agents: Researcher → Director → Coders (git worktrees) → Auditor → land.
+    $taskParts = array_slice($positional, 1);
+    $task = $arg1 === '' ? '' : implode(' ', $taskParts);
+    exit(Forge::run($task, ['max' => $flags['max'] ?? null]));
 } elseif ($cmd === 'load' && $arg1) {
     $session = new Session($config, $arg1);
     if (!file_exists(Config::sessionsDir() . '/' . $arg1 . '.json')) { echo "Session not found: $arg1\n"; exit(1); }

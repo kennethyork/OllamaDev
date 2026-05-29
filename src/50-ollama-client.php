@@ -152,6 +152,26 @@ class OllamaClient {
         return '';
     }
 
+    // One-shot chat constrained to valid JSON (Ollama's format=json). Returns the
+    // decoded object, or null on failure. Used by Forge's Director/Auditor so
+    // local models reliably emit parseable plans/verdicts.
+    public function chatJson(string $model, array $messages): ?array {
+        $params = ['model' => $model, 'messages' => $messages, 'stream' => false, 'format' => 'json', 'options' => self::chatOptions()];
+        $ch = curl_init($this->host . '/api/chat');
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 300,
+        ]);
+        $resp = curl_exec($ch);
+        curl_close($ch);
+        $j = json_decode((string)$resp, true);
+        $content = is_array($j) ? ($j['message']['content'] ?? '') : '';
+        if ($content === '') return null;
+        $d = json_decode($content, true);
+        return is_array($d) ? $d : null;
+    }
+
     // Native Ollama function-calling. Returns:
     //   ['ok'=>true, 'content'=>string, 'calls'=>[['name'=>,'params'=>], ...]]
     //   ['ok'=>false, 'unsupported'=>bool, 'error'=>string]
