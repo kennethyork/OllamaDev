@@ -6,33 +6,60 @@
 <title>OllamaDev ADE</title>
 <style>/* {{CSS}} */</style>
 </head>
-<body>
+<body data-theme="void">
     <div id="banner">starting…</div>
 
     <header id="topbar">
         <span class="brand">OllamaDev <span class="dim">ADE</span></span>
-        <span id="conn" class="conn">●</span>
-        <select id="modelSelect" title="Model"></select>
-        <button id="newTermBtn">+ Terminal</button>
-        <button id="layoutBtn" title="Cycle layout: split / terminals / editor">Layout: Split</button>
+        <span id="conn" class="conn" title="Ollama connection">●</span>
         <div class="spacer"></div>
+        <select id="modelSelect" title="Model"></select>
+        <select id="themeSelect" title="Theme"></select>
+        <button id="newTermBtn" class="primary">+ Terminal</button>
+        <button id="layoutBtn" title="Cycle layout: split / terminals / editor">Split</button>
         <span id="cwd" class="dim"></span>
     </header>
 
     <main id="main">
+        <nav id="rail">
+            <button class="rail-btn active" data-panel="files" title="Files">▤</button>
+            <button class="rail-btn" data-panel="tasks" title="Tasks">▦</button>
+        </nav>
+
         <aside id="sidebar">
-            <div class="side-title">FILES</div>
-            <div id="breadcrumb" class="dim"></div>
-            <div id="fileTree"></div>
-        </aside>
-        <section id="workspace">
-            <section id="editorPane">
-                <div id="editorTabs"></div>
-                <div id="editorBody">
-                    <div id="editorEmpty" class="dim">Select a file from the sidebar to edit it.</div>
+            <div id="filesPanel" class="panel">
+                <div class="side-title">Files</div>
+                <div id="breadcrumb" class="dim"></div>
+                <div id="fileTree"></div>
+            </div>
+            <div id="tasksPanel" class="panel" hidden>
+                <div class="side-title">Tasks</div>
+                <div class="task-add">
+                    <input id="taskInput" placeholder="New task… (Enter)">
                 </div>
-            </section>
-            <section id="terminals"></section>
+                <div id="taskHint" class="dim">Tasks live on the Board. Press Run to hand one to an agent terminal.</div>
+            </div>
+        </aside>
+
+        <section id="workspace">
+            <div id="wsTabs">
+                <button class="ws-tab active" data-view="code">Workspace</button>
+                <button class="ws-tab" data-view="board">Board</button>
+            </div>
+
+            <div id="codeView" class="ws-view">
+                <section id="editorPane">
+                    <div id="editorTabs"></div>
+                    <div id="editorBody">
+                        <div id="editorEmpty" class="dim">Select a file from the sidebar to edit it.</div>
+                    </div>
+                </section>
+                <section id="terminals"></section>
+            </div>
+
+            <div id="boardView" class="ws-view" hidden>
+                <div id="board"></div>
+            </div>
         </section>
     </main>
 

@@ -26,16 +26,20 @@ var ANSI_FG = { 30:'#484f58',31:'#f85149',32:'#3fb950',33:'#d29922',34:'#58a6ff'
 function Terminal(id, model) {
     this.id = id; this.model = model; this.offset = 0; this.polling = false;
     this.screen = null; this.line = null; this.fg = null; this.bold = false;
+    this.status = 'idle'; this.lastData = 0; this.badgeEl = null;
 }
 Terminal.prototype.mount = function (host) {
     var self = this;
     this.offset = 0; this.line = null; this.fg = null; this.bold = false;
     host.innerHTML =
-        '<div class="term-head"><span>' + esc(this.model) + '</span><span class="id">' + this.id.slice(-6) + '</span><button class="x" title="Close">&times;</button></div>' +
+        '<div class="term-head"><span class="nm">' + esc(this.model) + '</span><span class="id">' + this.id.slice(-6) + '</span>' +
+        '<span class="badge ' + this.status + '"><span class="b-dot"></span><span class="b-label">' + this.status + '</span></span>' +
+        '<button class="x" title="Close">&times;</button></div>' +
         '<div class="term-screen" tabindex="0"></div>' +
         '<div class="term-input-row"><span class="p">$</span><input class="term-input" placeholder="type a command, Enter to run"></div>' +
         '<div class="agent-row"><span class="ico">🤖</span><input class="agent-input" placeholder="ask the agent to do something here"><button>Run</button></div>';
     this.screen = host.querySelector('.term-screen');
+    this.badgeEl = host.querySelector('.badge');
     var input = host.querySelector('.term-input');
     var arow = host.querySelector('.agent-row');
     var head = host.querySelector('.term-head');
@@ -54,8 +58,16 @@ Terminal.prototype.mount = function (host) {
     this.screen.onclick = function () { input.focus(); };
     if (!this.polling) this.poll();
 };
+Terminal.prototype.setStatus = function (s) {
+    this.status = s;
+    if (this.badgeEl) {
+        this.badgeEl.className = 'badge ' + s;
+        var lbl = this.badgeEl.querySelector('.b-label'); if (lbl) lbl.textContent = s;
+    }
+};
 Terminal.prototype.runAgent = function (el) {
     var v = (el.value || '').trim(); if (!v) return; el.value = '';
+    this.setStatus('running'); this.lastData = Date.now();
     try { window.agentRun(this.id, v); } catch (e) {}
 };
 Terminal.prototype.newLine = function () { this.line = document.createElement('div'); this.line.className = 'term-line'; this.screen.appendChild(this.line); };
@@ -104,7 +116,9 @@ Terminal.prototype.poll = function () {
     function tick() {
         if (!self.polling) return;
         Promise.resolve(window.termRead(self.id, self.offset)).then(function (r) {
-            if (r && r.data) { self.write(b64ToStr(r.data)); self.offset = r.offset; }
+            if (r && r.data) { self.write(b64ToStr(r.data)); self.offset = r.offset; self.lastData = Date.now(); }
+            // Agent "running" → "done" once output has been quiet for ~2.5s.
+            if (self.status === 'running' && self.lastData && Date.now() - self.lastData > 2500) self.setStatus('done');
         }).catch(function () {}).then(function () { if (self.polling) setTimeout(tick, 80); });
     }
     tick();
@@ -202,16 +216,89 @@ var Editor = {
 };
 
 // ---------- app ----------
+// ---------- kanban tasks (local, hands work to agent terminals) ----------
+var Tasks = {
+    items: [], COLS: [['todo', 'To-do'], ['doing', 'Doing'], ['done', 'Done']],
+    load: function () { try { this.items = JSON.parse(localStorage.getItem('ade.tasks') || '[]'); } catch (e) { this.items = []; } if (!Array.isArray(this.items)) this.items = []; },
+    save: function () { try { localStorage.setItem('ade.tasks', JSON.stringify(this.items)); } catch (e) {} },
+    add: function (title) {
+        title = (title || '').trim(); if (!title) return;
+        this.items.push({ id: 't' + Date.now() + Math.random().toString(36).slice(2, 6), title: title, col: 'todo' });
+        this.save(); this.render();
+    },
+    move: function (id, col) { var t = this.items.find(function (x) { return x.id === id; }); if (t) { t.col = col; this.save(); this.render(); } },
+    del: function (id) { this.items = this.items.filter(function (x) { return x.id !== id; }); this.save(); this.render(); },
+    run: function (id) { var t = this.items.find(function (x) { return x.id === id; }); if (!t) return; this.move(id, 'doing'); App.runTaskInAgent(t.title); },
+    render: function () {
+        var board = $('#board'); if (!board) return;
+        var self = this;
+        board.innerHTML = this.COLS.map(function (c) {
+            var cards = self.items.filter(function (t) { return t.col === c[0]; });
+            var body = cards.length ? cards.map(function (t) {
+                return '<div class="card" draggable="true" data-id="' + t.id + '">' +
+                    '<div class="title">' + esc(t.title) + '</div>' +
+                    '<div class="actions">' +
+                    (c[0] !== 'done' ? '<button class="run" data-act="run">▶ Run</button>' : '') +
+                    '<button data-act="back">◀</button><button data-act="fwd">▶</button>' +
+                    '<button class="del" data-act="del">✕</button></div></div>';
+            }).join('') : '<div class="board-empty">—</div>';
+            return '<div class="col" data-col="' + c[0] + '"><div class="col-head"><span class="dotc"></span>' + c[1] +
+                '<span class="count">' + cards.length + '</span></div><div class="col-body">' + body + '</div></div>';
+        }).join('');
+        this.wire(board);
+    },
+    order: ['todo', 'doing', 'done'],
+    wire: function (board) {
+        var self = this;
+        board.querySelectorAll('.card').forEach(function (card) {
+            var id = card.dataset.id;
+            card.addEventListener('dragstart', function (e) { card.classList.add('dragging'); e.dataTransfer.setData('text/plain', id); });
+            card.addEventListener('dragend', function () { card.classList.remove('dragging'); });
+            card.querySelectorAll('[data-act]').forEach(function (b) {
+                b.onclick = function () {
+                    var t = self.items.find(function (x) { return x.id === id; }); if (!t) return;
+                    var i = self.order.indexOf(t.col);
+                    if (b.dataset.act === 'run') self.run(id);
+                    else if (b.dataset.act === 'del') self.del(id);
+                    else if (b.dataset.act === 'fwd' && i < 2) self.move(id, self.order[i + 1]);
+                    else if (b.dataset.act === 'back' && i > 0) self.move(id, self.order[i - 1]);
+                };
+            });
+        });
+        board.querySelectorAll('.col').forEach(function (col) {
+            col.addEventListener('dragover', function (e) { e.preventDefault(); col.classList.add('drag-over'); });
+            col.addEventListener('dragleave', function () { col.classList.remove('drag-over'); });
+            col.addEventListener('drop', function (e) {
+                e.preventDefault(); col.classList.remove('drag-over');
+                var id = e.dataTransfer.getData('text/plain'); if (id) self.move(id, col.dataset.col);
+            });
+        });
+    }
+};
+
 var App = {
-    terminals: [], cwd: '.', layout: 'split', zoomed: null,
+    terminals: [], cwd: '.', layout: 'split', zoomed: null, view: 'code', panel: 'files',
     init: function () {
         var self = this;
+        this.initThemes();
         $('#newTermBtn').onclick = function () { self.newTerminal(); };
         $('#layoutBtn').onclick = function () { self.cycleLayout(); };
+        // Activity rail: switch the sidebar between Files and Tasks.
+        document.querySelectorAll('.rail-btn').forEach(function (b) {
+            b.onclick = function () { self.setPanel(b.dataset.panel); };
+        });
+        // Workspace view tabs: Workspace (code) vs Board (kanban).
+        document.querySelectorAll('.ws-tab').forEach(function (t) {
+            t.onclick = function () { self.setView(t.dataset.view); };
+        });
+        // Add a task from the sidebar.
+        var ti = $('#taskInput');
+        if (ti) ti.addEventListener('keydown', function (e) { if (e.key === 'Enter') { Tasks.add(ti.value); ti.value = ''; } });
         // Global Ctrl/Cmd+S saves the active editor tab from anywhere.
         document.addEventListener('keydown', function (e) {
             if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); Editor.save(); }
         });
+        Tasks.load(); Tasks.render();
         this.loadModels().then(function () {
             Promise.resolve(window.getRoot ? window.getRoot() : '.').then(function (root) {
                 self.loadFiles(root || '.');
@@ -220,12 +307,49 @@ var App = {
             banner('ready', 'ok');
         });
     },
+    THEMES: [['void', 'Void'], ['neon-tokyo', 'Neon Tokyo'], ['synthwave', 'Synthwave'], ['dracula', 'Dracula'], ['midnight', 'Midnight'], ['mono', 'Mono']],
+    initThemes: function () {
+        var sel = $('#themeSelect'); if (!sel) return;
+        sel.innerHTML = this.THEMES.map(function (t) { return '<option value="' + t[0] + '">' + t[1] + '</option>'; }).join('');
+        var saved = 'void';
+        try { saved = localStorage.getItem('ade.theme') || 'void'; } catch (e) {}
+        this.applyTheme(saved); sel.value = saved;
+        sel.onchange = function () { App.applyTheme(sel.value); };
+    },
+    applyTheme: function (t) {
+        document.body.dataset.theme = t;
+        try { localStorage.setItem('ade.theme', t); } catch (e) {}
+    },
+    setPanel: function (p) {
+        this.panel = p;
+        document.querySelectorAll('.rail-btn').forEach(function (b) { b.classList.toggle('active', b.dataset.panel === p); });
+        $('#filesPanel').hidden = p !== 'files';
+        $('#tasksPanel').hidden = p !== 'tasks';
+    },
+    setView: function (v) {
+        this.view = v;
+        document.querySelectorAll('.ws-tab').forEach(function (t) { t.classList.toggle('active', t.dataset.view === v); });
+        $('#codeView').hidden = v !== 'code';
+        $('#boardView').hidden = v !== 'board';
+        if (v === 'board') Tasks.render();
+    },
+    // Hand a task title to an agent terminal (create one if none exist).
+    runTaskInAgent: function (title) {
+        var self = this;
+        var run = function (t) { t.setStatus('running'); t.lastData = Date.now(); try { window.agentRun(t.id, title); } catch (e) {} self.setView('code'); banner('running task in ' + t.id.slice(-6), 'ok'); };
+        if (this.terminals.length) { run(this.terminals[0]); }
+        else {
+            var model = $('#modelSelect').value || 'llama3.2:latest';
+            var id = rid(); var t = new Terminal(id, model);
+            Promise.resolve(window.termCreate(id, model)).then(function () { self.terminals.push(t); self.render(); run(t); });
+        }
+    },
     cycleLayout: function () {
         this.layout = this.layout === 'split' ? 'term' : this.layout === 'term' ? 'editor' : 'split';
-        var ws = $('#workspace');
-        ws.className = this.layout === 'term' ? 'focus-term' : this.layout === 'editor' ? 'focus-editor' : '';
+        var cv = $('#codeView');
+        cv.className = 'ws-view ' + (this.layout === 'term' ? 'focus-term' : this.layout === 'editor' ? 'focus-editor' : '');
         var label = this.layout === 'term' ? 'Terminals' : this.layout === 'editor' ? 'Editor' : 'Split';
-        $('#layoutBtn').textContent = 'Layout: ' + label;
+        $('#layoutBtn').textContent = label;
         this.render();
     },
     toggleZoom: function (id) {
