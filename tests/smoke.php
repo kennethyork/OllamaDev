@@ -455,6 +455,11 @@ ok('crew --no-skills flag wired', strpos($src, "'--no-skills'") !== false);
 ok('/crew parses per-role model flags', strpos($src, "--' . \$role . '-model") !== false);
 ok('/crew parses --focus', strpos($src, "--focus\\s+\"") !== false || strpos($src, '--focus\s+"') !== false);
 ok('crew prints per-role models when they differ', strpos($src, 'roles:') !== false);
+// Self-modification safeguard: review forced on the OllamaDev source unless --auto-merge
+ok('crew has a self-repo detector', strpos($src, 'function isSelfRepo()') !== false);
+ok('crew forces review on self-repo', strpos($src, "self::isSelfRepo()") !== false && strpos($src, 'self-modification detected') !== false);
+ok('crew --auto-merge override wired (CLI)', strpos($src, "'--auto-merge'") !== false);
+ok('crew --auto-merge override wired (/crew)', strpos($src, '--auto-merge(\s|$)') !== false);
 
 echo "\n========================\n";
 echo "Results: $pass passed, $fail failed\n";

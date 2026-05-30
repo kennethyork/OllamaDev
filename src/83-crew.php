@@ -122,7 +122,18 @@ class Crew {
 
         // ---- Landing — gated. 'review': nothing auto-merges (default-safe for
         // self-modification). 'auto': merge audit-clean, hold flagged.
-        $land = $opts['land'] ?? Config::get('crew.land', 'auto');
+        // Self-modification safeguard: when the crew is run on the OllamaDev source
+        // itself, default to review (hold everything) unless the user EXPLICITLY
+        // opted into auto-merge with --auto-merge. Other repos keep the auto default.
+        $explicit = $opts['land'] ?? '';
+        if ($explicit !== '' ) {
+            $land = $explicit;
+        } elseif (self::isSelfRepo()) {
+            $land = 'review';
+            echo "  {$y}⚠ self-modification detected (this is the OllamaDev source) — review mode forced; nothing auto-merges. Use --auto-merge to override.{$r}\n";
+        } else {
+            $land = Config::get('crew.land', 'auto');
+        }
         echo "\n{$b}▸ Landing{$r}" . ($land === 'review' ? " {$d}(review mode — nothing auto-merges){$r}" : '') . "\n";
         $merged = []; $held = [];
         foreach ($results as $res) {
@@ -284,6 +295,14 @@ class Crew {
     }
 
     private static function isGitRepo(): bool { return self::sh('git rev-parse --is-inside-work-tree 2>/dev/null') === 'true'; }
+    // True when the working repo IS the OllamaDev source (self-modification): the
+    // build header carrying OLLAMADEV_VERSION plus build.sh are a strong signature.
+    private static function isSelfRepo(): bool {
+        $root = self::sh('git rev-parse --show-toplevel 2>/dev/null');
+        if ($root === '' || !is_file($root . '/build.sh')) return false;
+        $header = $root . '/src/00-header.php';
+        return is_file($header) && strpos((string)@file_get_contents($header), 'OLLAMADEV_VERSION') !== false;
+    }
     private static function gitWorktreeSupported(): bool { return stripos(self::sh('git worktree -h 2>&1'), 'usage') !== false || self::sh('git worktree list 2>/dev/null') !== ''; }
     private static function sh(string $cmd): string { return trim((string)@shell_exec($cmd)); }
 }

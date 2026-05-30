@@ -1039,6 +1039,7 @@ if ($cmd === 'chat') {
     $task = $arg1 === '' ? '' : implode(' ', $taskParts);
     $copts = ['max' => $flags['max'] ?? null];
     if (in_array('--review', $argv, true)) $copts['land'] = 'review';
+    elseif (in_array('--auto-merge', $argv, true)) $copts['land'] = 'auto'; // explicit opt-in (overrides self-repo guard)
     if (in_array('--no-research', $argv, true)) $copts['research'] = false;
     if (in_array('--no-audit', $argv, true)) $copts['audit'] = false;
     if (in_array('--no-skills', $argv, true)) $copts['skills'] = false;

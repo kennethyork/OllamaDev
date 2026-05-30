@@ -273,6 +273,7 @@ class Session {
         if ($args === '') return "Usage: /crew <task> [options]\n" .
             "  --max N            number of parallel coders (default 4)\n" .
             "  --review           hold every branch for you to merge (nothing auto-merges)\n" .
+            "  --auto-merge       merge audit-clean branches (override the self-modification guard)\n" .
             "  --no-research / --no-audit / --no-skills   skip that phase\n" .
             "  --focus \"text\"    domain/stack steer (also picks matching skill packs)\n" .
             "  per-role models:   --director-model / --coder-model / --auditor-model / --researcher-model <name>\n" .
@@ -280,6 +281,7 @@ class Session {
         $opts = [];
         if (preg_match('/\s--max\s+(\d+)/', $args, $m)) { $opts['max'] = (int)$m[1]; $args = trim(preg_replace('/\s--max\s+\d+/', '', $args)); }
         if (preg_match('/(^|\s)--review(\s|$)/', $args)) { $opts['land'] = 'review'; $args = trim(preg_replace('/(^|\s)--review(\s|$)/', ' ', $args)); }
+        elseif (preg_match('/(^|\s)--auto-merge(\s|$)/', $args)) { $opts['land'] = 'auto'; $args = trim(preg_replace('/(^|\s)--auto-merge(\s|$)/', ' ', $args)); }
         if (preg_match('/(^|\s)--no-research(\s|$)/', $args)) { $opts['research'] = false; $args = trim(preg_replace('/(^|\s)--no-research(\s|$)/', ' ', $args)); }
         if (preg_match('/(^|\s)--no-audit(\s|$)/', $args)) { $opts['audit'] = false; $args = trim(preg_replace('/(^|\s)--no-audit(\s|$)/', ' ', $args)); }
         if (preg_match('/(^|\s)--no-skills(\s|$)/', $args)) { $opts['skills'] = false; $args = trim(preg_replace('/(^|\s)--no-skills(\s|$)/', ' ', $args)); }

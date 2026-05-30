@@ -4083,7 +4083,18 @@ class Crew {
 
         // ---- Landing — gated. 'review': nothing auto-merges (default-safe for
         // self-modification). 'auto': merge audit-clean, hold flagged.
-        $land = $opts['land'] ?? Config::get('crew.land', 'auto');
+        // Self-modification safeguard: when the crew is run on the OllamaDev source
+        // itself, default to review (hold everything) unless the user EXPLICITLY
+        // opted into auto-merge with --auto-merge. Other repos keep the auto default.
+        $explicit = $opts['land'] ?? '';
+        if ($explicit !== '' ) {
+            $land = $explicit;
+        } elseif (self::isSelfRepo()) {
+            $land = 'review';
+            echo "  {$y}⚠ self-modification detected (this is the OllamaDev source) — review mode forced; nothing auto-merges. Use --auto-merge to override.{$r}\n";
+        } else {
+            $land = Config::get('crew.land', 'auto');
+        }
         echo "\n{$b}▸ Landing{$r}" . ($land === 'review' ? " {$d}(review mode — nothing auto-merges){$r}" : '') . "\n";
         $merged = []; $held = [];
         foreach ($results as $res) {
@@ -4245,6 +4256,14 @@ class Crew {
     }
 
     private static function isGitRepo(): bool { return self::sh('git rev-parse --is-inside-work-tree 2>/dev/null') === 'true'; }
+    // True when the working repo IS the OllamaDev source (self-modification): the
+    // build header carrying OLLAMADEV_VERSION plus build.sh are a strong signature.
+    private static function isSelfRepo(): bool {
+        $root = self::sh('git rev-parse --show-toplevel 2>/dev/null');
+        if ($root === '' || !is_file($root . '/build.sh')) return false;
+        $header = $root . '/src/00-header.php';
+        return is_file($header) && strpos((string)@file_get_contents($header), 'OLLAMADEV_VERSION') !== false;
+    }
     private static function gitWorktreeSupported(): bool { return stripos(self::sh('git worktree -h 2>&1'), 'usage') !== false || self::sh('git worktree list 2>/dev/null') !== ''; }
     private static function sh(string $cmd): string { return trim((string)@shell_exec($cmd)); }
 }
@@ -4939,6 +4958,7 @@ class Session {
         if ($args === '') return "Usage: /crew <task> [options]\n" .
             "  --max N            number of parallel coders (default 4)\n" .
             "  --review           hold every branch for you to merge (nothing auto-merges)\n" .
+            "  --auto-merge       merge audit-clean branches (override the self-modification guard)\n" .
             "  --no-research / --no-audit / --no-skills   skip that phase\n" .
             "  --focus \"text\"    domain/stack steer (also picks matching skill packs)\n" .
             "  per-role models:   --director-model / --coder-model / --auditor-model / --researcher-model <name>\n" .
@@ -4946,6 +4966,7 @@ class Session {
         $opts = [];
         if (preg_match('/\s--max\s+(\d+)/', $args, $m)) { $opts['max'] = (int)$m[1]; $args = trim(preg_replace('/\s--max\s+\d+/', '', $args)); }
         if (preg_match('/(^|\s)--review(\s|$)/', $args)) { $opts['land'] = 'review'; $args = trim(preg_replace('/(^|\s)--review(\s|$)/', ' ', $args)); }
+        elseif (preg_match('/(^|\s)--auto-merge(\s|$)/', $args)) { $opts['land'] = 'auto'; $args = trim(preg_replace('/(^|\s)--auto-merge(\s|$)/', ' ', $args)); }
         if (preg_match('/(^|\s)--no-research(\s|$)/', $args)) { $opts['research'] = false; $args = trim(preg_replace('/(^|\s)--no-research(\s|$)/', ' ', $args)); }
         if (preg_match('/(^|\s)--no-audit(\s|$)/', $args)) { $opts['audit'] = false; $args = trim(preg_replace('/(^|\s)--no-audit(\s|$)/', ' ', $args)); }
         if (preg_match('/(^|\s)--no-skills(\s|$)/', $args)) { $opts['skills'] = false; $args = trim(preg_replace('/(^|\s)--no-skills(\s|$)/', ' ', $args)); }
@@ -6591,6 +6612,7 @@ if ($cmd === 'chat') {
     $task = $arg1 === '' ? '' : implode(' ', $taskParts);
     $copts = ['max' => $flags['max'] ?? null];
     if (in_array('--review', $argv, true)) $copts['land'] = 'review';
+    elseif (in_array('--auto-merge', $argv, true)) $copts['land'] = 'auto'; // explicit opt-in (overrides self-repo guard)
     if (in_array('--no-research', $argv, true)) $copts['research'] = false;
     if (in_array('--no-audit', $argv, true)) $copts['audit'] = false;
     if (in_array('--no-skills', $argv, true)) $copts['skills'] = false;
