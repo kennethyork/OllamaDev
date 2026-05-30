@@ -363,9 +363,18 @@ Tools::register('bash', function($p) {
         }
         return $GLOBALS['ptyBridge']->run($cmd);
     }
+    // In auto mode the user has opted into "run every tool without asking" — this is
+    // also the Crew coder context (an isolated git worktree). Allow full shell there
+    // except clearly destructive commands, mirroring the PTY path above. ask/readonly
+    // modes stay restricted to a safe readonly allowlist.
+    $dangerous = ['rm -rf /', 'rm -rf ~', 'rm -rf $HOME', 'mkfs', ':(){', 'sudo rm', '> /dev/sd', 'dd if='];
+    if (class_exists('Permission') && Permission::getMode() === 'auto') {
+        foreach ($dangerous as $b) { if (str_contains($cmd, $b)) return "Dangerous command blocked: $b"; }
+        return shell_exec($cmd . ' 2>&1') ?: "(no output)";
+    }
     $readonly = ['ls', 'pwd', 'cat', 'head', 'tail', 'grep', 'find', 'git', 'echo', 'wc', 'sort', 'uniq', 'awk', 'sed', 'cut', 'tr', 'file', 'stat', 'diff', 'tree'];
     $first = strtok($cmd, ' ');
-    if (!in_array($first, $readonly)) return "Command not allowed (readonly only): $first";
+    if (!in_array($first, $readonly)) return "Command not allowed (readonly only, or switch to auto mode): $first";
     foreach (['curl', 'wget', 'chmod', 'sudo', 'rm -rf', 'mkfs'] as $b) { if (str_contains($cmd, $b)) return "Dangerous command blocked: $b"; }
     if (preg_match('/echo\s+\$?\(\s*\([^)]+\)\s*\)/', $cmd)) {
         if (preg_match_all('/(\d+)\s*([+\-*\/])\s*(\d+)/', $cmd, $m, PREG_SET_ORDER)) {

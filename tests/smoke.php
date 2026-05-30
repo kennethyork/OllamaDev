@@ -473,6 +473,17 @@ ok('recall tool registered + read-only', strpos($src, "Tools::register('recall'"
 ok('remember tool registered', strpos($src, "Tools::register('remember'") !== false);
 ok('memory injected into system prompt', strpos($src, 'PROJECT MEMORY') !== false);
 ok('recall/remember have native schemas', strpos($src, "\$fn('recall'") !== false && strpos($src, "\$fn('remember'") !== false);
+
+echo "\n== Crew multi-host parallel ==\n";
+ok('Agent::setHost added', strpos($src, 'function setHost(string $host)') !== false);
+ok('crew builds a host pool', strpos($src, '$baseHost') !== false && strpos($src, "Config::get('ollama.hosts'") !== false);
+ok('crew parallelizes with pcntl when >1 host', strpos($src, 'pcntl_fork()') !== false && strpos($src, "function_exists('pcntl_fork')") !== false);
+ok('crew requires >1 host + >1 job to parallelize', strpos($src, 'count($jobs) > 1 && count($hosts) > 1') !== false);
+ok('crew runCoder accepts a host param', strpos($src, "string \$focus = '', string \$host = ''") !== false);
+ok('crew falls back to sequential (inline) on fork failure', strpos($src, 'fork failed: run inline') !== false);
+ok('crew --hosts flag wired (CLI)', strpos($src, "\$a === '--hosts'") !== false);
+ok('config has ollama.hosts default', strpos($src, "'hosts' => []") !== false);
+ok('bash honors auto mode for full shell', strpos($src, "Permission::getMode() === 'auto'") !== false && strpos($src, 'readonly only, or switch to auto mode') !== false);
 ok('skill tool is read-only', strpos($src, "'summarize', 'skill'") !== false);
 
 echo "\n== Crew team skills ==\n";

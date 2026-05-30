@@ -352,6 +352,7 @@ class Session {
             "  --auto-merge       merge audit-clean branches (override the self-modification guard)\n" .
             "  --no-research / --no-audit / --no-skills   skip that phase\n" .
             "  --focus \"text\"    domain/stack steer (also picks matching skill packs)\n" .
+            "  --hosts a,b,c      run coders in parallel across multiple Ollama hosts\n" .
             "  per-role models:   --director-model / --coder-model / --auditor-model / --researcher-model <name>\n" .
             "  e.g. /crew add a /health route --coder-model qwen2.5-coder:7b --auditor-model deepseek-r1:32b\n";
         $opts = [];
@@ -361,6 +362,7 @@ class Session {
         if (preg_match('/(^|\s)--no-research(\s|$)/', $args)) { $opts['research'] = false; $args = trim(preg_replace('/(^|\s)--no-research(\s|$)/', ' ', $args)); }
         if (preg_match('/(^|\s)--no-audit(\s|$)/', $args)) { $opts['audit'] = false; $args = trim(preg_replace('/(^|\s)--no-audit(\s|$)/', ' ', $args)); }
         if (preg_match('/(^|\s)--no-skills(\s|$)/', $args)) { $opts['skills'] = false; $args = trim(preg_replace('/(^|\s)--no-skills(\s|$)/', ' ', $args)); }
+        if (preg_match('/\s--hosts\s+(\S+)/', $args, $m)) { $opts['hosts'] = array_values(array_filter(array_map('trim', explode(',', $m[1])))); $args = trim(preg_replace('/\s--hosts\s+\S+/', '', $args)); }
         // --focus accepts a quoted phrase or a single token.
         if (preg_match('/\s--focus\s+"([^"]*)"/', $args, $m)) { $opts['focus'] = $m[1]; $args = trim(preg_replace('/\s--focus\s+"[^"]*"/', '', $args)); }
         elseif (preg_match('/\s--focus\s+(\S+)/', $args, $m)) { $opts['focus'] = $m[1]; $args = trim(preg_replace('/\s--focus\s+\S+/', '', $args)); }

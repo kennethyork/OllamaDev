@@ -79,6 +79,10 @@ User: run the tests
 
     public function setModel(string $model): void { $this->model = $model; $this->systemPrompt = $this->buildSystemPrompt(); }
 
+    // Point this agent at a specific Ollama host (used by the Crew to spread coders
+    // across multiple machines/GPUs for real parallel inference).
+    public function setHost(string $host): void { if (trim($host) !== '') $this->client = new OllamaClient(trim($host)); }
+
     // Resolve a user-typed model name to an actually-installed model. Matches
     // exactly, then "name:latest", then a unique prefix (so "/model qwen2.5-coder"
     // works without the tag). Returns null when nothing matches.

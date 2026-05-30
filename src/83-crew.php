@@ -85,26 +85,70 @@ class Crew {
         $wtRoot = sys_get_temp_dir() . '/ollamadev-crew/' . $runId;
         @mkdir($wtRoot, 0755, true);
         $results = [];
+
+        // Phase 1 (sequential): create every worktree up front. `git worktree add`
+        // mutates the shared repo, so it isn't safe to run concurrently.
+        $jobs = [];
         foreach ($subtasks as $i => $st) {
             $n = $i + 1;
             $branch = 'crew/' . substr($runId, 6) . '-' . $n . '-' . self::slug($st['title'] ?? ('task' . $n));
             $wt = $wtRoot . '/c' . $n;
-            echo "\n{$b}▸ Coder {$n}{$r} {$d}{$branch}{$r}\n";
             $add = self::sh('git worktree add -b ' . escapeshellarg($branch) . ' ' . escapeshellarg($wt) . ' ' . escapeshellarg($baseCommit) . ' 2>&1');
             if (!is_dir($wt)) { echo "  {$y}skipped (worktree failed): {$add}{$r}\n"; $setState($n, 'held'); continue; }
             if (!empty($teamSkills)) CrewSkills::materialize($teamSkills, $wt); // seed domain skills (git-excluded)
-
             $setState($n, 'doing');
-            self::runCoder($wt, $st, $mCoder, $maxIter, $research, $task, $focus);
-            // Commit whatever the coder changed — but never the agent's own
-            // .ollamadev state (costs/checkpoints/sessions it wrote in the worktree).
-            self::sh('git -C ' . escapeshellarg($wt) . ' add -A -- . ' . escapeshellarg(':(exclude).ollamadev'));
-            $changed = self::sh('git -C ' . escapeshellarg($wt) . ' diff --cached --name-only') !== '';
-            if ($changed) self::sh('git -C ' . escapeshellarg($wt) . ' commit -q -m ' . escapeshellarg('crew: ' . ($st['title'] ?? 'task ' . $n)) . ' 2>&1');
-            $diff = self::sh('git -C ' . escapeshellarg($wt) . ' diff ' . escapeshellarg($baseCommit) . ' HEAD');
-            $files = array_filter(explode("\n", self::sh('git -C ' . escapeshellarg($wt) . ' diff --name-only ' . escapeshellarg($baseCommit) . ' HEAD')));
-            echo "  " . ($diff === '' ? "{$d}no changes{$r}" : count($files) . " file(s) changed") . "\n";
-            $results[] = ['n' => $n, 'title' => $st['title'] ?? 'task', 'branch' => $branch, 'wt' => $wt, 'diff' => $diff, 'files' => $files, 'empty' => $diff === ''];
+            $jobs[] = ['n' => $n, 'st' => $st, 'branch' => $branch, 'wt' => $wt];
+        }
+
+        // Host pool for spreading coders across machines/GPUs (real parallel inference,
+        // since one Ollama serves one model at a time). Base host always included.
+        $extraHosts = [];
+        if (!empty($opts['hosts']) && is_array($opts['hosts'])) $extraHosts = $opts['hosts'];
+        elseif (is_array(Config::get('crew.hosts', null))) $extraHosts = Config::get('crew.hosts');
+        elseif (is_array(Config::get('ollama.hosts', null))) $extraHosts = Config::get('ollama.hosts');
+        $baseHost = Config::get('ollama.host', 'http://localhost:11434');
+        $hosts = array_values(array_unique(array_filter(array_merge([$baseHost], array_map('trim', $extraHosts)))));
+        $canFork = function_exists('pcntl_fork');
+        $parallel = count($jobs) > 1 && count($hosts) > 1 && $canFork;
+
+        // Phase 2: run coders. Parallel across hosts when possible; else sequential.
+        if ($parallel) {
+            echo "\n{$b}▸ Coders{$r} {$d}running " . count($jobs) . " in parallel across " . count($hosts) . " hosts (" . implode(', ', $hosts) . ")…{$r}\n";
+            $pids = [];
+            foreach ($jobs as $idx => $job) {
+                $host = $hosts[$idx % count($hosts)];
+                $resFile = $wtRoot . '/result-' . $job['n'] . '.json';
+                $pid = pcntl_fork();
+                if ($pid === 0) { // child: build in isolation, write the result, exit
+                    self::runCoder($job['wt'], $job['st'], $mCoder, $maxIter, $research, $task, $focus, $host);
+                    @file_put_contents($resFile, json_encode(self::collectCoderResult($job, $baseCommit)));
+                    exit(0);
+                } elseif ($pid > 0) {
+                    $pids[$pid] = ['job' => $job, 'file' => $resFile];
+                } else { // fork failed: run inline as a fallback
+                    self::runCoder($job['wt'], $job['st'], $mCoder, $maxIter, $research, $task, $focus, $host);
+                    $results[] = self::collectCoderResult($job, $baseCommit);
+                }
+            }
+            foreach ($pids as $pid => $meta) {
+                $status = 0; pcntl_waitpid($pid, $status);
+                $cres = json_decode((string) @file_get_contents($meta['file']), true);
+                if (is_array($cres)) $results[] = $cres;
+                else $results[] = ['n' => $meta['job']['n'], 'title' => $meta['job']['st']['title'] ?? 'task', 'branch' => $meta['job']['branch'], 'wt' => $meta['job']['wt'], 'diff' => '', 'files' => [], 'empty' => true];
+                $nfiles = is_array($cres) ? count($cres['files'] ?? []) : 0;
+                echo "  {$g}✓{$r} Coder {$meta['job']['n']} {$d}" . ($nfiles ? "$nfiles file(s)" : 'no changes') . "{$r}\n";
+            }
+            usort($results, fn($a, $b2) => $a['n'] <=> $b2['n']);
+        } else {
+            $spread = count($hosts) > 1;
+            foreach ($jobs as $idx => $job) {
+                $host = $spread ? $hosts[$idx % count($hosts)] : '';
+                echo "\n{$b}▸ Coder {$job['n']}{$r} {$d}{$job['branch']}" . ($host !== '' ? " · {$host}" : '') . "{$r}\n";
+                self::runCoder($job['wt'], $job['st'], $mCoder, $maxIter, $research, $task, $focus, $host);
+                $res = self::collectCoderResult($job, $baseCommit);
+                echo "  " . ($res['empty'] ? "{$d}no changes{$r}" : count($res['files']) . " file(s) changed") . "\n";
+                $results[] = $res;
+            }
         }
 
         // ---- Auditor: review each diff (optional; without it, nothing auto-merges) ----
@@ -213,14 +257,27 @@ class Crew {
         return $clean;
     }
 
+    // Commit a coder's work (excluding .ollamadev) and capture its diff/files.
+    private static function collectCoderResult(array $job, string $baseCommit): array {
+        $wt = $job['wt']; $st = $job['st']; $n = $job['n'];
+        self::sh('git -C ' . escapeshellarg($wt) . ' add -A -- . ' . escapeshellarg(':(exclude).ollamadev'));
+        $changed = self::sh('git -C ' . escapeshellarg($wt) . ' diff --cached --name-only') !== '';
+        if ($changed) self::sh('git -C ' . escapeshellarg($wt) . ' commit -q -m ' . escapeshellarg('crew: ' . ($st['title'] ?? 'task ' . $n)) . ' 2>&1');
+        $diff = self::sh('git -C ' . escapeshellarg($wt) . ' diff ' . escapeshellarg($baseCommit) . ' HEAD');
+        $files = array_values(array_filter(explode("\n", self::sh('git -C ' . escapeshellarg($wt) . ' diff --name-only ' . escapeshellarg($baseCommit) . ' HEAD'))));
+        return ['n' => $n, 'title' => $st['title'] ?? 'task', 'branch' => $job['branch'], 'wt' => $wt, 'diff' => $diff, 'files' => $files, 'empty' => $diff === ''];
+    }
+
     // Coder: a bounded agent loop in the worktree (auto permissions, isolated).
-    private static function runCoder(string $wt, array $st, string $model, int $maxIter, string $research = '', string $goal = '', string $focus = ''): void {
+    // $host pins this coder to a specific Ollama host for parallel runs.
+    private static function runCoder(string $wt, array $st, string $model, int $maxIter, string $research = '', string $goal = '', string $focus = '', string $host = ''): void {
         $prevCwd = getcwd();
         $oldMode = Permission::getMode(); $oldInt = Permission::isInteractive();
         @chdir($wt);
         Permission::setMode('auto'); Permission::setInteractive(false);
         try {
             $agent = new Agent();
+            if ($host !== '') $agent->setHost($host);
             $resolved = $agent->resolveModel($model); $agent->setModel($resolved ?: $model);
             $ctx = $research !== '' ? "\n\nShared research (from the Researcher):\n" . substr($research, 0, 4000) : '';
             $goalLine = $goal !== '' ? "Overall goal: $goal\n\n" : '';
