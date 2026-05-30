@@ -42,6 +42,10 @@ class Crew {
         $runId = 'crew_' . date('Ymd_His');
         echo "\n{$b}👥 OllamaDev Crew{$r}  {$d}model {$c}{$model}{$r}{$d} · base {$base}@" . substr($baseCommit, 0, 7) . "{$r}\n";
         if (!empty($teamSkills)) echo "  {$d}team skills: " . implode(', ', array_map(fn($s) => $s['name'], $teamSkills)) . "{$r}\n";
+        // Show per-role models when any role differs from the base (mix-and-match).
+        if ($mDirector !== $model || $mResearcher !== $model || $mCoder !== $model || $mAuditor !== $model) {
+            echo "  {$d}roles:{$r} Director {$c}{$mDirector}{$r}{$d} · Researcher {$c}{$mResearcher}{$r}{$d} · Coder {$c}{$mCoder}{$r}{$d} · Auditor {$c}{$mAuditor}{$r}\n";
+        }
 
         // ---- Researcher: survey the codebase, write a shared findings vault ----
         $research = '';

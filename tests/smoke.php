@@ -451,6 +451,10 @@ if (preg_match('/class CrewSkills \{.*?\n\}/s', $src, $cs)) {
 ok('crew computes team skills from focus', strpos($src, 'CrewSkills::forFocus($focus)') !== false);
 ok('crew materializes skills into worktrees', strpos($src, 'CrewSkills::materialize($teamSkills, $wt)') !== false);
 ok('crew --no-skills flag wired', strpos($src, "'--no-skills'") !== false);
+// /crew slash command exposes per-role models + focus
+ok('/crew parses per-role model flags', strpos($src, "--' . \$role . '-model") !== false);
+ok('/crew parses --focus', strpos($src, "--focus\\s+\"") !== false || strpos($src, '--focus\s+"') !== false);
+ok('crew prints per-role models when they differ', strpos($src, 'roles:') !== false);
 
 echo "\n========================\n";
 echo "Results: $pass passed, $fail failed\n";

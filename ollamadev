@@ -4003,6 +4003,10 @@ class Crew {
         $runId = 'crew_' . date('Ymd_His');
         echo "\n{$b}👥 OllamaDev Crew{$r}  {$d}model {$c}{$model}{$r}{$d} · base {$base}@" . substr($baseCommit, 0, 7) . "{$r}\n";
         if (!empty($teamSkills)) echo "  {$d}team skills: " . implode(', ', array_map(fn($s) => $s['name'], $teamSkills)) . "{$r}\n";
+        // Show per-role models when any role differs from the base (mix-and-match).
+        if ($mDirector !== $model || $mResearcher !== $model || $mCoder !== $model || $mAuditor !== $model) {
+            echo "  {$d}roles:{$r} Director {$c}{$mDirector}{$r}{$d} · Researcher {$c}{$mResearcher}{$r}{$d} · Coder {$c}{$mCoder}{$r}{$d} · Auditor {$c}{$mAuditor}{$r}\n";
+        }
 
         // ---- Researcher: survey the codebase, write a shared findings vault ----
         $research = '';
@@ -4932,12 +4936,26 @@ class Session {
     // /crew <task> [--max N] — run the OllamaDev Crew bench from inside a session.
     private function runCrew(string $args): string {
         $args = trim($args);
-        if ($args === '') return "Usage: /crew <task> [--max N] [--review]\n  Runs a bench of agents (Director/Coders/Auditor) in git worktrees.\n  --review holds every branch for you to merge (nothing auto-merges).\n";
+        if ($args === '') return "Usage: /crew <task> [options]\n" .
+            "  --max N            number of parallel coders (default 4)\n" .
+            "  --review           hold every branch for you to merge (nothing auto-merges)\n" .
+            "  --no-research / --no-audit / --no-skills   skip that phase\n" .
+            "  --focus \"text\"    domain/stack steer (also picks matching skill packs)\n" .
+            "  per-role models:   --director-model / --coder-model / --auditor-model / --researcher-model <name>\n" .
+            "  e.g. /crew add a /health route --coder-model qwen2.5-coder:7b --auditor-model deepseek-r1:32b\n";
         $opts = [];
         if (preg_match('/\s--max\s+(\d+)/', $args, $m)) { $opts['max'] = (int)$m[1]; $args = trim(preg_replace('/\s--max\s+\d+/', '', $args)); }
         if (preg_match('/(^|\s)--review(\s|$)/', $args)) { $opts['land'] = 'review'; $args = trim(preg_replace('/(^|\s)--review(\s|$)/', ' ', $args)); }
         if (preg_match('/(^|\s)--no-research(\s|$)/', $args)) { $opts['research'] = false; $args = trim(preg_replace('/(^|\s)--no-research(\s|$)/', ' ', $args)); }
         if (preg_match('/(^|\s)--no-audit(\s|$)/', $args)) { $opts['audit'] = false; $args = trim(preg_replace('/(^|\s)--no-audit(\s|$)/', ' ', $args)); }
+        if (preg_match('/(^|\s)--no-skills(\s|$)/', $args)) { $opts['skills'] = false; $args = trim(preg_replace('/(^|\s)--no-skills(\s|$)/', ' ', $args)); }
+        // --focus accepts a quoted phrase or a single token.
+        if (preg_match('/\s--focus\s+"([^"]*)"/', $args, $m)) { $opts['focus'] = $m[1]; $args = trim(preg_replace('/\s--focus\s+"[^"]*"/', '', $args)); }
+        elseif (preg_match('/\s--focus\s+(\S+)/', $args, $m)) { $opts['focus'] = $m[1]; $args = trim(preg_replace('/\s--focus\s+\S+/', '', $args)); }
+        // Per-role models: each takes one model name token.
+        foreach (['director' => 'directorModel', 'coder' => 'coderModel', 'auditor' => 'auditorModel', 'researcher' => 'researcherModel'] as $role => $key) {
+            if (preg_match('/\s--' . $role . '-model\s+(\S+)/', $args, $m)) { $opts[$key] = $m[1]; $args = trim(preg_replace('/\s--' . $role . '-model\s+\S+/', '', $args)); }
+        }
         Crew::run(trim($args), $opts); // prints its own progress
         return '';
     }
