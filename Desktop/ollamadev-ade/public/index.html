@@ -80,23 +80,51 @@
     </div>
 
     <div id="modalOverlay" class="modal-overlay" hidden>
-        <div class="modal">
-            <div class="modal-title">👥 OllamaDev Crew</div>
-            <div class="modal-sub dim">Researcher → Director → Coders (git worktrees) → Auditor → auto-merge clean</div>
-            <label class="modal-label">Task</label>
-            <textarea id="crewTask" placeholder="Describe the high-level task… e.g. add a /health route and a test for it"></textarea>
-            <div class="modal-row">
-                <label class="modal-label">Model</label>
-                <select id="crewModel" title="Use a fast coder model — large models make the bench very slow"></select>
-                <label class="modal-label" style="margin-left:14px;">Max coders</label>
-                <select id="crewMax"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select>
+        <div class="modal wizard">
+            <div class="modal-title">👥 OllamaDev Crew — setup</div>
+            <div class="wiz-steps">
+                <span class="wiz-dot active" data-s="1">1 · Project</span>
+                <span class="wiz-dot" data-s="2">2 · Task</span>
+                <span class="wiz-dot" data-s="3">3 · Crew</span>
+                <span class="wiz-dot" data-s="4">4 · Review</span>
             </div>
-            <label class="modal-check"><input type="checkbox" id="crewReview" checked> Review before merge (hold every branch — nothing auto-merges)</label>
+
+            <div class="wiz-step" data-step="1">
+                <label class="modal-label">Project folder</label>
+                <input id="crewFolder" placeholder="~/projects/my-app">
+                <div class="modal-hint dim">Crew runs in this git repo (needs at least one commit). Defaults to the folder you have open.</div>
+            </div>
+
+            <div class="wiz-step" data-step="2" hidden>
+                <label class="modal-label">Template</label>
+                <div id="crewTemplates" class="wiz-templates"></div>
+                <label class="modal-label">Task</label>
+                <textarea id="crewTask" placeholder="Describe the high-level task… e.g. add a /health route and a test for it"></textarea>
+                <div class="modal-hint dim">Pick a template to prefill, then edit. The Director splits this into independent subtasks.</div>
+            </div>
+
+            <div class="wiz-step" data-step="3" hidden>
+                <div class="modal-row">
+                    <label class="modal-label">Model</label>
+                    <select id="crewModel" title="Use a fast coder model — large models make the bench very slow"></select>
+                    <label class="modal-label" style="margin-left:14px;">Max coders</label>
+                    <select id="crewMax"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select>
+                </div>
+                <label class="modal-check"><input type="checkbox" id="crewReview" checked> Review before merge (hold every branch — nothing auto-merges)</label>
+            </div>
+
+            <div class="wiz-step" data-step="4" hidden>
+                <label class="modal-label">Review &amp; launch</label>
+                <div id="crewSummary" class="wiz-summary"></div>
+            </div>
+
             <div class="modal-actions">
                 <button id="crewCancel">Cancel</button>
-                <button id="crewRun" class="primary">Run Crews</button>
+                <div class="spacer"></div>
+                <button id="wizBack" hidden>← Back</button>
+                <button id="wizNext" class="primary">Next →</button>
+                <button id="crewRun" class="primary" hidden>Run Crews</button>
             </div>
-            <div id="crewDirHint" class="modal-hint dim">Runs in the folder shown in the sidebar. Needs a git repo with at least one commit.</div>
         </div>
     </div>
 

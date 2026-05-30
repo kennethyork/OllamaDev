@@ -218,6 +218,24 @@ body {
 .modal-actions button.primary { background: var(--accent); color: #08111f; border-color: transparent; font-weight: 700; }
 .modal-actions button.primary:hover { filter: brightness(1.1); background: var(--accent); }
 .modal-hint { font-size: 11px; margin-top: 12px; }
+/* crew setup wizard */
+.wizard { width: 560px; }
+.wiz-steps { display: flex; gap: 6px; margin: 14px 0 6px; }
+.wiz-dot { flex: 1; text-align: center; font-size: 11px; font-weight: 700; color: var(--faint); padding: 6px 4px; border-radius: var(--r-sm); background: var(--bg3); border: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wiz-dot.active { color: #08111f; background: var(--accent); border-color: transparent; }
+.wiz-dot.done { color: var(--accent); }
+.wiz-step { min-height: 96px; }
+.wiz-step[hidden] { display: none; }
+#crewFolder { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--fg); padding: 10px; font-family: var(--mono); font-size: 13px; outline: none; }
+#crewFolder:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.wiz-summary { font-size: 13px; line-height: 1.7; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 12px 14px; }
+.wiz-summary b { color: var(--dim); font-weight: 600; display: inline-block; min-width: 84px; }
+.wiz-summary .val { color: var(--fg); }
+.wiz-summary .warnv { color: var(--warn); }
+.wiz-templates { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.wiz-tpl { font-size: 12px; padding: 6px 11px; border-radius: 20px; border: 1px solid var(--border); background: var(--bg3); color: var(--dim); cursor: pointer; transition: all .12s; }
+.wiz-tpl:hover { color: var(--fg); border-color: var(--faint); }
+.wiz-tpl.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
 .modal-check { display: flex; align-items: center; gap: 8px; margin-top: 16px; font-size: 12px; color: var(--dim); cursor: pointer; }
 .modal-check input { accent-color: var(--accent); width: 15px; height: 15px; }
 

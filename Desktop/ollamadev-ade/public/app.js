@@ -347,14 +347,17 @@ var App = {
             if (e.key === 'Enter') self.submitFolder();
             else if (e.key === 'Escape') self.closeFolder();
         });
-        // Crew modal
+        // Crew setup wizard
         var fb = $('#crewBtn'); if (fb) fb.onclick = function () { self.openCrew(); };
         var fc = $('#crewCancel'); if (fc) fc.onclick = function () { self.closeCrew(); };
-        var fr = $('#crewRun'); if (fr) fr.onclick = function () { self.submitCrew(); };
+        var wn = $('#wizNext'); if (wn) wn.onclick = function () { self.wizNext(); };
+        var wbk = $('#wizBack'); if (wbk) wbk.onclick = function () { self.wizBack(); };
+        var fr = $('#crewRun'); if (fr) fr.onclick = function () { self.runCrewFromWizard(); };
         var ov = $('#modalOverlay'); if (ov) ov.onclick = function (e) { if (e.target === ov) self.closeCrew(); };
+        var cfo = $('#crewFolder'); if (cfo) cfo.addEventListener('keydown', function (e) { if (e.key === 'Enter') self.wizNext(); else if (e.key === 'Escape') self.closeCrew(); });
         var ft = $('#crewTask'); if (ft) ft.addEventListener('keydown', function (e) {
             if (e.key === 'Escape') self.closeCrew();
-            else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') self.submitCrew();
+            else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') self.wizNext();
         });
         // Activity rail: switch the sidebar between Files and Tasks.
         document.querySelectorAll('.rail-btn').forEach(function (b) {
@@ -501,30 +504,104 @@ var App = {
     },
     // Recommended fast coder models, in preference order, for the crew run.
     CREW_PREFERRED: ['qwen2.5-coder', 'qwen3-coder', 'codestral', 'deepseek-coder', 'mistral', 'llama3.1'],
+    // Setup templates (BridgeSpace-style) — prefill the task + suggested config.
+    CREW_TEMPLATES: [
+        { id: 'feature', label: '✨ Feature', task: 'Implement this feature: ', max: 3, review: true },
+        { id: 'bugfix', label: '🐛 Bug fix', task: 'Find and fix this bug: ', max: 1, review: true },
+        { id: 'tests', label: '🧪 Tests', task: 'Write thorough tests for: ', max: 2, review: true },
+        { id: 'refactor', label: '♻️ Refactor', task: 'Refactor for clarity/maintainability (no behavior change): ', max: 2, review: true },
+        { id: 'docs', label: '📝 Docs', task: 'Write/update documentation for: ', max: 1, review: false },
+        { id: 'audit', label: '🔍 Audit & fix', task: 'Review the codebase for bugs and security issues, and fix them: ', max: 2, review: true },
+        { id: 'blank', label: '➕ Blank', task: '', max: 2, review: true }
+    ],
     openCrew: function () {
         var o = $('#modalOverlay'); if (!o) return;
+        // Step 1 default folder = the open project.
+        var cf = $('#crewFolder'); if (cf) cf.value = (this.cwd && this.cwd !== '.') ? this.cwd : '';
+        // Populate the model dropdown, defaulting to a recommended fast model.
         var sel = $('#crewModel');
         if (sel) {
-            // Populate from installed models; default to a recommended fast one
-            // (a 30B+ model makes the bench painfully slow / look hung).
             var opts = Array.prototype.slice.call($('#modelSelect').options).map(function (o) { return o.value; });
             if (opts.length) {
                 var pick = opts[0];
                 for (var i = 0; i < this.CREW_PREFERRED.length; i++) {
-                    var hit = opts.find(function (m) { return m.indexOf(this.CREW_PREFERRED[i]) === 0 || m.indexOf(this.CREW_PREFERRED[i]) !== -1; }, this);
+                    var pref = this.CREW_PREFERRED[i];
+                    var hit = opts.find(function (m) { return m.indexOf(pref) !== -1; });
                     if (hit) { pick = hit; break; }
                 }
                 sel.innerHTML = opts.map(function (m) { return '<option' + (m === pick ? ' selected' : '') + '>' + esc(m) + '</option>'; }).join('');
             }
         }
-        var hint = $('#crewDirHint');
-        if (hint) hint.textContent = 'Runs in: ' + (this.cwd || '.') + '  (navigate the sidebar to pick a project; needs a git repo)';
-        o.hidden = false; var t = $('#crewTask'); if (t) t.focus();
+        this.renderTemplates();
+        o.hidden = false;
+        this.wizGo(1);
     },
     closeCrew: function () { var o = $('#modalOverlay'); if (o) o.hidden = true; },
-    submitCrew: function () {
-        var task = ($('#crewTask').value || '').trim();
-        if (!task) { $('#crewTask').focus(); return; }
+    renderTemplates: function () {
+        var box = $('#crewTemplates'); if (!box) return;
+        var self = this;
+        box.innerHTML = this.CREW_TEMPLATES.map(function (t) { return '<span class="wiz-tpl" data-id="' + t.id + '">' + t.label + '</span>'; }).join('');
+        box.querySelectorAll('.wiz-tpl').forEach(function (el) {
+            el.onclick = function () {
+                var t = self.CREW_TEMPLATES.find(function (x) { return x.id === el.dataset.id; });
+                if (!t) return;
+                box.querySelectorAll('.wiz-tpl').forEach(function (e) { e.classList.remove('active'); });
+                el.classList.add('active');
+                $('#crewTask').value = t.task;
+                $('#crewMax').value = String(t.max);
+                if ($('#crewReview')) $('#crewReview').checked = t.review;
+                var ta = $('#crewTask'); ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length;
+            };
+        });
+    },
+    // ---- wizard navigation ----
+    wizGo: function (step) {
+        this.wizStep = step;
+        document.querySelectorAll('.wiz-step').forEach(function (s) { s.hidden = (+s.dataset.step !== step); });
+        document.querySelectorAll('.wiz-dot').forEach(function (d) {
+            var s = +d.dataset.s; d.classList.toggle('active', s === step); d.classList.toggle('done', s < step);
+        });
+        $('#wizBack').hidden = step === 1;
+        $('#wizNext').hidden = step === 4;
+        $('#crewRun').hidden = step !== 4;
+        if (step === 4) this.buildSummary();
+        // focus the step's primary input
+        var f = step === 1 ? '#crewFolder' : step === 2 ? '#crewTask' : null;
+        if (f && $(f)) setTimeout(function () { $(f).focus(); }, 0);
+    },
+    wizBack: function () { if (this.wizStep > 1) this.wizGo(this.wizStep - 1); },
+    wizNext: function () {
+        var self = this;
+        if (this.wizStep === 1) {
+            var path = ($('#crewFolder').value || '').trim();
+            if (!path) { $('#crewFolder').focus(); banner('enter a project folder', 'err'); return; }
+            // Validate + set as the workspace folder, then advance.
+            Promise.resolve(window.setRoot ? window.setRoot(path) : { root: path }).then(function (r) {
+                if (!r || r.error) { banner('not a folder: ' + path, 'err'); $('#crewFolder').focus(); return; }
+                self.cwd = r.root; try { localStorage.setItem('ade.folder', r.root); } catch (e) {}
+                self.loadFiles(r.root);
+                self.wizGo(2);
+            }).catch(function (e) { banner('folder error: ' + e, 'err'); });
+            return;
+        }
+        if (this.wizStep === 2) {
+            if (!($('#crewTask').value || '').trim()) { $('#crewTask').focus(); banner('describe the task', 'err'); return; }
+            this.wizGo(3); return;
+        }
+        if (this.wizStep === 3) { this.wizGo(4); return; }
+    },
+    buildSummary: function () {
+        var box = $('#crewSummary'); if (!box) return;
+        var review = $('#crewReview') ? $('#crewReview').checked : true;
+        box.innerHTML =
+            '<div><b>Folder</b> <span class="val">' + esc(this.cwd || '.') + '</span></div>' +
+            '<div><b>Task</b> <span class="val">' + esc(($('#crewTask').value || '').trim()) + '</span></div>' +
+            '<div><b>Model</b> <span class="val">' + esc($('#crewModel').value || '') + '</span></div>' +
+            '<div><b>Coders</b> <span class="val">' + esc($('#crewMax').value || '2') + '</span></div>' +
+            '<div><b>Landing</b> <span class="' + (review ? 'val' : 'warnv') + '">' + (review ? 'review every branch (safe)' : 'auto-merge audit-clean') + '</span></div>';
+    },
+    runCrewFromWizard: function () {
+        var task = ($('#crewTask').value || '').trim(); if (!task) { this.wizGo(2); return; }
         var max = $('#crewMax').value || '2';
         var model = ($('#crewModel') && $('#crewModel').value) || $('#modelSelect').value || 'llama3.2:latest';
         var review = $('#crewReview') ? $('#crewReview').checked : true;
