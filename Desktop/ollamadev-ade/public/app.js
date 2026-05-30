@@ -562,18 +562,20 @@ var App = {
     // Built-in specialized teams — by software domain (with a focus the agents
     // follow) and by task type. Each sets the crew composition.
     CREW_TEAMS: [
-        // --- by software domain ---
-        { name: '🌐 Web Frontend', group: 'domain', max: 3, researcher: true, auditor: true, review: true, focus: 'Web frontend. Use the project\'s framework (React/Vue/Svelte/vanilla). Prioritize accessibility, responsive layout, component structure, and matching existing styles.' },
-        { name: '🔌 Backend / API', group: 'domain', max: 3, researcher: true, auditor: true, review: true, focus: 'Backend/API in the project\'s language & framework. Prioritize correct routing, input validation, error handling, auth, and tests.' },
-        { name: '📱 Mobile', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'Mobile app on the project\'s platform (iOS/Android/React Native/Flutter). Mind lifecycle, state management, and platform UX guidelines.' },
-        { name: '🎮 Game Dev', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'Game development with the project\'s engine (Unity/Godot/etc.). Mind the game loop, performance, input, and asset handling.' },
-        { name: '📊 Data / ML', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'Data/ML in Python (pandas/numpy/scikit/torch). Prioritize reproducibility, data validation, and clear, runnable scripts/notebooks.' },
-        { name: '⚙️ DevOps / Infra', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'DevOps/infra: shell, Docker, CI/CD, IaC. Prioritize idempotency, safety, least privilege, and clear config. Never hard-code secrets.' },
-        { name: '🖥 Desktop App', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'Desktop app with the project\'s toolkit (Electron/Qt/GTK/Tauri/etc.). Mind windowing, packaging, and OS integration.' },
-        { name: '🧰 CLI / Tooling', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'CLI tool: clear args/flags, helpful output, correct exit codes, and tests. Follow the project\'s conventions.' },
-        { name: '🗄 Database', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'Database work: schema, migrations, queries. Mind indexing, integrity, and safe/reversible migrations.' },
-        { name: '🔒 Security', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'Security hardening: input validation, authn/authz, secrets handling, injection, and dependency risks. Make minimal, safe changes.' },
-        { name: '🤖 AI / LLM app', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'AI/LLM application code: prompts, agent loops, API usage, streaming, token limits, and caching. Follow the project\'s SDK.' },
+        // --- by kind of software you're building ---
+        { name: '🌐 Website', group: 'domain', max: 3, researcher: true, auditor: true, review: true, focus: 'A website (static / marketing / content) — plain HTML/CSS/JS or the site generator (Next/Astro/Hugo/Eleventy/WordPress). Prioritize semantic markup, responsive design, SEO, fast load, and accessibility.' },
+        { name: '🖥 Web App', group: 'domain', max: 3, researcher: true, auditor: true, review: true, focus: 'A web application (SPA or full-stack) — use the project\'s framework (React/Vue/Svelte/Angular + backend). Prioritize component structure, state, routing, API integration, auth, and tests.' },
+        { name: '🛒 E-commerce', group: 'domain', max: 3, researcher: true, auditor: true, review: true, focus: 'An e-commerce site/app — catalog, cart, checkout, payments, orders. Prioritize correctness of money/tax math, payment security, and inventory integrity.' },
+        { name: '📱 Mobile App', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'A mobile app — the project\'s platform (iOS/Android/React Native/Flutter). Mind lifecycle, state, navigation, and platform UX guidelines.' },
+        { name: '🖥 Desktop App', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'A desktop app — the project\'s toolkit (Electron/Tauri/Qt/GTK). Mind windowing, packaging, and OS integration.' },
+        { name: '🔌 API / Backend', group: 'domain', max: 3, researcher: true, auditor: true, review: true, focus: 'An API / backend service — the project\'s language & framework. Prioritize routing, input validation, error handling, auth, and tests.' },
+        { name: '🧰 CLI Tool', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'A command-line tool — clear args/flags, helpful output, correct exit codes, and tests. Follow the project\'s conventions.' },
+        { name: '🎮 Game', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'A game — the project\'s engine (Unity/Godot/Phaser/etc.). Mind the game loop, performance, input, and assets.' },
+        { name: '🧩 Browser Extension', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'A browser extension (Chrome/Firefox, Manifest V3). Mind the manifest, content/background scripts, least-privilege permissions, and messaging.' },
+        { name: '🤖 Bot', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'A chat bot (Discord/Slack/Telegram). Mind the platform SDK, event/command handlers, rate limits, and token security.' },
+        { name: '📦 Library / Package', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'A reusable library/package — clean public API, docs, semantic versioning, no leaked internals, and tests.' },
+        { name: '🧠 AI / LLM App', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'An AI/LLM app — prompts, agent loops, API/SDK usage, streaming, token limits, and caching.' },
+        { name: '📊 Data / ML', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'A data/ML project (Python: pandas/numpy/scikit/torch). Prioritize reproducibility, data validation, and clear runnable scripts/notebooks.' },
         // --- by task type ---
         { name: '🛠 Feature Crew', group: 'task', max: 3, researcher: true, auditor: true, review: true },
         { name: '🐛 Bug Squad', group: 'task', max: 1, researcher: false, auditor: true, review: true },
@@ -593,7 +595,7 @@ var App = {
         var names = Object.keys(this.crewPresets());
         var saved = names.length ? '<optgroup label="Saved">' + names.map(function (n) { return '<option value="saved:' + esc(n) + '">' + esc(n) + '</option>'; }).join('') + '</optgroup>' : '';
         sel.innerHTML = '<option value="">— preset / team —</option>' +
-            '<optgroup label="By software type">' + dom + '</optgroup>' +
+            '<optgroup label="By project type">' + dom + '</optgroup>' +
             '<optgroup label="By task">' + task + '</optgroup>' + saved;
     },
     applyPreset: function (value) {
