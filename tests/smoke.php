@@ -423,6 +423,35 @@ ok('skill tool has native schema', strpos($src, "\$fn('skill'") !== false);
 ok('skills injected into system prompt', strpos($src, 'AVAILABLE SKILLS') !== false);
 ok('skill tool is read-only', strpos($src, "'summarize', 'skill'") !== false);
 
+echo "\n== Crew team skills ==\n";
+if (preg_match('/class CrewSkills \{.*?\n\}/s', $src, $cs)) {
+    eval($cs[0]);
+    $ecom = CrewSkills::forFocus('An e-commerce site — catalog, cart, checkout, payments, orders.');
+    $enames = array_map(fn($s) => $s['name'], $ecom);
+    ok('forFocus matches e-commerce → payments-money', in_array('payments-money', $enames, true));
+    ok('forFocus is capped at 5', count($ecom) <= 5);
+    $api = array_map(fn($s) => $s['name'], CrewSkills::forFocus('A REST API / backend service. Prioritize routing, validation, auth, and tests.'));
+    ok('forFocus matches REST API → rest-api-design', in_array('rest-api-design', $api, true));
+    ok('forFocus matches "and tests" → testing-discipline', in_array('testing-discipline', $api, true));
+    ok('forFocus on empty focus returns nothing', CrewSkills::forFocus('') === []);
+    $site = array_map(fn($s) => $s['name'], CrewSkills::forFocus('A website (static / marketing). Prioritize semantic markup, responsive design, SEO, and accessibility.'));
+    ok('forFocus matches website → responsive-design', in_array('responsive-design', $site, true));
+    // materialize writes SKILL.md into <base>/.ollamadev/skills/<name>/
+    $tmpWt = sys_get_temp_dir() . '/odv_teamskill_' . getmypid();
+    @mkdir($tmpWt, 0755, true);
+    $oldHome2 = getenv('HOME'); putenv('HOME=' . $tmpWt . '/home'); // isolate the "don't clobber global" check
+    $written = CrewSkills::materialize($ecom, $tmpWt);
+    $md = $tmpWt . '/.ollamadev/skills/payments-money/SKILL.md';
+    ok('materialize writes a team SKILL.md', is_file($md) && strpos(file_get_contents($md), 'name: payments-money') !== false);
+    ok('materialize reports written names', in_array('payments-money', $written, true));
+    putenv($oldHome2 !== false ? "HOME=$oldHome2" : 'HOME');
+    @exec('rm -rf ' . escapeshellarg($tmpWt));
+} else { ok('CrewSkills class extractable', false); }
+// Crew wiring: focus → team skills → materialized into worktrees
+ok('crew computes team skills from focus', strpos($src, 'CrewSkills::forFocus($focus)') !== false);
+ok('crew materializes skills into worktrees', strpos($src, 'CrewSkills::materialize($teamSkills, $wt)') !== false);
+ok('crew --no-skills flag wired', strpos($src, "'--no-skills'") !== false);
+
 echo "\n========================\n";
 echo "Results: $pass passed, $fail failed\n";
 if ($fail > 0) { echo "FAILED: " . implode(', ', $fails) . "\n"; exit(1); }

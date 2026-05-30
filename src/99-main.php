@@ -1041,6 +1041,7 @@ if ($cmd === 'chat') {
     if (in_array('--review', $argv, true)) $copts['land'] = 'review';
     if (in_array('--no-research', $argv, true)) $copts['research'] = false;
     if (in_array('--no-audit', $argv, true)) $copts['audit'] = false;
+    if (in_array('--no-skills', $argv, true)) $copts['skills'] = false;
     foreach (['directorModel', 'coderModel', 'auditorModel', 'researcherModel'] as $rk) if (!empty($flags[$rk])) $copts[$rk] = $flags[$rk];
     if (!empty($flags['focus'])) $copts['focus'] = $flags['focus'];
     exit(Crew::run($task, $copts));

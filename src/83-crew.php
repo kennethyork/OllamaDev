@@ -28,6 +28,9 @@ class Crew {
         $maxCoders = max(1, min(6, (int)($opts['max'] ?? Config::get('crew.maxCoders', 4))));
         $maxIter = max(2, (int)($opts['iterations'] ?? Config::get('crew.coderIterations', 10)));
         $focus = trim((string)($opts['focus'] ?? '')); // domain/stack steer from a specialized team
+        // Per-team skill packs: starter skills matched to the team's focus, loaded
+        // into each coder's worktree so they pick up domain conventions on demand.
+        $teamSkills = ($opts['skills'] ?? true) !== false ? CrewSkills::forFocus($focus) : [];
 
         $base = self::sh('git rev-parse --abbrev-ref HEAD');
         $baseCommit = self::sh('git rev-parse HEAD');
@@ -38,6 +41,7 @@ class Crew {
         $c = "\033[36m"; $d = "\033[2m"; $b = "\033[1m"; $g = "\033[32m"; $y = "\033[33m"; $r = "\033[0m";
         $runId = 'crew_' . date('Ymd_His');
         echo "\n{$b}👥 OllamaDev Crew{$r}  {$d}model {$c}{$model}{$r}{$d} · base {$base}@" . substr($baseCommit, 0, 7) . "{$r}\n";
+        if (!empty($teamSkills)) echo "  {$d}team skills: " . implode(', ', array_map(fn($s) => $s['name'], $teamSkills)) . "{$r}\n";
 
         // ---- Researcher: survey the codebase, write a shared findings vault ----
         $research = '';
@@ -84,6 +88,7 @@ class Crew {
             echo "\n{$b}▸ Coder {$n}{$r} {$d}{$branch}{$r}\n";
             $add = self::sh('git worktree add -b ' . escapeshellarg($branch) . ' ' . escapeshellarg($wt) . ' ' . escapeshellarg($baseCommit) . ' 2>&1');
             if (!is_dir($wt)) { echo "  {$y}skipped (worktree failed): {$add}{$r}\n"; $setState($n, 'held'); continue; }
+            if (!empty($teamSkills)) CrewSkills::materialize($teamSkills, $wt); // seed domain skills (git-excluded)
 
             $setState($n, 'doing');
             self::runCoder($wt, $st, $mCoder, $maxIter, $research, $task, $focus);
