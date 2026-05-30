@@ -236,6 +236,16 @@ body {
 .wiz-tpl { font-size: 12px; padding: 6px 11px; border-radius: 20px; border: 1px solid var(--border); background: var(--bg3); color: var(--dim); cursor: pointer; transition: all .12s; }
 .wiz-tpl:hover { color: var(--fg); border-color: var(--faint); }
 .wiz-tpl.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.roster { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.rmate { display: flex; align-items: center; gap: 9px; padding: 8px 11px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg); font-size: 13px; cursor: pointer; }
+.rmate.locked { cursor: default; opacity: .9; }
+.rmate input { accent-color: var(--accent); width: 15px; height: 15px; }
+.rmate .rico { font-size: 15px; }
+.rmate .rname { font-weight: 600; }
+.rmate .rdesc { color: var(--faint); font-size: 11px; }
+.rmate .rreq { margin-left: auto; color: var(--accent); font-size: 11px; font-weight: 700; }
+.rmate select { margin-left: auto; -webkit-appearance: none; appearance: none; background: var(--bg3); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 4px 24px 4px 9px; font-size: 12px; cursor: pointer;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b949e' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>"); background-repeat: no-repeat; background-position: right 8px center; }
 .modal-check { display: flex; align-items: center; gap: 8px; margin-top: 16px; font-size: 12px; color: var(--dim); cursor: pointer; }
 .modal-check input { accent-color: var(--accent); width: 15px; height: 15px; }
 

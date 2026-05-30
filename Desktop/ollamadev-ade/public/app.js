@@ -593,29 +593,43 @@ var App = {
     buildSummary: function () {
         var box = $('#crewSummary'); if (!box) return;
         var review = $('#crewReview') ? $('#crewReview').checked : true;
+        var researcher = $('#crewResearcher') ? $('#crewResearcher').checked : true;
+        var auditor = $('#crewAuditor') ? $('#crewAuditor').checked : true;
+        var team = ['🧭 Director'];
+        if (researcher) team.push('🔎 Researcher');
+        team.push('👷 ' + ($('#crewMax').value || '2') + ' Coder(s)');
+        if (auditor) team.push('🔍 Auditor');
         box.innerHTML =
             '<div><b>Folder</b> <span class="val">' + esc(this.cwd || '.') + '</span></div>' +
             '<div><b>Task</b> <span class="val">' + esc(($('#crewTask').value || '').trim()) + '</span></div>' +
+            '<div><b>Team</b> <span class="val">' + team.join(' · ') + '</span></div>' +
             '<div><b>Model</b> <span class="val">' + esc($('#crewModel').value || '') + '</span></div>' +
-            '<div><b>Coders</b> <span class="val">' + esc($('#crewMax').value || '2') + '</span></div>' +
-            '<div><b>Landing</b> <span class="' + (review ? 'val' : 'warnv') + '">' + (review ? 'review every branch (safe)' : 'auto-merge audit-clean') + '</span></div>';
+            '<div><b>Landing</b> <span class="' + (review ? 'val' : 'warnv') + '">' + (review ? 'review every branch (safe)' : (auditor ? 'auto-merge audit-clean' : 'review (no auditor)')) + '</span></div>';
     },
     runCrewFromWizard: function () {
         var task = ($('#crewTask').value || '').trim(); if (!task) { this.wizGo(2); return; }
-        var max = $('#crewMax').value || '2';
-        var model = ($('#crewModel') && $('#crewModel').value) || $('#modelSelect').value || 'llama3.2:latest';
-        var review = $('#crewReview') ? $('#crewReview').checked : true;
+        var opts = {
+            max: $('#crewMax').value || '2',
+            model: ($('#crewModel') && $('#crewModel').value) || $('#modelSelect').value || 'llama3.2:latest',
+            review: $('#crewReview') ? $('#crewReview').checked : true,
+            researcher: $('#crewResearcher') ? $('#crewResearcher').checked : true,
+            auditor: $('#crewAuditor') ? $('#crewAuditor').checked : true
+        };
         this.closeCrew();
-        this.runCrew(task, max, model, review);
+        this.runCrew(task, opts);
     },
     // Launch `ollamadev crew "<task>"` in a fresh terminal and show it full-screen.
-    runCrew: function (task, max, model, review) {
+    runCrew: function (task, opts) {
+        opts = opts || {};
         if (this.terminals.length >= this.MAX_TERMINALS) { banner('close a terminal first (max ' + this.MAX_TERMINALS + ')', 'err'); return; }
-        model = model || $('#modelSelect').value || 'llama3.2:latest';
+        var model = opts.model || $('#modelSelect').value || 'llama3.2:latest';
         var cli = this.cli || 'ollamadev';
         var q = "'" + String(task).replace(/'/g, "'\\''") + "'"; // shell single-quote
         // Run in the opened project folder, not the ADE's own directory.
-        var cmd = this.cdPrefix() + cli + ' crew ' + q + ' --max ' + (parseInt(max, 10) || 2) + ' -m ' + model + (review ? ' --review' : '');
+        var cmd = this.cdPrefix() + cli + ' crew ' + q + ' --max ' + (parseInt(opts.max, 10) || 2) + ' -m ' + model +
+            (opts.review !== false ? ' --review' : '') +
+            (opts.researcher === false ? ' --no-research' : '') +
+            (opts.auditor === false ? ' --no-audit' : '');
         var id = rid(); var t = new Terminal(id, 'crew');
         var self = this;
         Promise.resolve(window.termCreate(id, model)).then(function () {

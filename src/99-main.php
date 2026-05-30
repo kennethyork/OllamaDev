@@ -1008,6 +1008,8 @@ if ($cmd === 'chat') {
     $task = $arg1 === '' ? '' : implode(' ', $taskParts);
     $copts = ['max' => $flags['max'] ?? null];
     if (in_array('--review', $argv, true)) $copts['land'] = 'review';
+    if (in_array('--no-research', $argv, true)) $copts['research'] = false;
+    if (in_array('--no-audit', $argv, true)) $copts['audit'] = false;
     exit(Crew::run($task, $copts));
 } elseif ($cmd === 'load' && $arg1) {
     $session = new Session($config, $arg1);

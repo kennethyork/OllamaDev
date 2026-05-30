@@ -86,10 +86,12 @@ class Crew {
             $results[] = ['n' => $n, 'title' => $st['title'] ?? 'task', 'branch' => $branch, 'wt' => $wt, 'diff' => $diff, 'files' => $files, 'empty' => $diff === ''];
         }
 
-        // ---- Auditor: review each diff ----
-        echo "\n{$b}▸ Auditor{$r} reviewing…\n";
+        // ---- Auditor: review each diff (optional; without it, nothing auto-merges) ----
+        $doAudit = ($opts['audit'] ?? true) !== false;
+        echo "\n{$b}▸ Auditor{$r} " . ($doAudit ? "reviewing…" : "{$d}(disabled — all branches held for your review){$r}") . "\n";
         foreach ($results as &$res) {
             if ($res['empty']) { $res['audit'] = ['clean' => false, 'summary' => 'no changes', 'issues' => []]; echo "  {$d}#{$res['n']} skipped (empty){$r}\n"; continue; }
+            if (!$doAudit) { $res['audit'] = ['clean' => false, 'summary' => 'no auditor — review manually', 'issues' => []]; continue; }
             $res['audit'] = self::audit($agent, $res['title'], $res['diff'], $task);
             $vc = $res['audit']['clean'] ? "{$g}clean{$r}" : "{$y}flagged{$r}";
             echo "  #{$res['n']} {$vc} {$d}" . substr((string)($res['audit']['summary'] ?? ''), 0, 80) . "{$r}\n";
