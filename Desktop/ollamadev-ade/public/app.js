@@ -530,6 +530,8 @@ var App = {
             var sel = $('#' + id); if (!sel || !opts.length) return;
             sel.innerHTML = opts.map(function (m) { return '<option' + (m === pick ? ' selected' : '') + '>' + esc(m) + '</option>'; }).join('');
         });
+        this.crewFocus = "";
+
         this.renderTemplates();
         this.populatePresets();
         var pl = $('#crewProjLine'); if (pl) pl.textContent = 'Runs in: ' + (this.cwd || '.') + ' · default team: Director + Researcher + 2 Coders + Auditor · review on';
@@ -557,24 +559,42 @@ var App = {
     },
     mval: function (id) { var s = $('#' + id); return (s && s.value) || $('#modelSelect').value || 'llama3.2:latest'; },
     setMval: function (id, v) { var s = $('#' + id); if (!s || !v) return; if (![].some.call(s.options, function (o) { return o.value === v; })) s.innerHTML += '<option>' + esc(v) + '</option>'; s.value = v; },
-    // Built-in specialized teams — preset crew compositions for common work.
+    // Built-in specialized teams — by software domain (with a focus the agents
+    // follow) and by task type. Each sets the crew composition.
     CREW_TEAMS: [
-        { name: '🛠 Feature Crew', max: 3, researcher: true, auditor: true, review: true },
-        { name: '🐛 Bug Squad', max: 1, researcher: false, auditor: true, review: true },
-        { name: '🧪 Test Crew', max: 2, researcher: false, auditor: true, review: true },
-        { name: '♻️ Refactor Crew', max: 2, researcher: true, auditor: true, review: true },
-        { name: '📝 Docs Crew', max: 1, researcher: false, auditor: false, review: false },
-        { name: '🔍 Audit Crew', max: 2, researcher: true, auditor: true, review: true },
-        { name: '⚡ Solo (fast)', max: 1, researcher: false, auditor: false, review: true }
+        // --- by software domain ---
+        { name: '🌐 Web Frontend', group: 'domain', max: 3, researcher: true, auditor: true, review: true, focus: 'Web frontend. Use the project\'s framework (React/Vue/Svelte/vanilla). Prioritize accessibility, responsive layout, component structure, and matching existing styles.' },
+        { name: '🔌 Backend / API', group: 'domain', max: 3, researcher: true, auditor: true, review: true, focus: 'Backend/API in the project\'s language & framework. Prioritize correct routing, input validation, error handling, auth, and tests.' },
+        { name: '📱 Mobile', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'Mobile app on the project\'s platform (iOS/Android/React Native/Flutter). Mind lifecycle, state management, and platform UX guidelines.' },
+        { name: '🎮 Game Dev', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'Game development with the project\'s engine (Unity/Godot/etc.). Mind the game loop, performance, input, and asset handling.' },
+        { name: '📊 Data / ML', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'Data/ML in Python (pandas/numpy/scikit/torch). Prioritize reproducibility, data validation, and clear, runnable scripts/notebooks.' },
+        { name: '⚙️ DevOps / Infra', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'DevOps/infra: shell, Docker, CI/CD, IaC. Prioritize idempotency, safety, least privilege, and clear config. Never hard-code secrets.' },
+        { name: '🖥 Desktop App', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'Desktop app with the project\'s toolkit (Electron/Qt/GTK/Tauri/etc.). Mind windowing, packaging, and OS integration.' },
+        { name: '🧰 CLI / Tooling', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'CLI tool: clear args/flags, helpful output, correct exit codes, and tests. Follow the project\'s conventions.' },
+        { name: '🗄 Database', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'Database work: schema, migrations, queries. Mind indexing, integrity, and safe/reversible migrations.' },
+        { name: '🔒 Security', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'Security hardening: input validation, authn/authz, secrets handling, injection, and dependency risks. Make minimal, safe changes.' },
+        { name: '🤖 AI / LLM app', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'AI/LLM application code: prompts, agent loops, API usage, streaming, token limits, and caching. Follow the project\'s SDK.' },
+        // --- by task type ---
+        { name: '🛠 Feature Crew', group: 'task', max: 3, researcher: true, auditor: true, review: true },
+        { name: '🐛 Bug Squad', group: 'task', max: 1, researcher: false, auditor: true, review: true },
+        { name: '🧪 Test Crew', group: 'task', max: 2, researcher: false, auditor: true, review: true },
+        { name: '♻️ Refactor Crew', group: 'task', max: 2, researcher: true, auditor: true, review: true },
+        { name: '📝 Docs Crew', group: 'task', max: 1, researcher: false, auditor: false, review: false },
+        { name: '🔍 Audit Crew', group: 'task', max: 2, researcher: true, auditor: true, review: true },
+        { name: '⚡ Solo (fast)', group: 'task', max: 1, researcher: false, auditor: false, review: true }
     ],
     // ---- saved crew presets (team composition + per-role models, reusable) ----
     crewPresets: function () { try { var p = JSON.parse(localStorage.getItem('ade.crewPresets') || '{}'); return (p && typeof p === 'object') ? p : {}; } catch (e) { return {}; } },
     populatePresets: function () {
         var sel = $('#crewPreset'); if (!sel) return;
-        var builtin = '<optgroup label="Specialized teams">' + this.CREW_TEAMS.map(function (t) { return '<option value="builtin:' + esc(t.name) + '">' + esc(t.name) + '</option>'; }).join('') + '</optgroup>';
+        var opt = function (t) { return '<option value="builtin:' + esc(t.name) + '">' + esc(t.name) + '</option>'; };
+        var dom = this.CREW_TEAMS.filter(function (t) { return t.group === 'domain'; }).map(opt).join('');
+        var task = this.CREW_TEAMS.filter(function (t) { return t.group !== 'domain'; }).map(opt).join('');
         var names = Object.keys(this.crewPresets());
         var saved = names.length ? '<optgroup label="Saved">' + names.map(function (n) { return '<option value="saved:' + esc(n) + '">' + esc(n) + '</option>'; }).join('') + '</optgroup>' : '';
-        sel.innerHTML = '<option value="">— preset / team —</option>' + builtin + saved;
+        sel.innerHTML = '<option value="">— preset / team —</option>' +
+            '<optgroup label="By software type">' + dom + '</optgroup>' +
+            '<optgroup label="By task">' + task + '</optgroup>' + saved;
     },
     applyPreset: function (value) {
         var p;
@@ -586,6 +606,7 @@ var App = {
         }
         if (!p) return;
         var name = p.name || value.replace(/^saved:/, '');
+        this.crewFocus = p.focus || ''; // domain steer the team passes to the crew
         if (p.max) $('#crewMax').value = String(p.max);
         if ('review' in p && $('#crewReview')) $('#crewReview').checked = !!p.review;
         if ('researcher' in p && $('#crewResearcher')) $('#crewResearcher').checked = !!p.researcher;
@@ -609,7 +630,8 @@ var App = {
             directorModel: this.mval('crewModelDirector'),
             coderModel: this.mval('crewModelCoder'),
             auditorModel: this.mval('crewModelAuditor'),
-            researcherModel: this.mval('crewModelResearcher')
+            researcherModel: this.mval('crewModelResearcher'),
+            focus: this.crewFocus || ''
         };
         try { localStorage.setItem('ade.crewPresets', JSON.stringify(all)); } catch (e) {}
         this.populatePresets(); $('#crewPreset').value = 'saved:' + name; $('#crewPresetName').value = '';
@@ -638,7 +660,8 @@ var App = {
                 directorModel: self.mval('crewModelDirector'),
                 coderModel: self.mval('crewModelCoder'),
                 auditorModel: self.mval('crewModelAuditor'),
-                researcherModel: self.mval('crewModelResearcher')
+                researcherModel: self.mval('crewModelResearcher'),
+                focus: self.crewFocus || ''
             };
             self.closeCrew();
             self.runCrew(task, opts);
@@ -668,7 +691,8 @@ var App = {
             (opts.auditor === false ? ' --no-audit' : '') +
             rmf('--director-model', opts.directorModel) +
             rmf('--researcher-model', opts.researcher !== false ? opts.researcherModel : '') +
-            rmf('--auditor-model', opts.auditor !== false ? opts.auditorModel : '');
+            rmf('--auditor-model', opts.auditor !== false ? opts.auditorModel : '') +
+            rmf('--focus', opts.focus);
         var model = base;
         var id = rid(); var t = new Terminal(id, 'crew');
         var self = this;

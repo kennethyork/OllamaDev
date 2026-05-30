@@ -27,6 +27,7 @@ class Crew {
         $mAuditor    = $rm('auditorModel');
         $maxCoders = max(1, min(6, (int)($opts['max'] ?? Config::get('crew.maxCoders', 4))));
         $maxIter = max(2, (int)($opts['iterations'] ?? Config::get('crew.coderIterations', 10)));
+        $focus = trim((string)($opts['focus'] ?? '')); // domain/stack steer from a specialized team
 
         $base = self::sh('git rev-parse --abbrev-ref HEAD');
         $baseCommit = self::sh('git rev-parse HEAD');
@@ -56,7 +57,7 @@ class Crew {
 
         // ---- Director: decompose the task (informed by research) ----
         echo "\n{$b}▸ Director{$r} planning…\n";
-        $subtasks = self::plan($agent, $task, $maxCoders, $research, $mDirector);
+        $subtasks = self::plan($agent, $task, $maxCoders, $research, $mDirector, $focus);
         if (empty($subtasks)) { echo "  Director produced no subtasks; treating the whole task as one.\n"; $subtasks = [['title' => 'Task', 'prompt' => $task]]; }
         $subtasks = array_slice($subtasks, 0, $maxCoders);
         foreach ($subtasks as $i => $st) echo "  {$c}" . ($i + 1) . ".{$r} " . ($st['title'] ?? 'subtask') . "\n";
@@ -85,7 +86,7 @@ class Crew {
             if (!is_dir($wt)) { echo "  {$y}skipped (worktree failed): {$add}{$r}\n"; $setState($n, 'held'); continue; }
 
             $setState($n, 'doing');
-            self::runCoder($wt, $st, $mCoder, $maxIter, $research, $task);
+            self::runCoder($wt, $st, $mCoder, $maxIter, $research, $task, $focus);
             // Commit whatever the coder changed — but never the agent's own
             // .ollamadev state (costs/checkpoints/sessions it wrote in the worktree).
             self::sh('git -C ' . escapeshellarg($wt) . ' add -A -- . ' . escapeshellarg(':(exclude).ollamadev'));
@@ -171,14 +172,15 @@ class Crew {
     }
 
     // Director: ask the model for a JSON list of independent subtasks.
-    private static function plan(Agent $agent, string $task, int $max, string $research = '', string $model = ''): array {
+    private static function plan(Agent $agent, string $task, int $max, string $research = '', string $model = '', string $focus = ''): array {
         $sys = ['role' => 'system', 'content' =>
             "You are the Director of a team of coding agents. Decompose the user's task into at most $max " .
             "INDEPENDENT subtasks that, where possible, touch DIFFERENT files so they can be built in parallel " .
             "without conflicts. If the task is small, return a single subtask. Output ONLY JSON: " .
             '{"subtasks":[{"title":"short label","prompt":"a complete, self-contained instruction for one coder"}]}'];
         $ctx = $research !== '' ? "\n\nResearcher findings:\n" . substr($research, 0, 6000) : '';
-        $user = ['role' => 'user', 'content' => "Task:\n$task" . $ctx];
+        $fc = $focus !== '' ? "\n\nDomain/stack focus: $focus" : '';
+        $user = ['role' => 'user', 'content' => "Task:\n$task" . $fc . $ctx];
         $j = (new OllamaClient())->chatJson($model !== "" ? $model : $agent->getModel(), [$sys, $user]);
         $subs = is_array($j) && isset($j['subtasks']) && is_array($j['subtasks']) ? $j['subtasks'] : [];
         $clean = [];
@@ -192,7 +194,7 @@ class Crew {
     }
 
     // Coder: a bounded agent loop in the worktree (auto permissions, isolated).
-    private static function runCoder(string $wt, array $st, string $model, int $maxIter, string $research = '', string $goal = ''): void {
+    private static function runCoder(string $wt, array $st, string $model, int $maxIter, string $research = '', string $goal = '', string $focus = ''): void {
         $prevCwd = getcwd();
         $oldMode = Permission::getMode(); $oldInt = Permission::isInteractive();
         @chdir($wt);
@@ -202,9 +204,10 @@ class Crew {
             $resolved = $agent->resolveModel($model); $agent->setModel($resolved ?: $model);
             $ctx = $research !== '' ? "\n\nShared research (from the Researcher):\n" . substr($research, 0, 4000) : '';
             $goalLine = $goal !== '' ? "Overall goal: $goal\n\n" : '';
+            $focusLine = $focus !== '' ? "Domain/stack focus (follow its conventions): $focus\n\n" : '';
             $prompt = "You are a coding agent in an isolated git worktree. You MUST actually make the changes by " .
                 "calling your tools (write/edit/bash) — do not merely describe them. Keep changes focused; when the " .
-                "files are written, stop.\n\n" . $goalLine .
+                "files are written, stop.\n\n" . $focusLine . $goalLine .
                 "Your subtask: " . ($st['title'] ?? '') . "\n" . ($st['prompt'] ?? '') . $ctx;
             $messages = [['role' => 'user', 'content' => $prompt]];
             $dbg = (bool)getenv('CREW_DEBUG');
