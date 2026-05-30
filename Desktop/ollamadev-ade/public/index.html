@@ -104,20 +104,17 @@
             </div>
 
             <div class="wiz-step" data-step="3" hidden>
-                <label class="modal-label">Team</label>
+                <label class="modal-label">Team &mdash; pick a model per role</label>
                 <div class="roster">
                     <div class="rmate locked" title="The Director always plans the work — it can't be turned off">
-                        <span class="rico">🧭</span><span class="rname">Director</span><span class="rreq">always on</span>
+                        <span class="rico">🧭</span><span class="rname">Director</span><select id="crewModelDirector" class="rmodel"></select>
                     </div>
-                    <label class="rmate"><input type="checkbox" id="crewResearcher" checked><span class="rico">🔎</span><span class="rname">Researcher</span><span class="rdesc">surveys the repo first</span></label>
+                    <label class="rmate"><input type="checkbox" id="crewResearcher" checked><span class="rico">🔎</span><span class="rname">Researcher</span><select id="crewModelResearcher" class="rmodel"></select></label>
                     <div class="rmate"><span class="rico">👷</span><span class="rname">Coders</span>
-                        <select id="crewMax"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select>
+                        <select id="crewMax" class="rcount"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select>
+                        <select id="crewModelCoder" class="rmodel"></select>
                     </div>
-                    <label class="rmate"><input type="checkbox" id="crewAuditor" checked><span class="rico">🔍</span><span class="rname">Auditor</span><span class="rdesc">reviews each diff</span></label>
-                </div>
-                <div class="modal-row">
-                    <label class="modal-label">Model</label>
-                    <select id="crewModel" title="Use a fast coder model — large models make the bench very slow"></select>
+                    <label class="rmate"><input type="checkbox" id="crewAuditor" checked><span class="rico">🔍</span><span class="rname">Auditor</span><select id="crewModelAuditor" class="rmodel"></select></label>
                 </div>
                 <label class="modal-check"><input type="checkbox" id="crewReview" checked> 🧑 You — review before merge (hold every branch; nothing auto-merges)</label>
             </div>

@@ -399,7 +399,7 @@ if ($argc >= 2 && $argv[1] === 'stats') {
 }
 
 // ===== FLAG PARSING (must be before config load) =====
-$flags = ['model' => null, 'continue' => false, 'resume' => false, 'session' => null, 'fork' => false, 'prompt' => null, 'agent' => null, 'pure' => false, 'port' => 0, 'hostname' => '127.0.0.1', 'mdns' => false, 'help' => false, 'version' => false, 'cwd' => null, 'permission' => null, 'max' => null];
+$flags = ['model' => null, 'continue' => false, 'resume' => false, 'session' => null, 'fork' => false, 'prompt' => null, 'agent' => null, 'pure' => false, 'port' => 0, 'hostname' => '127.0.0.1', 'mdns' => false, 'help' => false, 'version' => false, 'cwd' => null, 'permission' => null, 'max' => null, 'directorModel' => null, 'coderModel' => null, 'auditorModel' => null, 'researcherModel' => null];
 $positional = [];
 for ($i = 1; $i < $argc; $i++) {
     $a = $argv[$i];
@@ -407,6 +407,10 @@ for ($i = 1; $i < $argc; $i++) {
     elseif ($a === '-c' || $a === '--continue') { $flags['continue'] = true; }
     elseif ($a === '-r' || $a === '--resume') { $flags['resume'] = true; }
     elseif ($a === '--max') { $flags['max'] = (int)($argv[++$i] ?? 0); }
+    elseif ($a === '--director-model') { $flags['directorModel'] = $argv[++$i] ?? null; }
+    elseif ($a === '--coder-model') { $flags['coderModel'] = $argv[++$i] ?? null; }
+    elseif ($a === '--auditor-model') { $flags['auditorModel'] = $argv[++$i] ?? null; }
+    elseif ($a === '--researcher-model') { $flags['researcherModel'] = $argv[++$i] ?? null; }
     elseif ($a === '-s' || $a === '--session') { $flags['session'] = $argv[++$i] ?? null; }
     elseif ($a === '--fork') { $flags['fork'] = true; }
     elseif ($a === '-p' || $a === '--prompt') { $flags['prompt'] = $argv[++$i] ?? null; }
@@ -1010,6 +1014,7 @@ if ($cmd === 'chat') {
     if (in_array('--review', $argv, true)) $copts['land'] = 'review';
     if (in_array('--no-research', $argv, true)) $copts['research'] = false;
     if (in_array('--no-audit', $argv, true)) $copts['audit'] = false;
+    foreach (['directorModel', 'coderModel', 'auditorModel', 'researcherModel'] as $rk) if (!empty($flags[$rk])) $copts[$rk] = $flags[$rk];
     exit(Crew::run($task, $copts));
 } elseif ($cmd === 'load' && $arg1) {
     $session = new Session($config, $arg1);

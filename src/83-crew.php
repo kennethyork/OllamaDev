@@ -14,6 +14,17 @@ class Crew {
         $agent = new Agent();
         if (!$agent->checkConnection()) { echo "\033[31mCannot reach Ollama.\033[0m Start it with: ollama serve\n"; return 1; }
         $model = $agent->getModel();
+        // Per-role models (Plyrium-style "mix and match per role"); each defaults
+        // to the base model. Resolve names against what's installed.
+        $rm = function ($key) use ($agent, $opts, $model) {
+            $m = trim((string)($opts[$key] ?? ''));
+            if ($m === '') return $model;
+            return $agent->resolveModel($m) ?: $m;
+        };
+        $mDirector   = $rm('directorModel');
+        $mResearcher = $rm('researcherModel');
+        $mCoder      = $rm('coderModel');
+        $mAuditor    = $rm('auditorModel');
         $maxCoders = max(1, min(6, (int)($opts['max'] ?? Config::get('crew.maxCoders', 4))));
         $maxIter = max(2, (int)($opts['iterations'] ?? Config::get('crew.coderIterations', 10)));
 
@@ -31,7 +42,7 @@ class Crew {
         $research = '';
         if (($opts['research'] ?? true) !== false) {
             echo "\n{$b}▸ Researcher{$r} surveying the codebase…\n";
-            $research = self::research($agent, $task, max(3, (int)Config::get('crew.researchIterations', 6)));
+            $research = self::research($agent, $task, max(3, (int)Config::get("crew.researchIterations", 6)), $mResearcher);
             if ($research !== '') {
                 $vaultDir = Config::dataDir() . '/crew/' . $runId;
                 @mkdir($vaultDir, 0755, true);
@@ -45,7 +56,7 @@ class Crew {
 
         // ---- Director: decompose the task (informed by research) ----
         echo "\n{$b}▸ Director{$r} planning…\n";
-        $subtasks = self::plan($agent, $task, $maxCoders, $research);
+        $subtasks = self::plan($agent, $task, $maxCoders, $research, $mDirector);
         if (empty($subtasks)) { echo "  Director produced no subtasks; treating the whole task as one.\n"; $subtasks = [['title' => 'Task', 'prompt' => $task]]; }
         $subtasks = array_slice($subtasks, 0, $maxCoders);
         foreach ($subtasks as $i => $st) echo "  {$c}" . ($i + 1) . ".{$r} " . ($st['title'] ?? 'subtask') . "\n";
@@ -74,7 +85,7 @@ class Crew {
             if (!is_dir($wt)) { echo "  {$y}skipped (worktree failed): {$add}{$r}\n"; $setState($n, 'held'); continue; }
 
             $setState($n, 'doing');
-            self::runCoder($wt, $st, $model, $maxIter, $research, $task);
+            self::runCoder($wt, $st, $mCoder, $maxIter, $research, $task);
             // Commit whatever the coder changed — but never the agent's own
             // .ollamadev state (costs/checkpoints/sessions it wrote in the worktree).
             self::sh('git -C ' . escapeshellarg($wt) . ' add -A -- . ' . escapeshellarg(':(exclude).ollamadev'));
@@ -92,7 +103,7 @@ class Crew {
         foreach ($results as &$res) {
             if ($res['empty']) { $res['audit'] = ['clean' => false, 'summary' => 'no changes', 'issues' => []]; echo "  {$d}#{$res['n']} skipped (empty){$r}\n"; continue; }
             if (!$doAudit) { $res['audit'] = ['clean' => false, 'summary' => 'no auditor — review manually', 'issues' => []]; continue; }
-            $res['audit'] = self::audit($agent, $res['title'], $res['diff'], $task);
+            $res['audit'] = self::audit($agent, $res['title'], $res["diff"], $task, $mAuditor);
             $vc = $res['audit']['clean'] ? "{$g}clean{$r}" : "{$y}flagged{$r}";
             echo "  #{$res['n']} {$vc} {$d}" . substr((string)($res['audit']['summary'] ?? ''), 0, 80) . "{$r}\n";
             foreach (($res['audit']['issues'] ?? []) as $iss) echo "      {$y}- " . substr((string)$iss, 0, 100) . "{$r}\n";
@@ -131,12 +142,12 @@ class Crew {
     }
 
     // Researcher worker: read-only survey of the codebase → shared findings text.
-    private static function research(Agent $agent, string $task, int $maxIter): string {
+    private static function research(Agent $agent, string $task, int $maxIter, string $model = ''): string {
         $prevMode = Permission::getMode(); $prevInt = Permission::isInteractive();
         Permission::setMode('readonly'); Permission::setInteractive(false);
         $findings = '';
         try {
-            $a = new Agent(); $a->setModel($agent->getModel());
+            $a = new Agent(); $a->setModel($model !== '' ? $model : $agent->getModel());
             $sys = ['role' => 'system', 'content' =>
                 "You are the Researcher. Investigate the codebase using READ-ONLY tools (ls, grep, view, glob, find) " .
                 "to gather context relevant to the task. Then give a concise findings briefing: key files and where " .
@@ -160,7 +171,7 @@ class Crew {
     }
 
     // Director: ask the model for a JSON list of independent subtasks.
-    private static function plan(Agent $agent, string $task, int $max, string $research = ''): array {
+    private static function plan(Agent $agent, string $task, int $max, string $research = '', string $model = ''): array {
         $sys = ['role' => 'system', 'content' =>
             "You are the Director of a team of coding agents. Decompose the user's task into at most $max " .
             "INDEPENDENT subtasks that, where possible, touch DIFFERENT files so they can be built in parallel " .
@@ -168,7 +179,7 @@ class Crew {
             '{"subtasks":[{"title":"short label","prompt":"a complete, self-contained instruction for one coder"}]}'];
         $ctx = $research !== '' ? "\n\nResearcher findings:\n" . substr($research, 0, 6000) : '';
         $user = ['role' => 'user', 'content' => "Task:\n$task" . $ctx];
-        $j = (new OllamaClient())->chatJson($agent->getModel(), [$sys, $user]);
+        $j = (new OllamaClient())->chatJson($model !== "" ? $model : $agent->getModel(), [$sys, $user]);
         $subs = is_array($j) && isset($j['subtasks']) && is_array($j['subtasks']) ? $j['subtasks'] : [];
         $clean = [];
         foreach ($subs as $s) {
@@ -219,7 +230,7 @@ class Crew {
     }
 
     // Auditor: review a diff, return ['clean'=>bool,'summary'=>string,'issues'=>[]].
-    private static function audit(Agent $agent, string $title, string $diff, string $goal = ''): array {
+    private static function audit(Agent $agent, string $title, string $diff, string $goal = '', string $model = ''): array {
         $diff = substr($diff, 0, 16000);
         $sys = ['role' => 'system', 'content' =>
             "You are a meticulous code Auditor. Review the git diff for correctness, security (secrets, injection, " .
@@ -229,7 +240,7 @@ class Crew {
             "the goal, introduces a language/framework the project doesn't use, or includes scaffolding that wasn't " .
             "requested. Minor style nits do not block."];
         $user = ['role' => 'user', 'content' => ($goal !== '' ? "Overall goal: $goal\n" : '') . "Subtask: $title\n\nDiff:\n$diff"];
-        $j = (new OllamaClient())->chatJson($agent->getModel(), [$sys, $user]);
+        $j = (new OllamaClient())->chatJson($model !== "" ? $model : $agent->getModel(), [$sys, $user]);
         if (!is_array($j)) return ['clean' => false, 'summary' => 'audit unavailable (could not parse review)', 'issues' => []];
         return [
             'clean' => (bool)($j['clean'] ?? false),

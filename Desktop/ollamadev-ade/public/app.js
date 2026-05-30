@@ -518,20 +518,18 @@ var App = {
         var o = $('#modalOverlay'); if (!o) return;
         // Step 1 default folder = the open project.
         var cf = $('#crewFolder'); if (cf) cf.value = (this.cwd && this.cwd !== '.') ? this.cwd : '';
-        // Populate the model dropdown, defaulting to a recommended fast model.
-        var sel = $('#crewModel');
-        if (sel) {
-            var opts = Array.prototype.slice.call($('#modelSelect').options).map(function (o) { return o.value; });
-            if (opts.length) {
-                var pick = opts[0];
-                for (var i = 0; i < this.CREW_PREFERRED.length; i++) {
-                    var pref = this.CREW_PREFERRED[i];
-                    var hit = opts.find(function (m) { return m.indexOf(pref) !== -1; });
-                    if (hit) { pick = hit; break; }
-                }
-                sel.innerHTML = opts.map(function (m) { return '<option' + (m === pick ? ' selected' : '') + '>' + esc(m) + '</option>'; }).join('');
-            }
+        // Populate a model dropdown per role, defaulting to a recommended fast model.
+        var opts = Array.prototype.slice.call($('#modelSelect').options).map(function (o) { return o.value; });
+        var pick = opts[0] || '';
+        for (var i = 0; i < this.CREW_PREFERRED.length; i++) {
+            var pref = this.CREW_PREFERRED[i];
+            var hit = opts.find(function (m) { return m.indexOf(pref) !== -1; });
+            if (hit) { pick = hit; break; }
         }
+        ['crewModelDirector', 'crewModelResearcher', 'crewModelCoder', 'crewModelAuditor'].forEach(function (id) {
+            var sel = $('#' + id); if (!sel || !opts.length) return;
+            sel.innerHTML = opts.map(function (m) { return '<option' + (m === pick ? ' selected' : '') + '>' + esc(m) + '</option>'; }).join('');
+        });
         this.renderTemplates();
         o.hidden = false;
         this.wizGo(1);
@@ -595,25 +593,29 @@ var App = {
         var review = $('#crewReview') ? $('#crewReview').checked : true;
         var researcher = $('#crewResearcher') ? $('#crewResearcher').checked : true;
         var auditor = $('#crewAuditor') ? $('#crewAuditor').checked : true;
-        var team = ['🧭 Director'];
-        if (researcher) team.push('🔎 Researcher');
-        team.push('👷 ' + ($('#crewMax').value || '2') + ' Coder(s)');
-        if (auditor) team.push('🔍 Auditor');
+        var self = this;
+        var team = ['🧭 Director <span class="dim">' + esc(this.mval('crewModelDirector')) + '</span>'];
+        if (researcher) team.push('🔎 Researcher <span class="dim">' + esc(this.mval('crewModelResearcher')) + '</span>');
+        team.push('👷 ' + ($('#crewMax').value || '2') + '× Coder <span class="dim">' + esc(this.mval('crewModelCoder')) + '</span>');
+        if (auditor) team.push('🔍 Auditor <span class="dim">' + esc(this.mval('crewModelAuditor')) + '</span>');
         box.innerHTML =
             '<div><b>Folder</b> <span class="val">' + esc(this.cwd || '.') + '</span></div>' +
             '<div><b>Task</b> <span class="val">' + esc(($('#crewTask').value || '').trim()) + '</span></div>' +
-            '<div><b>Team</b> <span class="val">' + team.join(' · ') + '</span></div>' +
-            '<div><b>Model</b> <span class="val">' + esc($('#crewModel').value || '') + '</span></div>' +
+            '<div><b>Team</b><div class="val" style="margin-top:4px">' + team.map(function (t) { return '· ' + t; }).join('<br>') + '</div></div>' +
             '<div><b>Landing</b> <span class="' + (review ? 'val' : 'warnv') + '">' + (review ? 'review every branch (safe)' : (auditor ? 'auto-merge audit-clean' : 'review (no auditor)')) + '</span></div>';
     },
+    mval: function (id) { var s = $('#' + id); return (s && s.value) || $('#modelSelect').value || 'llama3.2:latest'; },
     runCrewFromWizard: function () {
         var task = ($('#crewTask').value || '').trim(); if (!task) { this.wizGo(2); return; }
         var opts = {
             max: $('#crewMax').value || '2',
-            model: ($('#crewModel') && $('#crewModel').value) || $('#modelSelect').value || 'llama3.2:latest',
             review: $('#crewReview') ? $('#crewReview').checked : true,
             researcher: $('#crewResearcher') ? $('#crewResearcher').checked : true,
-            auditor: $('#crewAuditor') ? $('#crewAuditor').checked : true
+            auditor: $('#crewAuditor') ? $('#crewAuditor').checked : true,
+            directorModel: this.mval('crewModelDirector'),
+            coderModel: this.mval('crewModelCoder'),
+            auditorModel: this.mval('crewModelAuditor'),
+            researcherModel: this.mval('crewModelResearcher')
         };
         this.closeCrew();
         this.runCrew(task, opts);
@@ -622,14 +624,19 @@ var App = {
     runCrew: function (task, opts) {
         opts = opts || {};
         if (this.terminals.length >= this.MAX_TERMINALS) { banner('close a terminal first (max ' + this.MAX_TERMINALS + ')', 'err'); return; }
-        var model = opts.model || $('#modelSelect').value || 'llama3.2:latest';
+        var base = opts.coderModel || opts.model || $('#modelSelect').value || 'llama3.2:latest';
         var cli = this.cli || 'ollamadev';
         var q = "'" + String(task).replace(/'/g, "'\\''") + "'"; // shell single-quote
+        var rmf = function (flag, m) { return m ? ' ' + flag + " '" + String(m).replace(/'/g, "'\\''") + "'" : ''; };
         // Run in the opened project folder, not the ADE's own directory.
-        var cmd = this.cdPrefix() + cli + ' crew ' + q + ' --max ' + (parseInt(opts.max, 10) || 2) + ' -m ' + model +
+        var cmd = this.cdPrefix() + cli + ' crew ' + q + ' --max ' + (parseInt(opts.max, 10) || 2) + ' -m ' + base +
             (opts.review !== false ? ' --review' : '') +
             (opts.researcher === false ? ' --no-research' : '') +
-            (opts.auditor === false ? ' --no-audit' : '');
+            (opts.auditor === false ? ' --no-audit' : '') +
+            rmf('--director-model', opts.directorModel) +
+            rmf('--researcher-model', opts.researcher !== false ? opts.researcherModel : '') +
+            rmf('--auditor-model', opts.auditor !== false ? opts.auditorModel : '');
+        var model = base;
         var id = rid(); var t = new Terminal(id, 'crew');
         var self = this;
         Promise.resolve(window.termCreate(id, model)).then(function () {
