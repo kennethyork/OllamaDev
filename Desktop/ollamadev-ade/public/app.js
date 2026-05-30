@@ -557,15 +557,35 @@ var App = {
     },
     mval: function (id) { var s = $('#' + id); return (s && s.value) || $('#modelSelect').value || 'llama3.2:latest'; },
     setMval: function (id, v) { var s = $('#' + id); if (!s || !v) return; if (![].some.call(s.options, function (o) { return o.value === v; })) s.innerHTML += '<option>' + esc(v) + '</option>'; s.value = v; },
+    // Built-in specialized teams — preset crew compositions for common work.
+    CREW_TEAMS: [
+        { name: '🛠 Feature Crew', max: 3, researcher: true, auditor: true, review: true },
+        { name: '🐛 Bug Squad', max: 1, researcher: false, auditor: true, review: true },
+        { name: '🧪 Test Crew', max: 2, researcher: false, auditor: true, review: true },
+        { name: '♻️ Refactor Crew', max: 2, researcher: true, auditor: true, review: true },
+        { name: '📝 Docs Crew', max: 1, researcher: false, auditor: false, review: false },
+        { name: '🔍 Audit Crew', max: 2, researcher: true, auditor: true, review: true },
+        { name: '⚡ Solo (fast)', max: 1, researcher: false, auditor: false, review: true }
+    ],
     // ---- saved crew presets (team composition + per-role models, reusable) ----
     crewPresets: function () { try { var p = JSON.parse(localStorage.getItem('ade.crewPresets') || '{}'); return (p && typeof p === 'object') ? p : {}; } catch (e) { return {}; } },
     populatePresets: function () {
         var sel = $('#crewPreset'); if (!sel) return;
+        var builtin = '<optgroup label="Specialized teams">' + this.CREW_TEAMS.map(function (t) { return '<option value="builtin:' + esc(t.name) + '">' + esc(t.name) + '</option>'; }).join('') + '</optgroup>';
         var names = Object.keys(this.crewPresets());
-        sel.innerHTML = '<option value="">— preset —</option>' + names.map(function (n) { return '<option>' + esc(n) + '</option>'; }).join('');
+        var saved = names.length ? '<optgroup label="Saved">' + names.map(function (n) { return '<option value="saved:' + esc(n) + '">' + esc(n) + '</option>'; }).join('') + '</optgroup>' : '';
+        sel.innerHTML = '<option value="">— preset / team —</option>' + builtin + saved;
     },
-    applyPreset: function (name) {
-        var p = this.crewPresets()[name]; if (!p) return;
+    applyPreset: function (value) {
+        var p;
+        if (value.indexOf('builtin:') === 0) {
+            var nm = value.slice(8);
+            p = this.CREW_TEAMS.find(function (t) { return t.name === nm; });
+        } else {
+            p = this.crewPresets()[value.indexOf('saved:') === 0 ? value.slice(6) : value];
+        }
+        if (!p) return;
+        var name = p.name || value.replace(/^saved:/, '');
         if (p.max) $('#crewMax').value = String(p.max);
         if ('review' in p && $('#crewReview')) $('#crewReview').checked = !!p.review;
         if ('researcher' in p && $('#crewResearcher')) $('#crewResearcher').checked = !!p.researcher;
@@ -592,11 +612,13 @@ var App = {
             researcherModel: this.mval('crewModelResearcher')
         };
         try { localStorage.setItem('ade.crewPresets', JSON.stringify(all)); } catch (e) {}
-        this.populatePresets(); $('#crewPreset').value = name; $('#crewPresetName').value = '';
+        this.populatePresets(); $('#crewPreset').value = 'saved:' + name; $('#crewPresetName').value = '';
         banner('saved preset ' + name, 'ok');
     },
     delPreset: function () {
-        var name = $('#crewPreset').value; if (!name) { banner('select a preset to delete', 'err'); return; }
+        var v = $('#crewPreset').value;
+        if (v.indexOf('saved:') !== 0) { banner('only your saved presets can be deleted', 'err'); return; }
+        var name = v.slice(6);
         var all = this.crewPresets(); delete all[name];
         try { localStorage.setItem('ade.crewPresets', JSON.stringify(all)); } catch (e) {}
         this.populatePresets(); banner('deleted preset ' + name, 'ok');
