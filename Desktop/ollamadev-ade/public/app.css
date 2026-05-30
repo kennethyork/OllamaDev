@@ -233,6 +233,14 @@ body {
 .wiz-summary .val { color: var(--fg); }
 .wiz-summary .warnv { color: var(--warn); }
 .crew-adv { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 10px; }
+.preset-row { display: flex; gap: 6px; align-items: center; }
+.preset-row select { flex: 0 0 150px; -webkit-appearance: none; appearance: none; background: var(--bg3); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 6px 24px 6px 9px; font-size: 12px; cursor: pointer;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b949e' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>"); background-repeat: no-repeat; background-position: right 8px center; }
+.preset-row select option { background: var(--bg2); color: var(--fg); }
+.preset-row input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--fg); padding: 6px 9px; font-size: 12px; outline: none; }
+.preset-row input:focus { border-color: var(--accent); }
+.preset-row button { background: var(--bg3); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 6px 10px; font-size: 12px; cursor: pointer; }
+.preset-row button:hover { background: var(--elev); }
 .crew-adv > summary { cursor: pointer; font-size: 12px; font-weight: 700; color: var(--dim); list-style: none; user-select: none; }
 .crew-adv > summary::-webkit-details-marker { display: none; }
 .crew-adv > summary::before { content: '▸ '; color: var(--faint); }

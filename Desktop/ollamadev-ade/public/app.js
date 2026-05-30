@@ -356,6 +356,9 @@ var App = {
             if (e.key === 'Escape') self.closeCrew();
             else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') self.submitCrew();
         });
+        var cps = $('#crewPreset'); if (cps) cps.onchange = function () { if (cps.value) self.applyPreset(cps.value); };
+        var cpsv = $('#crewPresetSave'); if (cpsv) cpsv.onclick = function () { self.savePreset(); };
+        var cpdl = $('#crewPresetDel'); if (cpdl) cpdl.onclick = function () { self.delPreset(); };
         // Activity rail: switch the sidebar between Files and Tasks.
         document.querySelectorAll('.rail-btn').forEach(function (b) {
             b.onclick = function () { self.setPanel(b.dataset.panel); };
@@ -528,6 +531,7 @@ var App = {
             sel.innerHTML = opts.map(function (m) { return '<option' + (m === pick ? ' selected' : '') + '>' + esc(m) + '</option>'; }).join('');
         });
         this.renderTemplates();
+        this.populatePresets();
         var pl = $('#crewProjLine'); if (pl) pl.textContent = 'Runs in: ' + (this.cwd || '.') + ' · default team: Director + Researcher + 2 Coders + Auditor · review on';
         var adv = document.querySelector('.crew-adv'); if (adv) adv.open = false;
         o.hidden = false;
@@ -552,6 +556,51 @@ var App = {
         });
     },
     mval: function (id) { var s = $('#' + id); return (s && s.value) || $('#modelSelect').value || 'llama3.2:latest'; },
+    setMval: function (id, v) { var s = $('#' + id); if (!s || !v) return; if (![].some.call(s.options, function (o) { return o.value === v; })) s.innerHTML += '<option>' + esc(v) + '</option>'; s.value = v; },
+    // ---- saved crew presets (team composition + per-role models, reusable) ----
+    crewPresets: function () { try { var p = JSON.parse(localStorage.getItem('ade.crewPresets') || '{}'); return (p && typeof p === 'object') ? p : {}; } catch (e) { return {}; } },
+    populatePresets: function () {
+        var sel = $('#crewPreset'); if (!sel) return;
+        var names = Object.keys(this.crewPresets());
+        sel.innerHTML = '<option value="">— preset —</option>' + names.map(function (n) { return '<option>' + esc(n) + '</option>'; }).join('');
+    },
+    applyPreset: function (name) {
+        var p = this.crewPresets()[name]; if (!p) return;
+        if (p.max) $('#crewMax').value = String(p.max);
+        if ('review' in p && $('#crewReview')) $('#crewReview').checked = !!p.review;
+        if ('researcher' in p && $('#crewResearcher')) $('#crewResearcher').checked = !!p.researcher;
+        if ('auditor' in p && $('#crewAuditor')) $('#crewAuditor').checked = !!p.auditor;
+        this.setMval('crewModelDirector', p.directorModel);
+        this.setMval('crewModelCoder', p.coderModel);
+        this.setMval('crewModelAuditor', p.auditorModel);
+        this.setMval('crewModelResearcher', p.researcherModel);
+        var adv = document.querySelector('.crew-adv'); if (adv) adv.open = true;
+        banner('loaded preset ' + name, 'ok');
+    },
+    savePreset: function () {
+        var name = ($('#crewPresetName').value || '').trim() || $('#crewPreset').value;
+        if (!name) { $('#crewPresetName').focus(); banner('name the preset first', 'err'); return; }
+        var all = this.crewPresets();
+        all[name] = {
+            max: $('#crewMax').value || '2',
+            review: $('#crewReview') ? $('#crewReview').checked : true,
+            researcher: $('#crewResearcher') ? $('#crewResearcher').checked : true,
+            auditor: $('#crewAuditor') ? $('#crewAuditor').checked : true,
+            directorModel: this.mval('crewModelDirector'),
+            coderModel: this.mval('crewModelCoder'),
+            auditorModel: this.mval('crewModelAuditor'),
+            researcherModel: this.mval('crewModelResearcher')
+        };
+        try { localStorage.setItem('ade.crewPresets', JSON.stringify(all)); } catch (e) {}
+        this.populatePresets(); $('#crewPreset').value = name; $('#crewPresetName').value = '';
+        banner('saved preset ' + name, 'ok');
+    },
+    delPreset: function () {
+        var name = $('#crewPreset').value; if (!name) { banner('select a preset to delete', 'err'); return; }
+        var all = this.crewPresets(); delete all[name];
+        try { localStorage.setItem('ade.crewPresets', JSON.stringify(all)); } catch (e) {}
+        this.populatePresets(); banner('deleted preset ' + name, 'ok');
+    },
     // One screen: prompt the Director; the team handles the rest with smart
     // defaults (advanced section overrides if the user opened it).
     submitCrew: function () {
