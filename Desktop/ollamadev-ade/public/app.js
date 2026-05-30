@@ -56,6 +56,11 @@ function keyToBytes(e) {
     return null;
 }
 
+// Build a "by project type" crew team (composition + domain focus).
+function D(name, focus, max) {
+    return { name: name, group: 'domain', max: max || 2, researcher: true, auditor: true, review: true, focus: focus };
+}
+
 // ---------- terminal pane (dependency-free, ANSI colors) ----------
 function Terminal(id, model) {
     this.id = id; this.model = model; this.offset = 0; this.polling = false;
@@ -562,20 +567,41 @@ var App = {
     // Built-in specialized teams — by software domain (with a focus the agents
     // follow) and by task type. Each sets the crew composition.
     CREW_TEAMS: [
-        // --- by kind of software you're building ---
-        { name: '🌐 Website', group: 'domain', max: 3, researcher: true, auditor: true, review: true, focus: 'A website (static / marketing / content) — plain HTML/CSS/JS or the site generator (Next/Astro/Hugo/Eleventy/WordPress). Prioritize semantic markup, responsive design, SEO, fast load, and accessibility.' },
-        { name: '🖥 Web App', group: 'domain', max: 3, researcher: true, auditor: true, review: true, focus: 'A web application (SPA or full-stack) — use the project\'s framework (React/Vue/Svelte/Angular + backend). Prioritize component structure, state, routing, API integration, auth, and tests.' },
-        { name: '🛒 E-commerce', group: 'domain', max: 3, researcher: true, auditor: true, review: true, focus: 'An e-commerce site/app — catalog, cart, checkout, payments, orders. Prioritize correctness of money/tax math, payment security, and inventory integrity.' },
-        { name: '📱 Mobile App', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'A mobile app — the project\'s platform (iOS/Android/React Native/Flutter). Mind lifecycle, state, navigation, and platform UX guidelines.' },
-        { name: '🖥 Desktop App', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'A desktop app — the project\'s toolkit (Electron/Tauri/Qt/GTK). Mind windowing, packaging, and OS integration.' },
-        { name: '🔌 API / Backend', group: 'domain', max: 3, researcher: true, auditor: true, review: true, focus: 'An API / backend service — the project\'s language & framework. Prioritize routing, input validation, error handling, auth, and tests.' },
-        { name: '🧰 CLI Tool', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'A command-line tool — clear args/flags, helpful output, correct exit codes, and tests. Follow the project\'s conventions.' },
-        { name: '🎮 Game', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'A game — the project\'s engine (Unity/Godot/Phaser/etc.). Mind the game loop, performance, input, and assets.' },
-        { name: '🧩 Browser Extension', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'A browser extension (Chrome/Firefox, Manifest V3). Mind the manifest, content/background scripts, least-privilege permissions, and messaging.' },
-        { name: '🤖 Bot', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'A chat bot (Discord/Slack/Telegram). Mind the platform SDK, event/command handlers, rate limits, and token security.' },
-        { name: '📦 Library / Package', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'A reusable library/package — clean public API, docs, semantic versioning, no leaked internals, and tests.' },
-        { name: '🧠 AI / LLM App', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'An AI/LLM app — prompts, agent loops, API/SDK usage, streaming, token limits, and caching.' },
-        { name: '📊 Data / ML', group: 'domain', max: 2, researcher: true, auditor: true, review: true, focus: 'A data/ML project (Python: pandas/numpy/scikit/torch). Prioritize reproducibility, data validation, and clear runnable scripts/notebooks.' },
+        // --- by kind of software you're building (D() = a domain team) ---
+        D('🌐 Website', 'A website (static / marketing / content) — plain HTML/CSS/JS or the site generator (Next/Astro/Hugo/Eleventy/WordPress). Prioritize semantic markup, responsive design, SEO, fast load, and accessibility.', 3),
+        D('🚀 Landing Page', 'A single high-converting landing page. Prioritize clear hero/CTA, responsive layout, fast load, SEO/meta, and a working contact/signup form.', 2),
+        D('🖥 Web App', 'A web application (SPA or full-stack) — the project\'s framework (React/Vue/Svelte/Angular + backend). Prioritize components, state, routing, API integration, auth, and tests.', 3),
+        D('☁️ SaaS Product', 'A SaaS product — multi-tenant app with auth, billing/subscriptions, dashboards. Prioritize tenant isolation, security, and reliable billing logic.', 3),
+        D('🛒 E-commerce', 'An e-commerce site/app — catalog, cart, checkout, payments, orders. Prioritize money/tax math correctness, payment security, and inventory integrity.', 3),
+        D('📊 Admin Dashboard', 'An admin dashboard / internal tool — tables, forms, charts, CRUD, role-based access. Prioritize data accuracy, pagination, and clear UX.', 2),
+        D('📰 Blog / CMS', 'A blog or CMS — content models, editor, rendering, SEO, RSS. Prioritize content structure and safe rendering of user content.', 2),
+        D('📚 Docs Site', 'A documentation site (Docusaurus/MkDocs/Astro). Prioritize navigation, search, code samples, and clear structure.', 2),
+        D('💬 Forum / Community', 'A forum/community app — threads, posts, users, moderation. Prioritize data integrity, spam/abuse handling, and performance at scale.', 2),
+        D('📱 PWA', 'A Progressive Web App — installable, offline-capable. Mind the service worker, manifest, caching strategy, and responsive UI.', 2),
+        D('📱 Mobile App', 'A mobile app — the project\'s platform (iOS/Android/React Native/Flutter). Mind lifecycle, state, navigation, and platform UX guidelines.', 2),
+        D('🖥 Desktop App', 'A desktop app — the project\'s toolkit (Electron/Tauri/Qt/GTK). Mind windowing, packaging, and OS integration.', 2),
+        D('🔌 REST API / Backend', 'A REST API / backend service — the project\'s language & framework. Prioritize routing, validation, error handling, auth, and tests.', 3),
+        D('🔗 GraphQL API', 'A GraphQL API — schema, resolvers, N+1 avoidance, auth, and pagination. Keep the schema clean and typed.', 2),
+        D('⚡ Realtime / WebSocket', 'A realtime service (WebSocket/SSE) — connection lifecycle, rooms/channels, backpressure, and reconnection.', 2),
+        D('λ Serverless / Functions', 'Serverless functions (Lambda/Cloud Functions/Workers). Mind cold starts, statelessness, env config, and least-privilege IAM.', 2),
+        D('🧩 Microservice', 'A microservice — single responsibility, clear API contract, health checks, observability, and resilient inter-service calls.', 2),
+        D('🗄 Database / Schema', 'Database work — schema, migrations, queries. Mind indexing, integrity constraints, and safe/reversible migrations.', 2),
+        D('🔢 Data Pipeline / ETL', 'A data pipeline / ETL — extract, transform, load. Prioritize idempotency, schema validation, and recovery from partial failures.', 2),
+        D('📊 Data / ML', 'A data/ML project (Python: pandas/numpy/scikit/torch). Prioritize reproducibility, data validation, and clear runnable scripts/notebooks.', 2),
+        D('🧠 AI / LLM App', 'An AI/LLM app — prompts, agent loops, API/SDK usage, streaming, token limits, and caching.', 2),
+        D('🎮 Game', 'A game — the project\'s engine (Unity/Godot/Phaser/etc.). Mind the game loop, performance, input, and assets.', 2),
+        D('🧰 CLI Tool', 'A command-line tool — clear args/flags, helpful output, correct exit codes, and tests.', 2),
+        D('📦 Library / SDK', 'A reusable library/package/SDK — clean public API, docs, semantic versioning, no leaked internals, and tests.', 2),
+        D('🧩 Browser Extension', 'A browser extension (Chrome/Firefox, Manifest V3). Mind the manifest, content/background scripts, least-privilege permissions, and messaging.', 2),
+        D('🧷 VS Code Extension', 'A VS Code extension — contribution points, activation events, commands, and the extension API. Keep activation lean.', 2),
+        D('🔌 Plugin', 'A plugin (WordPress/Figma/Obsidian/etc.) — follow the host\'s plugin API, hooks/lifecycle, and packaging.', 2),
+        D('🤖 Bot', 'A chat bot (Discord/Slack/Telegram). Mind the platform SDK, event/command handlers, rate limits, and token security.', 2),
+        D('🤖 Automation / Script', 'An automation script — robust I/O, error handling, logging, idempotency, and safe handling of credentials.', 1),
+        D('⚙️ DevOps / Infra', 'DevOps/infra (IaC, Docker, CI/CD). Prioritize idempotency, safety, least privilege, and clear config. Never hard-code secrets.', 2),
+        D('🔄 CI/CD Pipeline', 'A CI/CD pipeline — build, test, deploy stages. Prioritize caching, fail-fast, secrets handling, and reproducibility.', 2),
+        D('🔧 Embedded / IoT', 'Embedded/IoT/firmware (C/C++/Rust/MicroPython). Mind memory/timing constraints, interrupts, and hardware I/O.', 2),
+        D('⛓ Smart Contract / Web3', 'A smart contract / web3 dApp (Solidity/etc.). Prioritize security (reentrancy, overflow), gas, and thorough tests.', 2),
+        D('🔒 Security Hardening', 'Security hardening — input validation, authn/authz, secrets, injection, and dependency risks. Make minimal, safe changes.', 2),
         // --- by task type ---
         { name: '🛠 Feature Crew', group: 'task', max: 3, researcher: true, auditor: true, review: true },
         { name: '🐛 Bug Squad', group: 'task', max: 1, researcher: false, auditor: true, review: true },
