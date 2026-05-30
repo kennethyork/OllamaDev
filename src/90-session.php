@@ -178,11 +178,42 @@ class Session {
             'checkpoints' => $this->listCheckpoints(),
             'init' => ProjectInit::run($this->agent, getcwd(), Permission::isInteractive()),
             'crew' => $this->runCrew($args),
-            'skills' => $this->listSkills(),
+            'skills' => $this->manageSkills($args),
             'retry', 'regenerate' => $this->retryLast(),
             'commands' => UserCmds::render(),
             default => UserCmds::exists($cmd) ? ('PROMPT:' . UserCmds::expand($cmd, $args)) : false
         };
+    }
+
+    private function manageSkills(string $args): string {
+        $parts = preg_split('/\s+/', trim($args), 2);
+        $sub = strtolower($parts[0] ?? '');
+        $rest = trim($parts[1] ?? '');
+        if ($sub === 'install') {
+            if ($rest === '') return "Usage: /skills install <dir | git-url | .tar.gz/.zip> [--force]\n";
+            $force = (bool) preg_match('/(^|\s)--force(\s|$)/', $rest);
+            if ($force) $rest = trim(preg_replace('/(^|\s)--force(\s|$)/', ' ', $rest));
+            $res = Skills::install($rest, $force);
+            $out = empty($res['installed']) ? "No skills installed.\n" : ("Installed: " . implode(', ', $res['installed']) . "\n");
+            foreach ($res['messages'] as $m) $out .= "  $m\n";
+            if (!empty($res['installed'])) $out .= "  \033[2mReview installed skills (/skills) — they are model instructions; your permission mode still gates writes/shell.\033[0m\n";
+            return $out;
+        }
+        if ($sub === 'export') {
+            if ($rest === '') return "Usage: /skills export <name> [outpath]\n";
+            $p = preg_split('/\s+/', $rest, 2);
+            $path = Skills::export($p[0], trim($p[1] ?? ''));
+            return $path ? "Exported: $path\n" : "Export failed (no such skill?): {$p[0]}\n";
+        }
+        if ($sub === 'remove' || $sub === 'rm' || $sub === 'delete') {
+            if ($rest === '') return "Usage: /skills remove <name>\n";
+            return Skills::remove($rest) ? "Removed: $rest\n" : "No such skill: $rest\n";
+        }
+        if ($sub === 'new' || $sub === 'add') {
+            if ($rest === '') return "Usage: /skills new <name>\n";
+            return "Created: " . Skills::scaffold($rest) . "\n";
+        }
+        return $this->listSkills();
     }
 
     private function listSkills(): string {
@@ -195,7 +226,7 @@ class Session {
         $c = "\033[36m"; $d = "\033[2m"; $r = "\033[0m";
         $out = "\nSkills (" . count($all) . ") — the agent loads these on demand via the skill tool:\n\n";
         foreach ($all as $s) $out .= sprintf("  {$c}%-18s{$r}{$d}%s{$r}\n", $s['name'], $s['description'] ?: '(no description)');
-        return $out . "\n";
+        return $out . "\n  {$d}/skills install <src> · export <name> · remove <name> · new <name>{$r}\n\n";
     }
 
     private function managePermission(string $args): string {

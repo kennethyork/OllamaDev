@@ -651,12 +651,42 @@ if ($argc >= 2 && $argv[1] === 'skills') {
         echo "Created skill: $md\nEdit it, then run `ollamadev skills` to confirm it's discovered.\n";
         exit(0);
     }
+    if ($sub === 'install') {
+        $rest = array_slice($argv, 3);
+        $force = in_array('--force', $rest, true);
+        $rest = array_values(array_filter($rest, fn($a) => $a !== '--force'));
+        $source = $rest[0] ?? '';
+        if ($source === '') { echo "Usage: ollamadev skills install <dir | git-url | .tar.gz/.zip> [--force]\n"; exit(1); }
+        echo "Installing skills from: $source\n";
+        $res = Skills::install($source, $force);
+        foreach ($res['messages'] as $m) echo "  $m\n";
+        if (empty($res['installed'])) { echo "No skills installed.\n"; exit(1); }
+        echo "Installed: " . implode(', ', $res['installed']) . "\n";
+        echo "\033[2mNote: a skill is instructions the model may follow. Review what you installed — the agent's\n";
+        echo "permission mode (auto/ask/readonly) still gates writes and shell.\033[0m\n";
+        exit(0);
+    }
+    if ($sub === 'export') {
+        $name = $argv[3] ?? '';
+        if ($name === '') { echo "Usage: ollamadev skills export <name> [outpath]\n"; exit(1); }
+        $path = Skills::export($name, $argv[4] ?? '');
+        if (!$path) { echo "Export failed (no such skill?): $name\n"; exit(1); }
+        echo "Exported: $path\n  Share it; others install with: ollamadev skills install " . basename($path) . "\n";
+        exit(0);
+    }
+    if ($sub === 'remove' || $sub === 'rm' || $sub === 'delete') {
+        $name = $argv[3] ?? '';
+        if ($name === '') { echo "Usage: ollamadev skills remove <name>\n"; exit(1); }
+        if (Skills::remove($name)) { echo "Removed: $name\n"; exit(0); }
+        echo "No such skill: $name\n"; exit(1);
+    }
     $all = Skills::all();
     if (!$all) {
         echo "No skills found.\n";
         echo "Skills live in:\n";
         foreach (Skills::baseDirs() as $d) echo "  $d/<name>/SKILL.md\n";
-        echo "Create one with: ollamadev skills new <name>\n";
+        echo "Create one with:  ollamadev skills new <name>\n";
+        echo "Install shared:   ollamadev skills install <dir | git-url | .tar.gz/.zip>\n";
         exit(0);
     }
     echo "Skills (" . count($all) . "):\n";
@@ -664,6 +694,7 @@ if ($argc >= 2 && $argv[1] === 'skills') {
         echo "  " . $s['name'] . " — " . ($s['description'] ?: '(no description)') . "\n";
         echo "      " . $s['dir'] . "\n";
     }
+    echo "\n\033[2mnew <name> · install <src> [--force] · export <name> [out] · remove <name>\033[0m\n";
     exit(0);
 }
 

@@ -414,6 +414,26 @@ if (preg_match('/class Skills \{.*?\n\}/s', $src, $sk)) {
     ok('Skills::get returns null for unknown', Skills::get('nope') === null);
     $md = Skills::scaffold('new-thing');
     ok('Skills::scaffold writes a SKILL.md', is_file($md) && strpos(file_get_contents($md), 'name: new-thing') !== false);
+    // install from a local directory of skill folders (sharing path)
+    $share = $tmpHome . '/share/shared-skill';
+    @mkdir($share, 0755, true);
+    file_put_contents($share . '/SKILL.md', "---\nname: shared-skill\ndescription: Came from elsewhere.\n---\n\n# shared-skill\nbody\n");
+    file_put_contents($share . '/helper.txt', "data");
+    $res = Skills::install($tmpHome . '/share');
+    ok('Skills::install installs from a directory', in_array('shared-skill', $res['installed'], true) && Skills::get('shared-skill') !== null);
+    ok('Skills::install copies helper files', is_file($tmpHome . '/.ollamadev/skills/shared-skill/helper.txt'));
+    $res2 = Skills::install($tmpHome . '/share'); // already exists, no --force
+    ok('Skills::install skips existing without --force', empty($res2['installed']));
+    ok('Skills::install --force overwrites', in_array('shared-skill', Skills::install($tmpHome . '/share', true)['installed'], true));
+    $bad = Skills::install('/nonexistent/path/xyz');
+    ok('Skills::install rejects an unknown source', empty($bad['installed']) && !empty($bad['messages']));
+    // export → tarball
+    $exp = Skills::export('shared-skill', $tmpHome . '/out.tar.gz');
+    ok('Skills::export writes a tarball', $exp !== null && is_file($exp) && filesize($exp) > 0);
+    ok('Skills::export returns null for unknown', Skills::export('nope') === null);
+    // remove
+    ok('Skills::remove deletes a skill', Skills::remove('shared-skill') === true && Skills::get('shared-skill') === null);
+    ok('Skills::remove returns false for unknown', Skills::remove('nope') === false);
     putenv("HOME=$oldHome"); chdir($oldCwd);
     @exec('rm -rf ' . escapeshellarg($tmpHome));
 } else { ok('Skills class extractable', false); }
@@ -421,6 +441,8 @@ if (preg_match('/class Skills \{.*?\n\}/s', $src, $sk)) {
 ok('skill tool registered', strpos($src, "Tools::register('skill'") !== false);
 ok('skill tool has native schema', strpos($src, "\$fn('skill'") !== false);
 ok('skills injected into system prompt', strpos($src, 'AVAILABLE SKILLS') !== false);
+ok('skills install/export/remove wired (CLI)', strpos($src, "\$sub === 'install'") !== false && strpos($src, "\$sub === 'export'") !== false);
+ok('skills install supports git + archive sources', strpos($src, 'git clone --depth 1') !== false && strpos($src, 'tgz|zip') !== false);
 ok('skill tool is read-only', strpos($src, "'summarize', 'skill'") !== false);
 
 echo "\n== Crew team skills ==\n";

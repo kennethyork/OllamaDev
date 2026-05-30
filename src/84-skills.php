@@ -65,6 +65,111 @@ class Skills {
         return implode("\n", $lines);
     }
 
+    public static function homeDir(): string { return (getenv('HOME') ?: sys_get_temp_dir()) . '/.ollamadev/skills'; }
+
+    // Install skills from a local directory, a git URL, or a .tar.gz/.zip archive
+    // (local path or http(s) URL). Each skill folder (one containing a SKILL.md) is
+    // copied into ~/.ollamadev/skills/<name>. Returns ['installed'=>[], 'messages'=>[]].
+    public static function install(string $source, bool $force = false): array {
+        $installed = []; $msgs = [];
+        $source = trim($source);
+        if ($source === '') return ['installed' => [], 'messages' => ['no source given']];
+        $tmp = sys_get_temp_dir() . '/odv_skill_install_' . getmypid() . '_' . substr(md5($source), 0, 6);
+        @exec('rm -rf ' . escapeshellarg($tmp)); @mkdir($tmp, 0755, true);
+        $scanBase = '';
+        $isArchive = (bool) preg_match('#\.(tar\.gz|tgz|zip)$#i', $source);
+        $isHttp = (bool) preg_match('#^https?://#i', $source);
+        $isGit = preg_match('#^git@#', $source) || preg_match('#\.git$#', $source)
+            || ($isHttp && preg_match('#(github\.com|gitlab\.com|bitbucket\.org)#i', $source) && !$isArchive);
+        try {
+            if ($isGit) {
+                $out = (string) @shell_exec('git clone --depth 1 ' . escapeshellarg($source) . ' ' . escapeshellarg($tmp . '/repo') . ' 2>&1');
+                if (!is_dir($tmp . '/repo')) { $msgs[] = 'git clone failed: ' . trim($out); return ['installed' => [], 'messages' => $msgs]; }
+                $scanBase = $tmp . '/repo';
+            } elseif ($isArchive) {
+                $archive = $source;
+                if ($isHttp) {
+                    $archive = $tmp . '/' . (basename((string) parse_url($source, PHP_URL_PATH)) ?: 'archive');
+                    if (!self::download($source, $archive)) { $msgs[] = "download failed: $source"; return ['installed' => [], 'messages' => $msgs]; }
+                }
+                if (!is_file($archive)) { $msgs[] = "no such file: $archive"; return ['installed' => [], 'messages' => $msgs]; }
+                @mkdir($tmp . '/x', 0755, true);
+                if (preg_match('#\.zip$#i', $archive)) @shell_exec('unzip -q ' . escapeshellarg($archive) . ' -d ' . escapeshellarg($tmp . '/x') . ' 2>&1');
+                else @shell_exec('tar -xzf ' . escapeshellarg($archive) . ' -C ' . escapeshellarg($tmp . '/x') . ' 2>&1');
+                $scanBase = $tmp . '/x';
+            } elseif (is_dir($source)) {
+                $scanBase = $source;
+            } else {
+                $msgs[] = "unrecognized source (expected a directory, a .git URL, or a .tar.gz/.zip): $source";
+                return ['installed' => [], 'messages' => $msgs];
+            }
+            $dirs = self::findSkillDirs($scanBase);
+            if (!$dirs) { $msgs[] = "no SKILL.md found under: $source"; return ['installed' => [], 'messages' => $msgs]; }
+            $home = self::homeDir();
+            foreach ($dirs as $dir) {
+                $meta = self::parse($dir . '/SKILL.md', basename($dir));
+                $name = preg_replace('/[^a-zA-Z0-9._-]+/', '-', $meta['name']);
+                if ($name === '' || $name === '.' || $name === '..') { $msgs[] = "skipped (bad name): $dir"; continue; }
+                $dst = $home . '/' . $name;
+                if (is_dir($dst) && !$force) { $msgs[] = "exists, skipped (use --force to overwrite): $name"; continue; }
+                if (is_dir($dst)) @exec('rm -rf ' . escapeshellarg($dst));
+                if (self::copyDir($dir, $dst)) $installed[] = $name;
+                else $msgs[] = "copy failed: $name";
+            }
+        } finally {
+            @exec('rm -rf ' . escapeshellarg($tmp));
+        }
+        return ['installed' => $installed, 'messages' => $msgs];
+    }
+
+    // Package a skill folder as a shareable tarball; returns the output path or null.
+    public static function export(string $name, string $out = ''): ?string {
+        $s = self::get($name);
+        if (!$s) return null;
+        $base = basename($s['dir']);
+        $out = $out !== '' ? $out : (getcwd() . '/' . $base . '.skill.tar.gz');
+        @shell_exec('tar -czf ' . escapeshellarg($out) . ' -C ' . escapeshellarg(dirname($s['dir'])) . ' ' . escapeshellarg($base) . ' 2>&1');
+        return is_file($out) ? $out : null;
+    }
+
+    // Delete an installed skill by name. Returns true if it's gone afterwards.
+    public static function remove(string $name): bool {
+        foreach (self::all() as $s) {
+            if (strcasecmp($s['name'], $name) === 0) { @exec('rm -rf ' . escapeshellarg($s['dir'])); return !is_dir($s['dir']); }
+        }
+        return false;
+    }
+
+    // Find every directory containing a SKILL.md beneath $base (depth-limited).
+    private static function findSkillDirs(string $base, int $depth = 4): array {
+        if (!is_dir($base)) return [];
+        if (is_file($base . '/SKILL.md')) return [$base];
+        if ($depth <= 0) return [];
+        $found = [];
+        foreach (glob($base . '/*', GLOB_ONLYDIR) ?: [] as $d) $found = array_merge($found, self::findSkillDirs($d, $depth - 1));
+        return $found;
+    }
+
+    private static function copyDir(string $src, string $dst): bool {
+        if (!@mkdir($dst, 0755, true) && !is_dir($dst)) return false;
+        foreach (scandir($src) ?: [] as $f) {
+            if ($f === '.' || $f === '..') continue;
+            $s = $src . '/' . $f; $d = $dst . '/' . $f;
+            if (is_dir($s)) { if (!self::copyDir($s, $d)) return false; }
+            elseif (!@copy($s, $d)) return false;
+        }
+        return true;
+    }
+
+    private static function download(string $url, string $dest): bool {
+        if (trim((string) @shell_exec('command -v curl 2>/dev/null')) !== '') {
+            @shell_exec('curl -fsSL ' . escapeshellarg($url) . ' -o ' . escapeshellarg($dest) . ' 2>/dev/null');
+            if (is_file($dest) && filesize($dest) > 0) return true;
+        }
+        $data = @file_get_contents($url);
+        return $data !== false && @file_put_contents($dest, $data) !== false;
+    }
+
     // Scaffold a new skill folder; returns the SKILL.md path.
     public static function scaffold(string $name): string {
         $home = getenv('HOME') ?: '/tmp';
