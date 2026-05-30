@@ -12,6 +12,20 @@ function banner(msg, kind) {
 }
 window.onerror = function (m, s, l) { banner('JS error: ' + m + ' @' + l, 'err'); return false; };
 
+// Tidy a long absolute path for a narrow label: collapse $HOME to ~ and keep the
+// meaningful tail (last segments) instead of the start, e.g.
+//   /home/me/Documents/OllamaDev/Desktop/ollamadev-ade  ->  ~/…/Desktop/ollamadev-ade
+function shortPath(p, maxLen) {
+    p = String(p || ''); maxLen = maxLen || 38;
+    var home = (window.HOME_DIR || '');
+    if (home && (p === home || p.indexOf(home + '/') === 0)) p = '~' + p.slice(home.length);
+    if (p.length <= maxLen) return p;
+    var lead = p[0] === '~' ? '~' : '';
+    var parts = p.replace(/^~?\/?/, '').split('/').filter(Boolean);
+    var tail = parts.slice(-2).join('/');
+    return (lead ? lead + '/' : '') + '…/' + tail;
+}
+
 function strToB64(s) { return btoa(unescape(encodeURIComponent(s))); }
 function b64ToStr(b64) {
     var bin = atob(b64), arr = new Uint8Array(bin.length);
@@ -545,6 +559,7 @@ var App = {
         Tasks.load(); Tasks.render();
         this.setLayout('term'); // CLI/terminal is the focus by default; editor on demand
         Promise.resolve(window.cliPath ? window.cliPath() : 'ollamadev').then(function (p) { self.cli = p || 'ollamadev'; }).catch(function () { self.cli = 'ollamadev'; });
+        Promise.resolve(window.homeDir ? window.homeDir() : '').then(function (h) { window.HOME_DIR = h || ''; }).catch(function () {});
         this.loadModels().then(function () {
             // Startup: prompt for the project folder (prefilled with the last one),
             // so the file tree, terminals, and Crew all open on your chosen project.
@@ -941,8 +956,8 @@ var App = {
             if (items && items.error) { banner('list failed: ' + items.error, 'err'); return; }
             if (!Array.isArray(items)) return;
             self.cwd = path;
-            var cwdEl = $('#cwd'); if (cwdEl) cwdEl.textContent = path;
-            var bc = $('#breadcrumb'); if (bc) bc.textContent = path;
+            var cwdEl = $('#cwd'); if (cwdEl) { cwdEl.textContent = shortPath(path); cwdEl.title = path; }
+            var bc = $('#breadcrumb'); if (bc) { bc.textContent = shortPath(path, 60); bc.title = path; }
             var tree = $('#fileTree');
             var html = '';
             // Parent (".." ) entry, unless we're at the filesystem root.

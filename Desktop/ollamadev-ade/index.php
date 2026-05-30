@@ -99,6 +99,11 @@ $app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $
         return is_array($d) ? $d : [];
     });
 
+    // Home directory, so the UI can show ~ instead of the full /home/<user> prefix.
+    $b->bind('homeDir', function (): string {
+        return getenv('HOME') ?: '';
+    });
+
     // Live per-coder log tail (one pane per coder while a crew runs).
     $b->bind('crewCoderLog', function (string $runId, int $n, int $offset = 0) {
         $home = getenv('HOME') ?: sys_get_temp_dir();

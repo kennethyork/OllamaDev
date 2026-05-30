@@ -105,7 +105,7 @@ body {
 #sidebar { width: 250px; flex: 0 0 250px; background: var(--bg2); border-right: 1px solid var(--border); overflow-y: auto; }
 .panel[hidden] { display: none; }
 .side-title { padding: 13px 14px 7px; font-size: 10px; letter-spacing: 1.5px; font-weight: 800; color: var(--faint); text-transform: uppercase; }
-#breadcrumb { padding: 0 14px 9px; font-family: var(--mono); font-size: 11px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+#breadcrumb { padding: 0 14px 9px; font-family: var(--mono); font-size: 11px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #fileTree { padding: 0 6px 14px; }
 .tree-item { display: flex; gap: 7px; align-items: center; padding: 5px 9px; border-radius: var(--r-sm); cursor: pointer; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-left: 2px solid transparent; transition: background .12s; }
 .tree-item:hover { background: var(--bg3); }
