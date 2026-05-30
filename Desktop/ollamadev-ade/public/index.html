@@ -47,6 +47,7 @@
             <div id="wsTabs">
                 <button class="ws-tab active" data-view="code">Workspace</button>
                 <button class="ws-tab" data-view="board">Board</button>
+                <button class="ws-tab" data-view="graph">Graph</button>
             </div>
 
             <div id="codeView" class="ws-view">
@@ -62,6 +63,16 @@
 
             <div id="boardView" class="ws-view" hidden>
                 <div id="board"></div>
+            </div>
+
+            <div id="graphView" class="ws-view" hidden>
+                <div id="graphBar">
+                    <span class="dim">Project memory graph — notes linked with [[wiki-links]].</span>
+                    <span id="graphStat" class="dim"></span>
+                    <button id="graphRefresh" title="Reload the graph">↻ Refresh</button>
+                </div>
+                <canvas id="graphCanvas"></canvas>
+                <div id="graphEmpty" class="dim" hidden>No memories yet. The agent saves them with the <code>remember</code> tool, or run <code>ollamadev memory new &lt;title&gt;</code>.</div>
             </div>
         </section>
     </main>

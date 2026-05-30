@@ -268,6 +268,14 @@ body {
 .modal-check input { accent-color: var(--accent); width: 15px; height: 15px; }
 
 /* ===== kanban board ===== */
+#graphView { position: relative; }
+#graphBar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+#graphBar #graphRefresh { margin-left: auto; background: var(--bg3); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r); padding: 4px 10px; cursor: pointer; }
+#graphBar #graphRefresh:hover { border-color: var(--accent); }
+#graphCanvas { flex: 1; width: 100%; min-height: 0; display: block; }
+#graphEmpty { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; max-width: 360px; }
+#graphEmpty code { background: var(--bg3); padding: 1px 5px; border-radius: 4px; }
+
 #boardView { padding: 14px; overflow: auto; }
 #board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; min-height: 100%; }
 .col { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); display: flex; flex-direction: column; min-height: 120px; }

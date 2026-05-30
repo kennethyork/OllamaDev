@@ -99,6 +99,15 @@ $app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $
         return is_array($d) ? $d : [];
     });
 
+    // Project knowledge graph (nodes + [[link]] edges) for the Graph view.
+    $b->bind('memoryGraph', function () use ($cli, $files): array {
+        $root = $files->getRoot();
+        $cmd = 'cd ' . escapeshellarg($root) . ' && ' . escapeshellarg($cli) . ' memory graph --json 2>/dev/null';
+        $out = (string) @shell_exec($cmd);
+        $d = json_decode(trim($out), true);
+        return is_array($d) && isset($d['nodes']) ? $d : ['nodes' => [], 'edges' => []];
+    });
+
     // --- Files ---
     $b->bind('getRoot', function () use ($files): string {
         return $files->getRoot();

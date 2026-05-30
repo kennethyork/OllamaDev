@@ -336,6 +336,121 @@ var Tasks = {
     }
 };
 
+// Project memory graph — a tiny vanilla force-directed layout on a canvas.
+var Graph = {
+    nodes: [], edges: [], anim: null, hover: null, dragging: null, dpr: 1,
+    load: function () {
+        var self = this;
+        Promise.resolve(window.memoryGraph ? window.memoryGraph() : { nodes: [], edges: [] }).then(function (g) {
+            g = g || {}; var nodes = g.nodes || [], edges = g.edges || [];
+            $('#graphStat').textContent = nodes.length + ' notes · ' + edges.length + ' links';
+            $('#graphEmpty').hidden = nodes.length > 0;
+            $('#graphCanvas').hidden = nodes.length === 0;
+            self.build(nodes, edges);
+        }).catch(function () { $('#graphEmpty').hidden = false; });
+    },
+    build: function (nodes, edges) {
+        var cv = $('#graphCanvas'); if (!cv) return;
+        var w = cv.clientWidth || 800, h = cv.clientHeight || 500;
+        // seed positions on a circle (deterministic — no Math.random needed)
+        this.nodes = nodes.map(function (n, i) {
+            var a = (i / Math.max(1, nodes.length)) * Math.PI * 2;
+            return { id: n.id, title: n.title || n.id, tags: n.tags || [], degree: n.degree || 0,
+                x: w / 2 + Math.cos(a) * Math.min(w, h) * 0.3, y: h / 2 + Math.sin(a) * Math.min(w, h) * 0.3, vx: 0, vy: 0 };
+        });
+        var byId = {}; this.nodes.forEach(function (n) { byId[n.id] = n; });
+        this.edges = (edges || []).filter(function (e) { return byId[e.from] && byId[e.to]; });
+        this.byId = byId;
+        this.resize();
+        this.start();
+    },
+    resize: function () {
+        var cv = $('#graphCanvas'); if (!cv) return;
+        this.dpr = window.devicePixelRatio || 1;
+        cv.width = cv.clientWidth * this.dpr; cv.height = cv.clientHeight * this.dpr;
+    },
+    start: function () {
+        var self = this; if (this.anim) cancelAnimationFrame(this.anim);
+        var ticks = 0;
+        var step = function () {
+            var settle = self.tick();
+            self.draw();
+            ticks++;
+            // keep animating while the user interacts; otherwise stop once settled
+            if (self.dragging || (ticks < 600 && settle > 0.05)) self.anim = requestAnimationFrame(step);
+            else self.anim = null;
+        };
+        step();
+    },
+    tick: function () {
+        var cv = $('#graphCanvas'); var w = cv.clientWidth, h = cv.clientHeight;
+        var ns = this.nodes, i, j, energy = 0;
+        var k = 0.012, rep = 9000, spring = 0.02, restLen = 120, damp = 0.85;
+        for (i = 0; i < ns.length; i++) { ns[i].fx = (w / 2 - ns[i].x) * k; ns[i].fy = (h / 2 - ns[i].y) * k; }
+        for (i = 0; i < ns.length; i++) for (j = i + 1; j < ns.length; j++) {
+            var dx = ns[i].x - ns[j].x, dy = ns[i].y - ns[j].y, d2 = dx * dx + dy * dy + 0.01;
+            var f = rep / d2, d = Math.sqrt(d2), ux = dx / d, uy = dy / d;
+            ns[i].fx += ux * f; ns[i].fy += uy * f; ns[j].fx -= ux * f; ns[j].fy -= uy * f;
+        }
+        this.edges.forEach(function (e) {
+            var a = this.byId[e.from], b = this.byId[e.to];
+            var dx = b.x - a.x, dy = b.y - a.y, d = Math.sqrt(dx * dx + dy * dy) + 0.01;
+            var f = (d - restLen) * spring, ux = dx / d, uy = dy / d;
+            a.fx += ux * f; a.fy += uy * f; b.fx -= ux * f; b.fy -= uy * f;
+        }, this);
+        for (i = 0; i < ns.length; i++) {
+            if (ns[i] === this.dragging) { ns[i].vx = 0; ns[i].vy = 0; continue; }
+            ns[i].vx = (ns[i].vx + ns[i].fx) * damp; ns[i].vy = (ns[i].vy + ns[i].fy) * damp;
+            ns[i].x += ns[i].vx; ns[i].y += ns[i].vy;
+            energy += Math.abs(ns[i].vx) + Math.abs(ns[i].vy);
+        }
+        return ns.length ? energy / ns.length : 0;
+    },
+    draw: function () {
+        var cv = $('#graphCanvas'); if (!cv) return; var ctx = cv.getContext('2d');
+        var css = getComputedStyle(document.body);
+        var line = css.getPropertyValue('--border') || '#444', accent = css.getPropertyValue('--accent') || '#4ea1ff';
+        var fg = css.getPropertyValue('--fg') || '#ddd', panel = css.getPropertyValue('--bg3') || '#222';
+        ctx.save(); ctx.scale(this.dpr, this.dpr);
+        ctx.clearRect(0, 0, cv.clientWidth, cv.clientHeight);
+        ctx.strokeStyle = line; ctx.lineWidth = 1; ctx.globalAlpha = 0.7;
+        this.edges.forEach(function (e) {
+            var a = this.byId[e.from], b = this.byId[e.to];
+            ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        }, this);
+        ctx.globalAlpha = 1;
+        this.nodes.forEach(function (n) {
+            var r = 6 + Math.min(14, n.degree * 2);
+            ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+            ctx.fillStyle = (n === this.hover) ? accent : panel; ctx.fill();
+            ctx.lineWidth = 2; ctx.strokeStyle = accent; ctx.stroke();
+            ctx.fillStyle = fg; ctx.font = '12px system-ui, sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText(n.title, n.x, n.y + r + 13);
+        }, this);
+        ctx.restore();
+    },
+    nodeAt: function (mx, my) {
+        for (var i = this.nodes.length - 1; i >= 0; i--) {
+            var n = this.nodes[i], r = 6 + Math.min(14, n.degree * 2) + 4;
+            if ((mx - n.x) * (mx - n.x) + (my - n.y) * (my - n.y) <= r * r) return n;
+        }
+        return null;
+    },
+    bind: function () {
+        var self = this, cv = $('#graphCanvas'); if (!cv) return;
+        var pos = function (ev) { var rc = cv.getBoundingClientRect(); return { x: ev.clientX - rc.left, y: ev.clientY - rc.top }; };
+        cv.addEventListener('mousedown', function (ev) { var p = pos(ev); self.dragging = self.nodeAt(p.x, p.y); if (self.dragging && !self.anim) self.start(); });
+        cv.addEventListener('mousemove', function (ev) {
+            var p = pos(ev);
+            if (self.dragging) { self.dragging.x = p.x; self.dragging.y = p.y; }
+            else { var h = self.nodeAt(p.x, p.y); if (h !== self.hover) { self.hover = h; cv.style.cursor = h ? 'pointer' : 'default'; if (!self.anim) self.draw(); } }
+        });
+        window.addEventListener('mouseup', function () { self.dragging = null; });
+        var rb = $('#graphRefresh'); if (rb) rb.onclick = function () { self.load(); };
+        window.addEventListener('resize', function () { if (App.view === 'graph') { self.resize(); if (!self.anim) self.draw(); } });
+    }
+};
+
 var App = {
     terminals: [], cwd: '.', layout: 'split', zoomed: null, view: 'code', panel: 'files', crewBoard: null, crewPoll: null,
     init: function () {
@@ -368,10 +483,11 @@ var App = {
         document.querySelectorAll('.rail-btn').forEach(function (b) {
             b.onclick = function () { self.setPanel(b.dataset.panel); };
         });
-        // Workspace view tabs: Workspace (code) vs Board (kanban).
+        // Workspace view tabs: Workspace (code) vs Board (kanban) vs Graph (memory).
         document.querySelectorAll('.ws-tab').forEach(function (t) {
             t.onclick = function () { self.setView(t.dataset.view); };
         });
+        Graph.bind();
         // Add a task from the sidebar.
         var ti = $('#taskInput');
         if (ti) ti.addEventListener('keydown', function (e) { if (e.key === 'Enter') { Tasks.add(ti.value); ti.value = ''; } });
@@ -457,7 +573,9 @@ var App = {
         document.querySelectorAll('.ws-tab').forEach(function (t) { t.classList.toggle('active', t.dataset.view === v); });
         $('#codeView').hidden = v !== 'code';
         $('#boardView').hidden = v !== 'board';
+        $('#graphView').hidden = v !== 'graph';
         if (v === 'board') Tasks.render();
+        if (v === 'graph') Graph.load();
     },
     // Hand a task title to an agent terminal's CLI (create one if none exist).
     runTaskInAgent: function (title) {
