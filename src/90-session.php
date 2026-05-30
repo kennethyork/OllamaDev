@@ -179,6 +179,7 @@ class Session {
             'init' => ProjectInit::run($this->agent, getcwd(), Permission::isInteractive()),
             'crew' => $this->runCrew($args),
             'skills' => $this->manageSkills($args),
+            'memory', 'mem' => $this->manageMemory($args),
             'retry', 'regenerate' => $this->retryLast(),
             'commands' => UserCmds::render(),
             default => UserCmds::exists($cmd) ? ('PROMPT:' . UserCmds::expand($cmd, $args)) : false
@@ -214,6 +215,49 @@ class Session {
             return "Created: " . Skills::scaffold($rest) . "\n";
         }
         return $this->listSkills();
+    }
+
+    private function manageMemory(string $args): string {
+        $parts = preg_split('/\s+/', trim($args), 2);
+        $sub = strtolower($parts[0] ?? '');
+        $rest = trim($parts[1] ?? '');
+        $c = "\033[36m"; $d = "\033[2m"; $r = "\033[0m";
+        if ($sub === 'new' || $sub === 'add') {
+            if ($rest === '') return "Usage: /memory new <title>\n";
+            $slug = Memory::save($rest, "Write the note here. Link related notes with [[other-slug]].", []);
+            return "Created: " . Memory::projectDir() . "/$slug.md\n";
+        }
+        if ($sub === 'show' || $sub === 'read') {
+            $m = Memory::get($rest);
+            if (!$m) return "No such memory: $rest\n";
+            $out = "{$c}{$m['title']}{$r} ({$m['slug']})\n" . trim($m['body']) . "\n";
+            if ($m['links']) $out .= "{$d}links: " . implode(', ', $m['links']) . "{$r}\n";
+            return $out;
+        }
+        if ($sub === 'search') {
+            $hits = Memory::search($rest);
+            if (!$hits) return "No matches.\n";
+            $out = '';
+            foreach ($hits as $s => $m) $out .= "  {$c}$s{$r} {$d}{$m['title']}{$r}\n";
+            return $out;
+        }
+        if ($sub === 'rm' || $sub === 'remove' || $sub === 'delete') {
+            return Memory::remove($rest) ? "Removed: $rest\n" : "No such memory: $rest\n";
+        }
+        if ($sub === 'graph') {
+            $g = Memory::graph();
+            $out = "Memory graph: " . count($g['nodes']) . " notes, " . count($g['edges']) . " links\n";
+            foreach ($g['nodes'] as $n) {
+                $out .= "  {$c}{$n['id']}{$r}\n";
+                foreach (array_filter($g['edges'], fn($e) => $e['from'] === $n['id']) as $e) $out .= "      {$d}→ {$e['to']}{$r}\n";
+            }
+            return $out;
+        }
+        $all = Memory::all();
+        if (!$all) return "Memory is empty. Save facts with /memory new <title>, or the agent's remember tool.\n";
+        $out = "\nMemory (" . count($all) . " notes):\n";
+        foreach ($all as $slug => $m) $out .= sprintf("  {$c}%-22s{$r}{$d}%s{$r}\n", $slug, $m['title']);
+        return $out . "  {$d}/memory show <slug> · search <q> · graph · new <title> · rm <slug>{$r}\n\n";
     }
 
     private function listSkills(): string {
@@ -288,6 +332,7 @@ class Session {
         $out .= $row('/tools', 'list available tools');
         $out .= $row('/commands', 'list custom commands');
         $out .= $row('/skills', 'list skills the agent can load on demand');
+        $out .= $row('/memory', 'browse the project knowledge graph (recall/remember)');
         $out .= $row('/permission <…>', 'manage tool approval (auto|ask|readonly)');
         $out .= "\n  {$d}Session{$r}\n";
         $out .= $row('/cd · /ls · /pwd', 'navigate the working directory');
@@ -579,7 +624,7 @@ return "Available: " . implode(', ', array_keys($gitAliases)) . "\n";
         if ($firstWord) {
             $base = ['/help', '/model', '/models', '/pull', '/chat', '/agent', '/retry', '/regenerate', '/new', '/clear', '/compact',
                 '/save', '/session', '/git', '/status', '/tools', '/context', '/pwd', '/cd', '/ls',
-                '/permission', '/verbose', '/undo', '/checkpoints', '/init', '/crew', '/skills', '/image', '/commands', '/exit', '/quit',
+                '/permission', '/verbose', '/undo', '/checkpoints', '/init', '/crew', '/skills', '/memory', '/image', '/commands', '/exit', '/quit',
                 'help', 'exit', 'quit', 'clear', 'model', 'models', 'tools', 'git', 'status', 'compact', 'context', 'new', 'cd', 'ls', 'init'];
             foreach ($base as $c) if ($token === '' || str_starts_with($c, $token)) $cands[] = $c;
         } else {

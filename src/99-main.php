@@ -698,6 +698,60 @@ if ($argc >= 2 && $argv[1] === 'skills') {
     exit(0);
 }
 
+// Memory Command - graph knowledge base (list / new / show / search / graph / rm)
+if ($argc >= 2 && $argv[1] === 'memory') {
+    $sub = $argv[2] ?? 'list';
+    if ($sub === 'new' || $sub === 'add') {
+        $title = trim(implode(' ', array_slice($argv, 3)));
+        if ($title === '') { echo "Usage: ollamadev memory new <title>\n"; exit(1); }
+        $slug = Memory::save($title, "Write the note here. Link related notes with [[other-slug]].", []);
+        echo "Created memory: " . Memory::projectDir() . "/$slug.md\n";
+        exit(0);
+    }
+    if ($sub === 'show' || $sub === 'read') {
+        $m = Memory::get($argv[3] ?? '');
+        if (!$m) { echo "No such memory.\n"; exit(1); }
+        echo "# {$m['title']}  ({$m['slug']})" . ($m['tags'] ? "  [" . implode(', ', $m['tags']) . "]" : '') . "\n\n" . trim($m['body']) . "\n";
+        if ($m['links']) echo "\nLinks: " . implode(', ', array_map(fn($l) => "[[$l]]", $m['links'])) . "\n";
+        exit(0);
+    }
+    if ($sub === 'search') {
+        $hits = Memory::search(trim(implode(' ', array_slice($argv, 3))));
+        if (!$hits) { echo "No matches.\n"; exit(0); }
+        foreach ($hits as $s => $m) echo "  $s — {$m['title']}\n";
+        exit(0);
+    }
+    if ($sub === 'rm' || $sub === 'remove' || $sub === 'delete') {
+        $ok = Memory::remove($argv[3] ?? '');
+        echo $ok ? "Removed.\n" : "No such memory.\n";
+        exit($ok ? 0 : 1);
+    }
+    if ($sub === 'graph') {
+        $g = Memory::graph();
+        if (in_array('--json', $argv, true)) { echo json_encode($g) . "\n"; exit(0); }
+        echo "Memory graph: " . count($g['nodes']) . " notes, " . count($g['edges']) . " links\n\n";
+        foreach ($g['nodes'] as $n) {
+            $out = array_values(array_filter($g['edges'], fn($e) => $e['from'] === $n['id']));
+            echo "  " . $n['id'] . ($n['title'] !== $n['id'] ? " ({$n['title']})" : '') . "\n";
+            foreach ($out as $e) echo "      → " . $e['to'] . "\n";
+        }
+        exit(0);
+    }
+    $all = Memory::all();
+    if (!$all) {
+        echo "No memories yet. They live in:\n";
+        foreach (Memory::baseDirs() as $d) echo "  $d/<slug>.md\n";
+        echo "Create one with: ollamadev memory new <title>\n";
+        exit(0);
+    }
+    echo "Memory (" . count($all) . " notes):\n";
+    foreach ($all as $slug => $m) {
+        echo "  $slug — {$m['title']}" . ($m['tags'] ? "  [" . implode(', ', $m['tags']) . "]" : '') . ($m['links'] ? "  → " . implode(', ', $m['links']) : '') . "\n";
+    }
+    echo "\n\033[2mnew <title> · show <slug> · search <q> · graph [--json] · rm <slug>\033[0m\n";
+    exit(0);
+}
+
 // Providers Command
 
 if ($argc >= 2 && $argv[1] === 'providers') {

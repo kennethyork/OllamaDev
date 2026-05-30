@@ -343,7 +343,7 @@ class Permission {
         'changes', 'watch', 'symbols', 'hover', 'goto', 'goto_definition', 'definition',
         'refs', 'find_refs', 'diagnostics', 'git_status', 'git_diff', 'git_log',
         'git_branch', 'git_show', 'git_remote', 'git_fetch', 'mcp_servers', 'calc',
-        'print', 'say', 'echo', 'reply', 'ok', 'OK', 'error', 'summarize', 'skill',
+        'print', 'say', 'echo', 'reply', 'ok', 'OK', 'error', 'summarize', 'skill', 'recall',
     ];
 
     public static function setMode(string $mode): void {
@@ -1011,6 +1011,15 @@ class Tools {
             $fn('skill', 'Load a skill: returns detailed instructions for a named capability listed under AVAILABLE SKILLS. Call this BEFORE doing specialized work that matches a skill, then follow the returned steps.', [
                 'name' => $str('The skill name to load'),
             ], ['name']),
+            $fn('recall', 'Read project memory: pass slug to read one note, query to search, or neither to list. Memories are durable facts about this project (listed under PROJECT MEMORY).', [
+                'slug' => $str('A memory slug to read in full'),
+                'query' => $str('Text to search memory titles/tags/bodies'),
+            ], []),
+            $fn('remember', 'Save a durable fact about this project as a linked memory note. Link related notes inside content with [[slug]]. Use for decisions, conventions, gotchas worth keeping across sessions.', [
+                'title' => $str('Short title for the note'),
+                'content' => $str('The fact/notes to store (may contain [[slug]] links)'),
+                'tags' => $str('Optional comma-separated tags'),
+            ], ['content']),
             $fn('task', 'Delegate a focused sub-task to a fresh nested agent (its own short context, same model, bounded iterations). The sub-agent is READ-ONLY by default (it can read/search/analyze but not write files or run shell). Returns a concise result string. Use for self-contained research/analysis you want handled in isolation.', [
                 'prompt' => $str('The sub-task to perform, described fully and self-contained'),
                 'context' => $str('Optional extra context the sub-agent needs'),
@@ -2784,6 +2793,13 @@ User: run the tests
         $skills = class_exists('Skills') ? Skills::catalog() : '';
         if ($skills !== '') {
             $tools .= "\n\nAVAILABLE SKILLS — when a request matches one, FIRST call the skill tool to load its instructions, then follow them:\n" . $skills;
+        }
+
+        // Graph memory: a short index of saved notes; pull full ones with recall,
+        // save durable facts with remember (link notes via [[slug]]).
+        $mem = class_exists('Memory') ? Memory::index() : '';
+        if ($mem !== '') {
+            $tools .= "\n\nPROJECT MEMORY — durable notes about this project. Use recall(slug) to read one, recall(query) to search, and remember(title, content) to save a new fact (link related notes with [[slug]]):\n" . $mem;
         }
 
         return ['role' => 'system', 'content' => $prompt . $projectMemory . "\n\n" . $tools];
@@ -4788,6 +4804,162 @@ class CrewSkills {
         return $present;
     }
 }
+// GRAPH MEMORY — a persistent, linked knowledge base that lives next to the code.
+// Each memory is a markdown file with frontmatter (title, tags) and a body that can
+// link to other memories with [[wiki-links]]. Files live in:
+//   Project:  <cwd>/.ollamadev/memory/<slug>.md   (committable, co-located with code)
+//   Global:   ~/.ollamadev/memory/<slug>.md
+// The agent gets a short index of memory titles in its system prompt and pulls full
+// notes on demand via the `recall` tool; it writes new facts with `remember`. The
+// links form a graph the desktop renders (Memory::graph()).
+class Memory {
+    public static function baseDirs(): array {
+        $home = getenv('HOME') ?: sys_get_temp_dir();
+        return array_values(array_unique([getcwd() . '/.ollamadev/memory', $home . '/.ollamadev/memory']));
+    }
+    public static function projectDir(): string { return getcwd() . '/.ollamadev/memory'; }
+
+    // All memories keyed by slug (project overrides global). Each: slug,title,tags[],path,links[].
+    public static function all(): array {
+        $mem = [];
+        foreach (self::baseDirs() as $base) {
+            if (!is_dir($base)) continue;
+            foreach (glob($base . '/*.md') ?: [] as $file) {
+                $slug = basename($file, '.md');
+                if (isset($mem[$slug])) continue;
+                $mem[$slug] = self::parse($file, $slug) + ['slug' => $slug, 'path' => $file];
+            }
+        }
+        ksort($mem);
+        return $mem;
+    }
+
+    private static function parse(string $file, string $slug): array {
+        $content = (string) @file_get_contents($file);
+        $title = $slug; $tags = []; $body = $content;
+        if (preg_match('/^---\s*\n(.*?)\n---\s*\n(.*)$/s', $content, $m)) {
+            $body = $m[2];
+            foreach (preg_split('/\n/', $m[1]) as $line) {
+                if (preg_match('/^\s*title\s*:\s*(.+)$/i', $line, $mm)) $title = trim($mm[1], " \"'");
+                elseif (preg_match('/^\s*tags\s*:\s*(.+)$/i', $line, $mm)) $tags = array_values(array_filter(array_map('trim', preg_split('/[,;]/', $mm[1]))));
+            }
+        }
+        $links = [];
+        if (preg_match_all('/\[\[([^\]]+)\]\]/', $body, $lm)) $links = array_values(array_unique(array_map('trim', $lm[1])));
+        return ['title' => $title !== '' ? $title : $slug, 'tags' => $tags, 'links' => $links, 'body' => $body];
+    }
+
+    public static function get(string $slug): ?array {
+        $all = self::all();
+        if (isset($all[$slug])) return $all[$slug];
+        // also resolve by title (case-insensitive)
+        foreach ($all as $m) if (strcasecmp($m['title'], $slug) === 0) return $m;
+        return null;
+    }
+
+    public static function slugify(string $s): string {
+        $s = strtolower(preg_replace('/[^a-zA-Z0-9]+/', '-', $s));
+        return trim(substr($s, 0, 48), '-') ?: 'note';
+    }
+
+    // Save a memory into the project memory dir. Returns the slug.
+    public static function save(string $title, string $body, array $tags = [], string $slug = ''): string {
+        $slug = $slug !== '' ? self::slugify($slug) : self::slugify($title);
+        $dir = self::projectDir();
+        @mkdir($dir, 0755, true);
+        $fm = "---\ntitle: " . trim($title) . "\n";
+        if ($tags) $fm .= "tags: " . implode(', ', array_map('trim', $tags)) . "\n";
+        $fm .= "---\n\n";
+        @file_put_contents($dir . '/' . $slug . '.md', $fm . rtrim($body) . "\n");
+        return $slug;
+    }
+
+    public static function remove(string $slug): bool {
+        $m = self::get($slug);
+        if (!$m) return false;
+        @unlink($m['path']);
+        return !is_file($m['path']);
+    }
+
+    // Match query against title, tags, and body. Returns matching metas.
+    public static function search(string $query): array {
+        $q = strtolower(trim($query));
+        if ($q === '') return self::all();
+        $hits = [];
+        foreach (self::all() as $slug => $m) {
+            $hay = strtolower($m['title'] . ' ' . implode(' ', $m['tags']) . ' ' . $m['body']);
+            if (strpos($hay, $q) !== false) $hits[$slug] = $m;
+        }
+        return $hits;
+    }
+
+    // Short "slug — title" index for the system prompt (bounded).
+    public static function index(int $cap = 24): string {
+        $lines = [];
+        foreach (self::all() as $slug => $m) {
+            $lines[] = '- ' . $slug . ($m['title'] !== $slug ? ' — ' . $m['title'] : '');
+            if (count($lines) >= $cap) { $lines[] = '- … (' . (count(self::all()) - $cap) . ' more — search with recall)'; break; }
+        }
+        return implode("\n", $lines);
+    }
+
+    // Graph of nodes + edges (edges resolved to existing memories by slug or title).
+    public static function graph(): array {
+        $all = self::all();
+        $titleToSlug = [];
+        foreach ($all as $slug => $m) { $titleToSlug[strtolower($m['title'])] = $slug; $titleToSlug[strtolower($slug)] = $slug; }
+        $nodes = []; $edges = []; $seen = [];
+        foreach ($all as $slug => $m) {
+            $nodes[] = ['id' => $slug, 'title' => $m['title'], 'tags' => $m['tags'], 'degree' => 0];
+            foreach ($m['links'] as $link) {
+                $target = $titleToSlug[strtolower(trim($link))] ?? null;
+                if ($target && $target !== $slug) {
+                    $key = $slug . '->' . $target;
+                    if (!isset($seen[$key])) { $edges[] = ['from' => $slug, 'to' => $target]; $seen[$key] = true; }
+                }
+            }
+        }
+        // degree count for sizing in the graph view
+        $deg = [];
+        foreach ($edges as $e) { $deg[$e['from']] = ($deg[$e['from']] ?? 0) + 1; $deg[$e['to']] = ($deg[$e['to']] ?? 0) + 1; }
+        foreach ($nodes as &$n) $n['degree'] = $deg[$n['id']] ?? 0;
+        unset($n);
+        return ['nodes' => $nodes, 'edges' => $edges];
+    }
+}
+
+// recall — read-only: list / read / search memories (and see their links).
+Tools::register('recall', function ($p) {
+    $slug = trim((string) ($p['slug'] ?? ''));
+    $query = trim((string) ($p['query'] ?? ''));
+    if ($slug !== '') {
+        $m = Memory::get($slug);
+        if (!$m) return "No memory '$slug'. " . (($i = Memory::index()) !== '' ? "Known:\n$i" : 'Memory is empty.');
+        $links = $m['links'] ? "\nLinks: " . implode(', ', array_map(fn($l) => "[[$l]]", $m['links'])) : '';
+        return "# {$m['title']}  ({$m['slug']})" . ($m['tags'] ? "  tags: " . implode(', ', $m['tags']) : '') . "\n" . trim($m['body']) . $links;
+    }
+    if ($query !== '') {
+        $hits = Memory::search($query);
+        if (!$hits) return "No memories match '$query'.";
+        $out = "Memories matching '$query':\n";
+        foreach ($hits as $s => $m) $out .= "- $s — {$m['title']}\n";
+        return $out . "Read one with recall(slug).";
+    }
+    $i = Memory::index();
+    return $i === '' ? "Memory is empty. Save facts with the remember tool." : ("Project memory:\n" . $i . "\nRead one with recall(slug), or search with recall(query).");
+});
+
+// remember — write: persist a fact as a linked memory. Use [[other-slug]] in content to link.
+Tools::register('remember', function ($p) {
+    $title = trim((string) ($p['title'] ?? ''));
+    $content = (string) ($p['content'] ?? $p['body'] ?? '');
+    if ($title === '' && $content === '') return "remember needs a title and content.";
+    if ($title === '') $title = substr(trim(preg_replace('/\s+/', ' ', $content)), 0, 48);
+    $tags = [];
+    if (isset($p['tags'])) $tags = is_array($p['tags']) ? $p['tags'] : array_filter(array_map('trim', preg_split('/[,;]/', (string) $p['tags'])));
+    $slug = Memory::save($title, $content, $tags, (string) ($p['slug'] ?? ''));
+    return "Saved memory '$slug' (\"$title\"). Link to it from other notes with [[$slug]].";
+});
 class Session {
     private array $config;
     private string $id;
@@ -4969,6 +5141,7 @@ class Session {
             'init' => ProjectInit::run($this->agent, getcwd(), Permission::isInteractive()),
             'crew' => $this->runCrew($args),
             'skills' => $this->manageSkills($args),
+            'memory', 'mem' => $this->manageMemory($args),
             'retry', 'regenerate' => $this->retryLast(),
             'commands' => UserCmds::render(),
             default => UserCmds::exists($cmd) ? ('PROMPT:' . UserCmds::expand($cmd, $args)) : false
@@ -5004,6 +5177,49 @@ class Session {
             return "Created: " . Skills::scaffold($rest) . "\n";
         }
         return $this->listSkills();
+    }
+
+    private function manageMemory(string $args): string {
+        $parts = preg_split('/\s+/', trim($args), 2);
+        $sub = strtolower($parts[0] ?? '');
+        $rest = trim($parts[1] ?? '');
+        $c = "\033[36m"; $d = "\033[2m"; $r = "\033[0m";
+        if ($sub === 'new' || $sub === 'add') {
+            if ($rest === '') return "Usage: /memory new <title>\n";
+            $slug = Memory::save($rest, "Write the note here. Link related notes with [[other-slug]].", []);
+            return "Created: " . Memory::projectDir() . "/$slug.md\n";
+        }
+        if ($sub === 'show' || $sub === 'read') {
+            $m = Memory::get($rest);
+            if (!$m) return "No such memory: $rest\n";
+            $out = "{$c}{$m['title']}{$r} ({$m['slug']})\n" . trim($m['body']) . "\n";
+            if ($m['links']) $out .= "{$d}links: " . implode(', ', $m['links']) . "{$r}\n";
+            return $out;
+        }
+        if ($sub === 'search') {
+            $hits = Memory::search($rest);
+            if (!$hits) return "No matches.\n";
+            $out = '';
+            foreach ($hits as $s => $m) $out .= "  {$c}$s{$r} {$d}{$m['title']}{$r}\n";
+            return $out;
+        }
+        if ($sub === 'rm' || $sub === 'remove' || $sub === 'delete') {
+            return Memory::remove($rest) ? "Removed: $rest\n" : "No such memory: $rest\n";
+        }
+        if ($sub === 'graph') {
+            $g = Memory::graph();
+            $out = "Memory graph: " . count($g['nodes']) . " notes, " . count($g['edges']) . " links\n";
+            foreach ($g['nodes'] as $n) {
+                $out .= "  {$c}{$n['id']}{$r}\n";
+                foreach (array_filter($g['edges'], fn($e) => $e['from'] === $n['id']) as $e) $out .= "      {$d}→ {$e['to']}{$r}\n";
+            }
+            return $out;
+        }
+        $all = Memory::all();
+        if (!$all) return "Memory is empty. Save facts with /memory new <title>, or the agent's remember tool.\n";
+        $out = "\nMemory (" . count($all) . " notes):\n";
+        foreach ($all as $slug => $m) $out .= sprintf("  {$c}%-22s{$r}{$d}%s{$r}\n", $slug, $m['title']);
+        return $out . "  {$d}/memory show <slug> · search <q> · graph · new <title> · rm <slug>{$r}\n\n";
     }
 
     private function listSkills(): string {
@@ -5078,6 +5294,7 @@ class Session {
         $out .= $row('/tools', 'list available tools');
         $out .= $row('/commands', 'list custom commands');
         $out .= $row('/skills', 'list skills the agent can load on demand');
+        $out .= $row('/memory', 'browse the project knowledge graph (recall/remember)');
         $out .= $row('/permission <…>', 'manage tool approval (auto|ask|readonly)');
         $out .= "\n  {$d}Session{$r}\n";
         $out .= $row('/cd · /ls · /pwd', 'navigate the working directory');
@@ -5369,7 +5586,7 @@ return "Available: " . implode(', ', array_keys($gitAliases)) . "\n";
         if ($firstWord) {
             $base = ['/help', '/model', '/models', '/pull', '/chat', '/agent', '/retry', '/regenerate', '/new', '/clear', '/compact',
                 '/save', '/session', '/git', '/status', '/tools', '/context', '/pwd', '/cd', '/ls',
-                '/permission', '/verbose', '/undo', '/checkpoints', '/init', '/crew', '/skills', '/image', '/commands', '/exit', '/quit',
+                '/permission', '/verbose', '/undo', '/checkpoints', '/init', '/crew', '/skills', '/memory', '/image', '/commands', '/exit', '/quit',
                 'help', 'exit', 'quit', 'clear', 'model', 'models', 'tools', 'git', 'status', 'compact', 'context', 'new', 'cd', 'ls', 'init'];
             foreach ($base as $c) if ($token === '' || str_starts_with($c, $token)) $cands[] = $c;
         } else {
@@ -6404,6 +6621,60 @@ if ($argc >= 2 && $argv[1] === 'skills') {
         echo "      " . $s['dir'] . "\n";
     }
     echo "\n\033[2mnew <name> · install <src> [--force] · export <name> [out] · remove <name>\033[0m\n";
+    exit(0);
+}
+
+// Memory Command - graph knowledge base (list / new / show / search / graph / rm)
+if ($argc >= 2 && $argv[1] === 'memory') {
+    $sub = $argv[2] ?? 'list';
+    if ($sub === 'new' || $sub === 'add') {
+        $title = trim(implode(' ', array_slice($argv, 3)));
+        if ($title === '') { echo "Usage: ollamadev memory new <title>\n"; exit(1); }
+        $slug = Memory::save($title, "Write the note here. Link related notes with [[other-slug]].", []);
+        echo "Created memory: " . Memory::projectDir() . "/$slug.md\n";
+        exit(0);
+    }
+    if ($sub === 'show' || $sub === 'read') {
+        $m = Memory::get($argv[3] ?? '');
+        if (!$m) { echo "No such memory.\n"; exit(1); }
+        echo "# {$m['title']}  ({$m['slug']})" . ($m['tags'] ? "  [" . implode(', ', $m['tags']) . "]" : '') . "\n\n" . trim($m['body']) . "\n";
+        if ($m['links']) echo "\nLinks: " . implode(', ', array_map(fn($l) => "[[$l]]", $m['links'])) . "\n";
+        exit(0);
+    }
+    if ($sub === 'search') {
+        $hits = Memory::search(trim(implode(' ', array_slice($argv, 3))));
+        if (!$hits) { echo "No matches.\n"; exit(0); }
+        foreach ($hits as $s => $m) echo "  $s — {$m['title']}\n";
+        exit(0);
+    }
+    if ($sub === 'rm' || $sub === 'remove' || $sub === 'delete') {
+        $ok = Memory::remove($argv[3] ?? '');
+        echo $ok ? "Removed.\n" : "No such memory.\n";
+        exit($ok ? 0 : 1);
+    }
+    if ($sub === 'graph') {
+        $g = Memory::graph();
+        if (in_array('--json', $argv, true)) { echo json_encode($g) . "\n"; exit(0); }
+        echo "Memory graph: " . count($g['nodes']) . " notes, " . count($g['edges']) . " links\n\n";
+        foreach ($g['nodes'] as $n) {
+            $out = array_values(array_filter($g['edges'], fn($e) => $e['from'] === $n['id']));
+            echo "  " . $n['id'] . ($n['title'] !== $n['id'] ? " ({$n['title']})" : '') . "\n";
+            foreach ($out as $e) echo "      → " . $e['to'] . "\n";
+        }
+        exit(0);
+    }
+    $all = Memory::all();
+    if (!$all) {
+        echo "No memories yet. They live in:\n";
+        foreach (Memory::baseDirs() as $d) echo "  $d/<slug>.md\n";
+        echo "Create one with: ollamadev memory new <title>\n";
+        exit(0);
+    }
+    echo "Memory (" . count($all) . " notes):\n";
+    foreach ($all as $slug => $m) {
+        echo "  $slug — {$m['title']}" . ($m['tags'] ? "  [" . implode(', ', $m['tags']) . "]" : '') . ($m['links'] ? "  → " . implode(', ', $m['links']) : '') . "\n";
+    }
+    echo "\n\033[2mnew <title> · show <slug> · search <q> · graph [--json] · rm <slug>\033[0m\n";
     exit(0);
 }
 

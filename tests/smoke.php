@@ -443,6 +443,36 @@ ok('skill tool has native schema', strpos($src, "\$fn('skill'") !== false);
 ok('skills injected into system prompt', strpos($src, 'AVAILABLE SKILLS') !== false);
 ok('skills install/export/remove wired (CLI)', strpos($src, "\$sub === 'install'") !== false && strpos($src, "\$sub === 'export'") !== false);
 ok('skills install supports git + archive sources', strpos($src, 'git clone --depth 1') !== false && strpos($src, 'tgz|zip') !== false);
+
+echo "\n== Graph memory ==\n";
+if (preg_match('/class Memory \{.*?\n\}/s', $src, $mm)) {
+    eval($mm[0]);
+    $tmp = sys_get_temp_dir() . '/odv_mem_' . getmypid();
+    @mkdir($tmp, 0755, true);
+    $oldCwd2 = getcwd(); $oldHome3 = getenv('HOME');
+    chdir($tmp); putenv('HOME=' . $tmp . '/home');
+    $s1 = Memory::save('Auth uses JWT', 'JWT in HttpOnly cookies. See [[session-handling]].', ['auth', 'security']);
+    $s2 = Memory::save('Session handling', 'Rotates every 15m. Related to [[auth-uses-jwt]].', ['auth']);
+    ok('Memory::save slugifies the title', $s1 === 'auth-uses-jwt' && $s2 === 'session-handling');
+    $all = Memory::all();
+    ok('Memory::all discovers saved notes', isset($all['auth-uses-jwt']) && isset($all['session-handling']));
+    ok('Memory parses tags', $all['auth-uses-jwt']['tags'] === ['auth', 'security']);
+    ok('Memory extracts [[wiki-links]]', in_array('session-handling', $all['auth-uses-jwt']['links'], true));
+    ok('Memory::get resolves by slug', (Memory::get('auth-uses-jwt')['title'] ?? '') === 'Auth uses JWT');
+    ok('Memory::get resolves by title', (Memory::get('Session handling')['slug'] ?? '') === 'session-handling');
+    ok('Memory::search matches body/tags', isset(Memory::search('httponly')['auth-uses-jwt']) && count(Memory::search('auth')) === 2);
+    $g = Memory::graph();
+    ok('Memory::graph builds nodes', count($g['nodes']) === 2);
+    ok('Memory::graph resolves edges both ways', count($g['edges']) === 2);
+    ok('Memory::graph computes degree', ($g['nodes'][0]['degree'] ?? 0) === 2);
+    ok('Memory::remove deletes a note', Memory::remove('session-handling') === true && Memory::get('session-handling') === null);
+    chdir($oldCwd2); putenv($oldHome3 !== false ? "HOME=$oldHome3" : 'HOME');
+    @exec('rm -rf ' . escapeshellarg($tmp));
+} else { ok('Memory class extractable', false); }
+ok('recall tool registered + read-only', strpos($src, "Tools::register('recall'") !== false && strpos($src, "'skill', 'recall'") !== false);
+ok('remember tool registered', strpos($src, "Tools::register('remember'") !== false);
+ok('memory injected into system prompt', strpos($src, 'PROJECT MEMORY') !== false);
+ok('recall/remember have native schemas', strpos($src, "\$fn('recall'") !== false && strpos($src, "\$fn('remember'") !== false);
 ok('skill tool is read-only', strpos($src, "'summarize', 'skill'") !== false);
 
 echo "\n== Crew team skills ==\n";

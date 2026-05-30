@@ -67,6 +67,13 @@ User: run the tests
             $tools .= "\n\nAVAILABLE SKILLS — when a request matches one, FIRST call the skill tool to load its instructions, then follow them:\n" . $skills;
         }
 
+        // Graph memory: a short index of saved notes; pull full ones with recall,
+        // save durable facts with remember (link notes via [[slug]]).
+        $mem = class_exists('Memory') ? Memory::index() : '';
+        if ($mem !== '') {
+            $tools .= "\n\nPROJECT MEMORY — durable notes about this project. Use recall(slug) to read one, recall(query) to search, and remember(title, content) to save a new fact (link related notes with [[slug]]):\n" . $mem;
+        }
+
         return ['role' => 'system', 'content' => $prompt . $projectMemory . "\n\n" . $tools];
     }
 

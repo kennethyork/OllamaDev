@@ -65,6 +65,15 @@ class Tools {
             $fn('skill', 'Load a skill: returns detailed instructions for a named capability listed under AVAILABLE SKILLS. Call this BEFORE doing specialized work that matches a skill, then follow the returned steps.', [
                 'name' => $str('The skill name to load'),
             ], ['name']),
+            $fn('recall', 'Read project memory: pass slug to read one note, query to search, or neither to list. Memories are durable facts about this project (listed under PROJECT MEMORY).', [
+                'slug' => $str('A memory slug to read in full'),
+                'query' => $str('Text to search memory titles/tags/bodies'),
+            ], []),
+            $fn('remember', 'Save a durable fact about this project as a linked memory note. Link related notes inside content with [[slug]]. Use for decisions, conventions, gotchas worth keeping across sessions.', [
+                'title' => $str('Short title for the note'),
+                'content' => $str('The fact/notes to store (may contain [[slug]] links)'),
+                'tags' => $str('Optional comma-separated tags'),
+            ], ['content']),
             $fn('task', 'Delegate a focused sub-task to a fresh nested agent (its own short context, same model, bounded iterations). The sub-agent is READ-ONLY by default (it can read/search/analyze but not write files or run shell). Returns a concise result string. Use for self-contained research/analysis you want handled in isolation.', [
                 'prompt' => $str('The sub-task to perform, described fully and self-contained'),
                 'context' => $str('Optional extra context the sub-agent needs'),
