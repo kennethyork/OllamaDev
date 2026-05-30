@@ -487,6 +487,12 @@ ok('bash honors auto mode for full shell', strpos($src, "Permission::getMode() =
 ok('crew exposes a per-run logDir on the board', strpos($src, "'logDir' => \$logDir") !== false);
 ok('crew tees each coder to a log file', strpos($src, "/coder-' . \$n . '.log'") !== false);
 ok('runCoder accepts a logFile param', strpos($src, "string \$host = '', string \$logFile = ''") !== false);
+ok('crew --panes flag parsed', strpos($src, "\$a === '--panes'") !== false);
+ok('crew --run-id parsed + honored', strpos($src, "\$a === '--run-id'") !== false && strpos($src, "\$opts['runId']") !== false);
+ok('crew-watch subcommand dispatches', strpos($src, "\$cmd === 'crew-watch'") !== false);
+ok('Crew::watchPanes splits a tmux pane per coder', strpos($src, 'function watchPanes(') !== false && strpos($src, 'tmux split-window') !== false);
+ok('--panes degrades gracefully without tmux', strpos($src, '--panes needs tmux') !== false);
+ok('--panes uses tail -f on coder logs', strpos($src, "'tail -n +1 -f '") !== false);
 ok('skill tool is read-only', strpos($src, "'summarize', 'skill'") !== false);
 
 echo "\n== Crew team skills ==\n";

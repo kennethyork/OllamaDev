@@ -39,7 +39,9 @@ class Crew {
         if ($dirty) echo "\033[33m  ⚠ working tree has uncommitted changes — coders branch from the last commit (HEAD), not your working copy.\033[0m\n";
 
         $c = "\033[36m"; $d = "\033[2m"; $b = "\033[1m"; $g = "\033[32m"; $y = "\033[33m"; $r = "\033[0m";
-        $runId = 'crew_' . date('Ymd_His');
+        // runId may be supplied (by --panes, so the pane watcher knows it up front).
+        $runId = (string)($opts['runId'] ?? '');
+        if (!preg_match('/^crew_[0-9_]+$/', $runId)) $runId = 'crew_' . date('Ymd_His');
         echo "\n{$b}👥 OllamaDev Crew{$r}  {$d}model {$c}{$model}{$r}{$d} · base {$base}@" . substr($baseCommit, 0, 7) . "{$r}\n";
         if (!empty($teamSkills)) echo "  {$d}team skills: " . implode(', ', array_map(fn($s) => $s['name'], $teamSkills)) . "{$r}\n";
         // Show per-role models when any role differs from the base (mix-and-match).
@@ -364,6 +366,35 @@ class Crew {
     public static function slug(string $s): string {
         $s = strtolower(preg_replace('/[^a-zA-Z0-9]+/', '-', $s));
         return trim(substr($s, 0, 32), '-') ?: 'task';
+    }
+
+    // Split one tmux pane per coder as their logs appear (drives `crew --panes`).
+    // Runs as a detached helper process alongside the crew. $sess is the tmux
+    // session to target (ignored when $inTmux — then it uses the current session).
+    public static function watchPanes(string $runId, string $sess, bool $inTmux): void {
+        if (!preg_match('/^crew_[0-9_]+$/', $runId)) return;
+        $home = getenv('HOME') ?: sys_get_temp_dir();
+        $dir = $home . '/.ollamadev/crew/' . $runId;
+        $boardFile = $home . '/.ollamadev/crew/current.json';
+        $tgt = $inTmux ? '' : (' -t ' . escapeshellarg($sess));
+        $alive = fn() => $inTmux || trim((string)@shell_exec('tmux has-session -t ' . escapeshellarg($sess) . ' >/dev/null 2>&1 && echo ok')) === 'ok';
+        $deadline = time() + 1800; // 30-minute safety cap
+        if (!$inTmux) { while (time() < $deadline && !$alive()) usleep(200000); } // wait for the session
+        $seen = [];
+        while (time() < $deadline) {
+            if (!$alive()) break;
+            foreach (glob($dir . '/coder-*.log') ?: [] as $f) {
+                if (!preg_match('/coder-(\d+)\.log$/', $f, $m)) continue;
+                $n = (int)$m[1];
+                if (isset($seen[$n])) continue;
+                $seen[$n] = true;
+                @shell_exec('tmux split-window' . $tgt . ' ' . escapeshellarg('tail -n +1 -f ' . $f) . ' >/dev/null 2>&1');
+                @shell_exec('tmux select-layout' . $tgt . ' tiled >/dev/null 2>&1');
+            }
+            $board = json_decode((string)@file_get_contents($boardFile), true);
+            if (is_array($board) && ($board['runId'] ?? '') === $runId && ($board['active'] ?? true) === false) break;
+            sleep(1);
+        }
     }
 
     private static function isGitRepo(): bool { return self::sh('git rev-parse --is-inside-work-tree 2>/dev/null') === 'true'; }

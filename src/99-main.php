@@ -413,6 +413,8 @@ for ($i = 1; $i < $argc; $i++) {
     elseif ($a === '--researcher-model') { $flags['researcherModel'] = $argv[++$i] ?? null; }
     elseif ($a === '--focus') { $flags['focus'] = $argv[++$i] ?? null; }
     elseif ($a === '--hosts') { $flags['hosts'] = $argv[++$i] ?? null; }
+    elseif ($a === '--panes') { $flags['panes'] = true; }
+    elseif ($a === '--run-id') { $flags['runId'] = $argv[++$i] ?? null; }
     elseif ($a === '-s' || $a === '--session') { $flags['session'] = $argv[++$i] ?? null; }
     elseif ($a === '--fork') { $flags['fork'] = true; }
     elseif ($a === '-p' || $a === '--prompt') { $flags['prompt'] = $argv[++$i] ?? null; }
@@ -1132,7 +1134,49 @@ if ($cmd === 'chat') {
     foreach (['directorModel', 'coderModel', 'auditorModel', 'researcherModel'] as $rk) if (!empty($flags[$rk])) $copts[$rk] = $flags[$rk];
     if (!empty($flags['focus'])) $copts['focus'] = $flags['focus'];
     if (!empty($flags['hosts'])) $copts['hosts'] = array_values(array_filter(array_map('trim', explode(',', $flags['hosts']))));
+    if (!empty($flags['runId'])) $copts['runId'] = $flags['runId'];
+
+    // --panes: show one live tmux pane per coder (each tailing its log), with the
+    // main crew output in pane 0. Needs tmux; otherwise runs normally (logs still written).
+    if (!empty($flags['panes'])) {
+        $tmux = trim((string) @shell_exec('command -v tmux 2>/dev/null'));
+        if ($tmux === '') {
+            fwrite(STDERR, "  --panes needs tmux (not found). Running normally; per-coder logs are still written to ~/.ollamadev/crew/<runId>/.\n");
+        } else {
+            $home = getenv('HOME') ?: sys_get_temp_dir();
+            $runId = $copts['runId'] ?? ('crew_' . date('Ymd_His'));
+            $copts['runId'] = $runId;
+            $self = $argv[0];
+            $bg = trim((string) @shell_exec('command -v setsid 2>/dev/null')) !== '' ? 'setsid ' : 'nohup ';
+            if (getenv('TMUX') !== false) {
+                // Already in tmux: split the current window; run the crew inline here.
+                @shell_exec($bg . escapeshellarg($self) . ' crew-watch ' . escapeshellarg($runId) . ' --in-tmux >/dev/null 2>&1 &');
+                exit(Crew::run($task, $copts));
+            }
+            // Not in tmux: launch a detached session running the crew, split panes, attach.
+            $inner = [];
+            for ($k = 1; $k < count($argv); $k++) { if ($argv[$k] === '--panes') continue; $inner[] = $argv[$k]; }
+            if (!in_array('--run-id', $inner, true)) { $inner[] = '--run-id'; $inner[] = $runId; }
+            $innerCmd = escapeshellarg($self) . ' ' . implode(' ', array_map('escapeshellarg', $inner));
+            $script = sys_get_temp_dir() . '/odv-crew-' . $runId . '.sh';
+            @file_put_contents($script, "#!/usr/bin/env bash\n" . $innerCmd . "\nprintf '\\n[crew finished — press any key to close this pane]'\nread -n1\n");
+            @chmod($script, 0755);
+            $sess = 'odv-' . substr($runId, 5);
+            @shell_exec('tmux new-session -d -s ' . escapeshellarg($sess) . ' -x 220 -y 50 ' . escapeshellarg('bash ' . $script) . ' 2>&1');
+            @shell_exec($bg . escapeshellarg($self) . ' crew-watch ' . escapeshellarg($runId) . ' --session ' . escapeshellarg($sess) . ' >/dev/null 2>&1 &');
+            $st = 0; system('tmux attach -t ' . escapeshellarg($sess), $st);
+            @unlink($script);
+            exit(0);
+        }
+    }
     exit(Crew::run($task, $copts));
+} elseif ($cmd === 'crew-watch' && $arg1) {
+    // Internal: split a tmux pane per coder as their logs appear (used by --panes).
+    $inTmux = in_array('--in-tmux', $argv, true);
+    $sess = '';
+    foreach ($argv as $ai => $av) if ($av === '--session') { $sess = $argv[$ai + 1] ?? ''; break; }
+    Crew::watchPanes($arg1, $sess, $inTmux);
+    exit(0);
 } elseif ($cmd === 'load' && $arg1) {
     $session = new Session($config, $arg1);
     if (!file_exists(Config::sessionsDir() . '/' . $arg1 . '.json')) { echo "Session not found: $arg1\n"; exit(1); }
