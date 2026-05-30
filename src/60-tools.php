@@ -62,6 +62,9 @@ class Tools {
             $fn('fetch', 'Fetch the raw contents of a URL.', [
                 'url' => $str('The URL to fetch'),
             ], ['url']),
+            $fn('skill', 'Load a skill: returns detailed instructions for a named capability listed under AVAILABLE SKILLS. Call this BEFORE doing specialized work that matches a skill, then follow the returned steps.', [
+                'name' => $str('The skill name to load'),
+            ], ['name']),
             $fn('task', 'Delegate a focused sub-task to a fresh nested agent (its own short context, same model, bounded iterations). The sub-agent is READ-ONLY by default (it can read/search/analyze but not write files or run shell). Returns a concise result string. Use for self-contained research/analysis you want handled in isolation.', [
                 'prompt' => $str('The sub-task to perform, described fully and self-contained'),
                 'context' => $str('Optional extra context the sub-agent needs'),

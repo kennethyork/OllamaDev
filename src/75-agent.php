@@ -60,6 +60,13 @@ User: run the tests
 <tool_code>{\"name\": \"bash\", \"arguments\": {\"command\": \"ls -la\"}}</tool_code>";
         }
 
+        // Progressive-disclosure skills: list only names+descriptions; the model
+        // loads a skill's full instructions on demand via the `skill` tool.
+        $skills = class_exists('Skills') ? Skills::catalog() : '';
+        if ($skills !== '') {
+            $tools .= "\n\nAVAILABLE SKILLS — when a request matches one, FIRST call the skill tool to load its instructions, then follow them:\n" . $skills;
+        }
+
         return ['role' => 'system', 'content' => $prompt . $projectMemory . "\n\n" . $tools];
     }
 

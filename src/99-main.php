@@ -641,6 +641,32 @@ if ($argc >= 2 && $argv[1] === 'models') {
     exit(0);
 }
 
+// Skills Command - list / scaffold on-demand skills
+if ($argc >= 2 && $argv[1] === 'skills') {
+    $sub = $argv[2] ?? 'list';
+    if ($sub === 'new' || $sub === 'add') {
+        $name = $argv[3] ?? '';
+        if ($name === '') { echo "Usage: ollamadev skills new <name>\n"; exit(1); }
+        $md = Skills::scaffold($name);
+        echo "Created skill: $md\nEdit it, then run `ollamadev skills` to confirm it's discovered.\n";
+        exit(0);
+    }
+    $all = Skills::all();
+    if (!$all) {
+        echo "No skills found.\n";
+        echo "Skills live in:\n";
+        foreach (Skills::baseDirs() as $d) echo "  $d/<name>/SKILL.md\n";
+        echo "Create one with: ollamadev skills new <name>\n";
+        exit(0);
+    }
+    echo "Skills (" . count($all) . "):\n";
+    foreach ($all as $s) {
+        echo "  " . $s['name'] . " — " . ($s['description'] ?: '(no description)') . "\n";
+        echo "      " . $s['dir'] . "\n";
+    }
+    exit(0);
+}
+
 // Providers Command
 
 if ($argc >= 2 && $argv[1] === 'providers') {

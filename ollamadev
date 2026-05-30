@@ -343,7 +343,7 @@ class Permission {
         'changes', 'watch', 'symbols', 'hover', 'goto', 'goto_definition', 'definition',
         'refs', 'find_refs', 'diagnostics', 'git_status', 'git_diff', 'git_log',
         'git_branch', 'git_show', 'git_remote', 'git_fetch', 'mcp_servers', 'calc',
-        'print', 'say', 'echo', 'reply', 'ok', 'OK', 'error', 'summarize',
+        'print', 'say', 'echo', 'reply', 'ok', 'OK', 'error', 'summarize', 'skill',
     ];
 
     public static function setMode(string $mode): void {
@@ -1008,6 +1008,9 @@ class Tools {
             $fn('fetch', 'Fetch the raw contents of a URL.', [
                 'url' => $str('The URL to fetch'),
             ], ['url']),
+            $fn('skill', 'Load a skill: returns detailed instructions for a named capability listed under AVAILABLE SKILLS. Call this BEFORE doing specialized work that matches a skill, then follow the returned steps.', [
+                'name' => $str('The skill name to load'),
+            ], ['name']),
             $fn('task', 'Delegate a focused sub-task to a fresh nested agent (its own short context, same model, bounded iterations). The sub-agent is READ-ONLY by default (it can read/search/analyze but not write files or run shell). Returns a concise result string. Use for self-contained research/analysis you want handled in isolation.', [
                 'prompt' => $str('The sub-task to perform, described fully and self-contained'),
                 'context' => $str('Optional extra context the sub-agent needs'),
@@ -2776,6 +2779,13 @@ User: run the tests
 <tool_code>{\"name\": \"bash\", \"arguments\": {\"command\": \"ls -la\"}}</tool_code>";
         }
 
+        // Progressive-disclosure skills: list only names+descriptions; the model
+        // loads a skill's full instructions on demand via the `skill` tool.
+        $skills = class_exists('Skills') ? Skills::catalog() : '';
+        if ($skills !== '') {
+            $tools .= "\n\nAVAILABLE SKILLS — when a request matches one, FIRST call the skill tool to load its instructions, then follow them:\n" . $skills;
+        }
+
         return ['role' => 'system', 'content' => $prompt . $projectMemory . "\n\n" . $tools];
     }
 
@@ -4229,6 +4239,98 @@ class Crew {
     private static function gitWorktreeSupported(): bool { return stripos(self::sh('git worktree -h 2>&1'), 'usage') !== false || self::sh('git worktree list 2>/dev/null') !== ''; }
     private static function sh(string $cmd): string { return trim((string)@shell_exec($cmd)); }
 }
+// SKILLS — on-demand capabilities for local models (Claude-Code-style).
+// A skill is a folder with a SKILL.md (frontmatter: name, description; body:
+// instructions) plus optional helper files. Only the name+description are put in
+// the system prompt; the model loads a skill's full instructions on demand via
+// the `skill` tool (progressive disclosure — keeps prompts small).
+//   Project skills:  <cwd>/.ollamadev/skills/<name>/SKILL.md
+//   Global skills:   ~/.ollamadev/skills/<name>/SKILL.md
+class Skills {
+    public static function baseDirs(): array {
+        $home = getenv('HOME') ?: '/tmp';
+        return array_values(array_unique([getcwd() . '/.ollamadev/skills', $home . '/.ollamadev/skills']));
+    }
+
+    // All discovered skills, keyed by lowercase name (project overrides global).
+    public static function all(): array {
+        $skills = [];
+        foreach (self::baseDirs() as $base) {
+            if (!is_dir($base)) continue;
+            foreach (glob($base . '/*', GLOB_ONLYDIR) ?: [] as $dir) {
+                $md = $dir . '/SKILL.md';
+                if (!is_file($md)) continue;
+                $meta = self::parse($md, basename($dir));
+                $key = strtolower($meta['name']);
+                if (!isset($skills[$key])) $skills[$key] = $meta + ['dir' => $dir, 'file' => $md];
+            }
+        }
+        ksort($skills);
+        return $skills;
+    }
+
+    private static function parse(string $md, string $fallback): array {
+        $content = (string) @file_get_contents($md);
+        $name = $fallback; $desc = '';
+        if (preg_match('/^---\s*\n(.*?)\n---\s*\n/s', $content, $m)) {
+            foreach (preg_split('/\n/', $m[1]) as $line) {
+                if (preg_match('/^\s*name\s*:\s*(.+)$/i', $line, $mm)) $name = trim($mm[1], " \"'");
+                elseif (preg_match('/^\s*description\s*:\s*(.+)$/i', $line, $mm)) $desc = trim($mm[1], " \"'");
+            }
+        }
+        if ($desc === '') {
+            $body = preg_replace('/^---\s*\n.*?\n---\s*\n/s', '', $content);
+            foreach (preg_split('/\n/', (string) $body) as $line) {
+                $t = trim($line);
+                if ($t !== '' && $t[0] !== '#') { $desc = $t; break; }
+            }
+        }
+        return ['name' => $name !== '' ? $name : $fallback, 'description' => $desc];
+    }
+
+    // Full skill (body + helper file list) by name, or null.
+    public static function get(string $name): ?array {
+        foreach (self::all() as $s) {
+            if (strcasecmp($s['name'], $name) === 0) {
+                $files = array_values(array_filter(array_map('basename', glob($s['dir'] . '/*') ?: []), fn($f) => $f !== 'SKILL.md'));
+                return $s + ['body' => (string) @file_get_contents($s['file']), 'files' => $files];
+            }
+        }
+        return null;
+    }
+
+    // "- name: description" lines for the system prompt (empty if no skills).
+    public static function catalog(): string {
+        $lines = [];
+        foreach (self::all() as $s) $lines[] = '- ' . $s['name'] . ': ' . $s['description'];
+        return implode("\n", $lines);
+    }
+
+    // Scaffold a new skill folder; returns the SKILL.md path.
+    public static function scaffold(string $name): string {
+        $home = getenv('HOME') ?: '/tmp';
+        $dir = $home . '/.ollamadev/skills/' . preg_replace('/[^a-zA-Z0-9._-]+/', '-', $name);
+        @mkdir($dir, 0755, true);
+        $md = $dir . '/SKILL.md';
+        if (!is_file($md)) {
+            @file_put_contents($md, "---\nname: $name\ndescription: One line on when to use this skill.\n---\n\n" .
+                "# $name\n\nStep-by-step instructions the model should follow when this skill is loaded.\n\n" .
+                "- You can reference helper files placed next to this SKILL.md.\n");
+        }
+        return $md;
+    }
+}
+
+// The `skill` tool: load a skill's full instructions on demand.
+Tools::register('skill', function ($p) {
+    $name = trim((string) ($p['name'] ?? $p['skill'] ?? (is_string($p) ? $p : '')));
+    $names = array_map(fn($s) => $s['name'], Skills::all());
+    if ($name === '') return "Usage: skill(name). Available skills: " . (empty($names) ? '(none)' : implode(', ', $names));
+    $s = Skills::get($name);
+    if (!$s) return "No skill named '$name'. Available: " . (empty($names) ? '(none)' : implode(', ', $names));
+    $extra = !empty($s['files']) ? "\n\n(Helper files in {$s['dir']}: " . implode(', ', $s['files']) . " — read them with the view tool if needed.)" : '';
+    return "# Skill: {$s['name']}\n{$s['description']}\n\n" . $s['body'] . $extra;
+});
 class TerminalManager
 {
     public string $baseDir;
@@ -4537,10 +4639,24 @@ class Session {
             'checkpoints' => $this->listCheckpoints(),
             'init' => ProjectInit::run($this->agent, getcwd(), Permission::isInteractive()),
             'crew' => $this->runCrew($args),
+            'skills' => $this->listSkills(),
             'retry', 'regenerate' => $this->retryLast(),
             'commands' => UserCmds::render(),
             default => UserCmds::exists($cmd) ? ('PROMPT:' . UserCmds::expand($cmd, $args)) : false
         };
+    }
+
+    private function listSkills(): string {
+        $all = Skills::all();
+        if (!$all) {
+            $out = "No skills found. Skills are folders with a SKILL.md:\n";
+            foreach (Skills::baseDirs() as $d) $out .= "  $d/<name>/SKILL.md\n";
+            return $out . "Create one with: ollamadev skills new <name>\n";
+        }
+        $c = "\033[36m"; $d = "\033[2m"; $r = "\033[0m";
+        $out = "\nSkills (" . count($all) . ") — the agent loads these on demand via the skill tool:\n\n";
+        foreach ($all as $s) $out .= sprintf("  {$c}%-18s{$r}{$d}%s{$r}\n", $s['name'], $s['description'] ?: '(no description)');
+        return $out . "\n";
     }
 
     private function managePermission(string $args): string {
@@ -4601,6 +4717,7 @@ class Session {
         $out .= $row('/context · /status', 'show context fill & token usage');
         $out .= $row('/tools', 'list available tools');
         $out .= $row('/commands', 'list custom commands');
+        $out .= $row('/skills', 'list skills the agent can load on demand');
         $out .= $row('/permission <…>', 'manage tool approval (auto|ask|readonly)');
         $out .= "\n  {$d}Session{$r}\n";
         $out .= $row('/cd · /ls · /pwd', 'navigate the working directory');
@@ -4876,7 +4993,7 @@ return "Available: " . implode(', ', array_keys($gitAliases)) . "\n";
         if ($firstWord) {
             $base = ['/help', '/model', '/models', '/pull', '/chat', '/agent', '/retry', '/regenerate', '/new', '/clear', '/compact',
                 '/save', '/session', '/git', '/status', '/tools', '/context', '/pwd', '/cd', '/ls',
-                '/permission', '/verbose', '/undo', '/checkpoints', '/init', '/image', '/commands', '/exit', '/quit',
+                '/permission', '/verbose', '/undo', '/checkpoints', '/init', '/crew', '/skills', '/image', '/commands', '/exit', '/quit',
                 'help', 'exit', 'quit', 'clear', 'model', 'models', 'tools', 'git', 'status', 'compact', 'context', 'new', 'cd', 'ls', 'init'];
             foreach ($base as $c) if ($token === '' || str_starts_with($c, $token)) $cands[] = $c;
         } else {
@@ -5854,6 +5971,32 @@ if ($argc >= 2 && $argv[1] === 'models') {
     $models = $client->listModels();
     echo "Available Models:\n";
     foreach ($models as $m) echo "  $m\n";
+    exit(0);
+}
+
+// Skills Command - list / scaffold on-demand skills
+if ($argc >= 2 && $argv[1] === 'skills') {
+    $sub = $argv[2] ?? 'list';
+    if ($sub === 'new' || $sub === 'add') {
+        $name = $argv[3] ?? '';
+        if ($name === '') { echo "Usage: ollamadev skills new <name>\n"; exit(1); }
+        $md = Skills::scaffold($name);
+        echo "Created skill: $md\nEdit it, then run `ollamadev skills` to confirm it's discovered.\n";
+        exit(0);
+    }
+    $all = Skills::all();
+    if (!$all) {
+        echo "No skills found.\n";
+        echo "Skills live in:\n";
+        foreach (Skills::baseDirs() as $d) echo "  $d/<name>/SKILL.md\n";
+        echo "Create one with: ollamadev skills new <name>\n";
+        exit(0);
+    }
+    echo "Skills (" . count($all) . "):\n";
+    foreach ($all as $s) {
+        echo "  " . $s['name'] . " — " . ($s['description'] ?: '(no description)') . "\n";
+        echo "      " . $s['dir'] . "\n";
+    }
     exit(0);
 }
 

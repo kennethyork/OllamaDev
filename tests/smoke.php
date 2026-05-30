@@ -395,6 +395,34 @@ ok('crew Director uses JSON mode', strpos($src, 'chatJson(') !== false);
 ok('crew Coder uses git worktrees', strpos($src, 'git worktree add') !== false);
 ok('crew Auditor + auto-merge wired', strpos($src, "git merge --no-ff") !== false && strpos($src, 'function audit(') !== false);
 
+echo "\n== Skills ==\n";
+if (preg_match('/class Skills \{.*?\n\}/s', $src, $sk)) {
+    eval($sk[0]);
+    $tmpHome = sys_get_temp_dir() . '/odv_skills_' . getmypid();
+    @mkdir($tmpHome . '/.ollamadev/skills/git-pro', 0755, true);
+    file_put_contents($tmpHome . '/.ollamadev/skills/git-pro/SKILL.md',
+        "---\nname: git-pro\ndescription: Craft clean commits and rebases.\n---\n\n# git-pro\n\nWrite atomic commits.\n");
+    $oldHome = getenv('HOME'); $oldCwd = getcwd();
+    putenv("HOME=$tmpHome"); chdir($tmpHome);
+    $all = Skills::all();
+    ok('Skills::all discovers a SKILL.md', isset($all['git-pro']));
+    ok('Skills parses frontmatter description', ($all['git-pro']['description'] ?? '') === 'Craft clean commits and rebases.');
+    ok('Skills::catalog lists name: description', strpos(Skills::catalog(), 'git-pro: Craft clean') !== false);
+    $g = Skills::get('git-pro');
+    ok('Skills::get returns full body', $g !== null && strpos($g['body'], 'Write atomic commits.') !== false);
+    ok('Skills::get is case-insensitive', Skills::get('GIT-PRO') !== null);
+    ok('Skills::get returns null for unknown', Skills::get('nope') === null);
+    $md = Skills::scaffold('new-thing');
+    ok('Skills::scaffold writes a SKILL.md', is_file($md) && strpos(file_get_contents($md), 'name: new-thing') !== false);
+    putenv("HOME=$oldHome"); chdir($oldCwd);
+    @exec('rm -rf ' . escapeshellarg($tmpHome));
+} else { ok('Skills class extractable', false); }
+// Source wiring: skill tool registered, schema present, prompt injection, read-only
+ok('skill tool registered', strpos($src, "Tools::register('skill'") !== false);
+ok('skill tool has native schema', strpos($src, "\$fn('skill'") !== false);
+ok('skills injected into system prompt', strpos($src, 'AVAILABLE SKILLS') !== false);
+ok('skill tool is read-only', strpos($src, "'summarize', 'skill'") !== false);
+
 echo "\n========================\n";
 echo "Results: $pass passed, $fail failed\n";
 if ($fail > 0) { echo "FAILED: " . implode(', ', $fails) . "\n"; exit(1); }

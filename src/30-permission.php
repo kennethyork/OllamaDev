@@ -11,7 +11,7 @@ class Permission {
         'changes', 'watch', 'symbols', 'hover', 'goto', 'goto_definition', 'definition',
         'refs', 'find_refs', 'diagnostics', 'git_status', 'git_diff', 'git_log',
         'git_branch', 'git_show', 'git_remote', 'git_fetch', 'mcp_servers', 'calc',
-        'print', 'say', 'echo', 'reply', 'ok', 'OK', 'error', 'summarize',
+        'print', 'say', 'echo', 'reply', 'ok', 'OK', 'error', 'summarize', 'skill',
     ];
 
     public static function setMode(string $mode): void {

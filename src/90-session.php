@@ -178,10 +178,24 @@ class Session {
             'checkpoints' => $this->listCheckpoints(),
             'init' => ProjectInit::run($this->agent, getcwd(), Permission::isInteractive()),
             'crew' => $this->runCrew($args),
+            'skills' => $this->listSkills(),
             'retry', 'regenerate' => $this->retryLast(),
             'commands' => UserCmds::render(),
             default => UserCmds::exists($cmd) ? ('PROMPT:' . UserCmds::expand($cmd, $args)) : false
         };
+    }
+
+    private function listSkills(): string {
+        $all = Skills::all();
+        if (!$all) {
+            $out = "No skills found. Skills are folders with a SKILL.md:\n";
+            foreach (Skills::baseDirs() as $d) $out .= "  $d/<name>/SKILL.md\n";
+            return $out . "Create one with: ollamadev skills new <name>\n";
+        }
+        $c = "\033[36m"; $d = "\033[2m"; $r = "\033[0m";
+        $out = "\nSkills (" . count($all) . ") — the agent loads these on demand via the skill tool:\n\n";
+        foreach ($all as $s) $out .= sprintf("  {$c}%-18s{$r}{$d}%s{$r}\n", $s['name'], $s['description'] ?: '(no description)');
+        return $out . "\n";
     }
 
     private function managePermission(string $args): string {
@@ -242,6 +256,7 @@ class Session {
         $out .= $row('/context · /status', 'show context fill & token usage');
         $out .= $row('/tools', 'list available tools');
         $out .= $row('/commands', 'list custom commands');
+        $out .= $row('/skills', 'list skills the agent can load on demand');
         $out .= $row('/permission <…>', 'manage tool approval (auto|ask|readonly)');
         $out .= "\n  {$d}Session{$r}\n";
         $out .= $row('/cd · /ls · /pwd', 'navigate the working directory');
@@ -517,7 +532,7 @@ return "Available: " . implode(', ', array_keys($gitAliases)) . "\n";
         if ($firstWord) {
             $base = ['/help', '/model', '/models', '/pull', '/chat', '/agent', '/retry', '/regenerate', '/new', '/clear', '/compact',
                 '/save', '/session', '/git', '/status', '/tools', '/context', '/pwd', '/cd', '/ls',
-                '/permission', '/verbose', '/undo', '/checkpoints', '/init', '/image', '/commands', '/exit', '/quit',
+                '/permission', '/verbose', '/undo', '/checkpoints', '/init', '/crew', '/skills', '/image', '/commands', '/exit', '/quit',
                 'help', 'exit', 'quit', 'clear', 'model', 'models', 'tools', 'git', 'status', 'compact', 'context', 'new', 'cd', 'ls', 'init'];
             foreach ($base as $c) if ($token === '' || str_starts_with($c, $token)) $cands[] = $c;
         } else {
