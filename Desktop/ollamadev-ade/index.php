@@ -99,6 +99,23 @@ $app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $
         return is_array($d) ? $d : [];
     });
 
+    // Live per-coder log tail (one pane per coder while a crew runs).
+    $b->bind('crewCoderLog', function (string $runId, int $n, int $offset = 0) {
+        $home = getenv('HOME') ?: sys_get_temp_dir();
+        // runId is validated to the crew_YYYYmmdd_HHMMSS shape — no path traversal.
+        if (!preg_match('/^crew_[0-9_]+$/', $runId) || $n < 1 || $n > 64) return ['data' => '', 'size' => 0];
+        $f = $home . '/.ollamadev/crew/' . $runId . '/coder-' . $n . '.log';
+        if (!is_file($f)) return ['data' => '', 'size' => 0];
+        $size = (int) filesize($f);
+        if ($offset >= $size) return ['data' => '', 'size' => $size];
+        $fh = @fopen($f, 'rb');
+        if (!$fh) return ['data' => '', 'size' => $size];
+        if ($offset > 0) fseek($fh, $offset);
+        $data = (string) stream_get_contents($fh);
+        fclose($fh);
+        return ['data' => $data, 'size' => $size];
+    });
+
     // Project knowledge graph (nodes + [[link]] edges) for the Graph view.
     $b->bind('memoryGraph', function () use ($cli, $files): array {
         $root = $files->getRoot();

@@ -451,6 +451,52 @@ var Graph = {
     }
 };
 
+// Live per-coder panes: one read-only terminal-style pane per crew coder,
+// tailing its log so you watch the whole team build in parallel.
+var CrewPanes = {
+    runId: null, offsets: {}, text: {}, bodies: {}, count: 0,
+    sync: function (board) {
+        var host = $('#crewPanes'); if (!host) return;
+        var subs = (board && Array.isArray(board.subtasks)) ? board.subtasks : [];
+        if (!board || !board.runId || !subs.length) { host.hidden = true; host.innerHTML = ''; this.runId = null; this.count = 0; return; }
+        host.hidden = false;
+        // (Re)build the panes when the run or the coder count changes.
+        if (board.runId !== this.runId || subs.length !== this.count) {
+            this.runId = board.runId; this.count = subs.length; this.offsets = {}; this.text = {}; this.bodies = {};
+            var self = this;
+            host.innerHTML = subs.map(function (s) {
+                return '<div class="cpane" data-n="' + s.n + '">' +
+                    '<div class="cpane-head"><span class="cpane-title">👷 ' + esc(s.title || ('coder ' + s.n)) + '</span>' +
+                    '<span class="cpane-badge" data-n="' + s.n + '"></span></div>' +
+                    '<pre class="cpane-body" data-n="' + s.n + '"></pre></div>';
+            }).join('');
+            host.querySelectorAll('.cpane-body').forEach(function (el) { self.bodies[el.dataset.n] = el; });
+        }
+        // Update state badges every sync.
+        subs.forEach(function (s) {
+            var badge = host.querySelector('.cpane-badge[data-n="' + s.n + '"]'); if (!badge) return;
+            var map = { todo: '○ queued', doing: '● working', done: '✓ done', held: '⚠ held' };
+            badge.textContent = map[s.state] || s.state || '';
+            badge.className = 'cpane-badge st-' + (s.state || 'todo');
+        });
+        this.poll(subs);
+    },
+    poll: function (subs) {
+        if (!this.runId || !window.crewCoderLog) return;
+        var self = this;
+        subs.forEach(function (s) {
+            var n = s.n, off = self.offsets[n] || 0;
+            Promise.resolve(window.crewCoderLog(self.runId, n, off)).then(function (r) {
+                if (!r || !r.data) return;
+                self.text[n] = (self.text[n] || '') + r.data;
+                self.offsets[n] = r.size;
+                var el = self.bodies[n];
+                if (el) { el.textContent = self.text[n]; el.scrollTop = el.scrollHeight; }
+            }).catch(function () {});
+        });
+    }
+};
+
 var App = {
     terminals: [], cwd: '.', layout: 'split', zoomed: null, view: 'code', panel: 'files', crewBoard: null, crewPoll: null,
     init: function () {
@@ -574,7 +620,7 @@ var App = {
         $('#codeView').hidden = v !== 'code';
         $('#boardView').hidden = v !== 'board';
         $('#graphView').hidden = v !== 'graph';
-        if (v === 'board') Tasks.render();
+        if (v === 'board') { Tasks.render(); CrewPanes.sync(this.crewBoard); }
         if (v === 'graph') Graph.load();
     },
     // Hand a task title to an agent terminal's CLI (create one if none exist).
@@ -807,7 +853,8 @@ var App = {
                 coderModel: self.mval('crewModelCoder'),
                 auditorModel: self.mval('crewModelAuditor'),
                 researcherModel: self.mval('crewModelResearcher'),
-                focus: self.crewFocus || ''
+                focus: self.crewFocus || '',
+                hosts: ($('#crewHosts') && $('#crewHosts').value || '').trim()
             };
             self.closeCrew();
             self.runCrew(task, opts);
@@ -838,7 +885,8 @@ var App = {
             rmf('--director-model', opts.directorModel) +
             rmf('--researcher-model', opts.researcher !== false ? opts.researcherModel : '') +
             rmf('--auditor-model', opts.auditor !== false ? opts.auditorModel : '') +
-            rmf('--focus', opts.focus);
+            rmf('--focus', opts.focus) +
+            (opts.hosts ? ' --hosts ' + "'" + String(opts.hosts).replace(/\s+/g, '').replace(/'/g, "'\\''") + "'" : '');
         var model = base;
         var id = rid(); var t = new Terminal(id, 'crew');
         var self = this;
@@ -858,7 +906,7 @@ var App = {
         this.crewPoll = setInterval(function () {
             Promise.resolve(window.crewBoard ? window.crewBoard() : null).then(function (b) {
                 self.crewBoard = (b && b.subtasks) ? b : self.crewBoard;
-                if (self.view === 'board') Tasks.render();
+                if (self.view === 'board') { Tasks.render(); CrewPanes.sync(self.crewBoard); }
                 // Stop polling a while after the run goes inactive.
                 if (b && b.active === false) { if (++idle > 6) { clearInterval(self.crewPoll); self.crewPoll = null; } }
                 else idle = 0;

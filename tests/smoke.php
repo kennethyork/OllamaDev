@@ -484,6 +484,9 @@ ok('crew falls back to sequential (inline) on fork failure', strpos($src, 'fork 
 ok('crew --hosts flag wired (CLI)', strpos($src, "\$a === '--hosts'") !== false);
 ok('config has ollama.hosts default', strpos($src, "'hosts' => []") !== false);
 ok('bash honors auto mode for full shell', strpos($src, "Permission::getMode() === 'auto'") !== false && strpos($src, 'readonly only, or switch to auto mode') !== false);
+ok('crew exposes a per-run logDir on the board', strpos($src, "'logDir' => \$logDir") !== false);
+ok('crew tees each coder to a log file', strpos($src, "/coder-' . \$n . '.log'") !== false);
+ok('runCoder accepts a logFile param', strpos($src, "string \$host = '', string \$logFile = ''") !== false);
 ok('skill tool is read-only', strpos($src, "'summarize', 'skill'") !== false);
 
 echo "\n== Crew team skills ==\n";

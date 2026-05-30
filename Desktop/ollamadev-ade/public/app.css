@@ -277,6 +277,16 @@ body {
 #graphEmpty code { background: var(--bg3); padding: 1px 5px; border-radius: 4px; }
 
 #boardView { padding: 14px; overflow: auto; }
+#crewPanes { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; margin-bottom: 14px; }
+#crewPanes[hidden] { display: none; }
+.cpane { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); display: flex; flex-direction: column; overflow: hidden; min-height: 150px; }
+.cpane-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--bg3); }
+.cpane-title { font-weight: 600; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cpane-badge { margin-left: auto; font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--dim); white-space: nowrap; }
+.cpane-badge.st-doing { color: var(--accent); border-color: var(--accent); }
+.cpane-badge.st-done { color: #3fb950; border-color: #3fb950; }
+.cpane-badge.st-held { color: #d29922; border-color: #d29922; }
+.cpane-body { margin: 0; padding: 8px 10px; flex: 1; max-height: 240px; overflow: auto; font: 11px/1.45 ui-monospace, Menlo, Consolas, monospace; color: var(--fg); white-space: pre-wrap; word-break: break-word; }
 #board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; min-height: 100%; }
 .col { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); display: flex; flex-direction: column; min-height: 120px; }
 .col.drag-over { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }

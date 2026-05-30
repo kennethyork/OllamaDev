@@ -75,7 +75,11 @@ class Crew {
         $home = getenv('HOME') ?: sys_get_temp_dir();
         $boardFile = $home . '/.ollamadev/crew/current.json';
         @mkdir(dirname($boardFile), 0755, true);
-        $board = ['task' => $task, 'runId' => $runId, 'active' => true, 'model' => $model, 'subtasks' => []];
+        // Per-run log dir: each coder tees its activity to coder-<n>.log so the
+        // desktop can show one live pane per coder (watch them work in parallel).
+        $logDir = dirname($boardFile) . '/' . $runId;
+        @mkdir($logDir, 0755, true);
+        $board = ['task' => $task, 'runId' => $runId, 'active' => true, 'model' => $model, 'logDir' => $logDir, 'subtasks' => []];
         foreach ($subtasks as $i => $st) $board['subtasks'][] = ['n' => $i + 1, 'title' => $st['title'] ?? ('task ' . ($i + 1)), 'state' => 'todo'];
         $writeBoard = function () use (&$board, $boardFile) { $board['ts'] = time(); @file_put_contents($boardFile, json_encode($board)); };
         $setState = function (int $n, string $s) use (&$board, $writeBoard) { foreach ($board['subtasks'] as &$bs) { if ($bs['n'] === $n) $bs['state'] = $s; } unset($bs); $writeBoard(); };
@@ -97,7 +101,7 @@ class Crew {
             if (!is_dir($wt)) { echo "  {$y}skipped (worktree failed): {$add}{$r}\n"; $setState($n, 'held'); continue; }
             if (!empty($teamSkills)) CrewSkills::materialize($teamSkills, $wt); // seed domain skills (git-excluded)
             $setState($n, 'doing');
-            $jobs[] = ['n' => $n, 'st' => $st, 'branch' => $branch, 'wt' => $wt];
+            $jobs[] = ['n' => $n, 'st' => $st, 'branch' => $branch, 'wt' => $wt, 'log' => $logDir . '/coder-' . $n . '.log'];
         }
 
         // Host pool for spreading coders across machines/GPUs (real parallel inference,
@@ -120,13 +124,13 @@ class Crew {
                 $resFile = $wtRoot . '/result-' . $job['n'] . '.json';
                 $pid = pcntl_fork();
                 if ($pid === 0) { // child: build in isolation, write the result, exit
-                    self::runCoder($job['wt'], $job['st'], $mCoder, $maxIter, $research, $task, $focus, $host);
+                    self::runCoder($job['wt'], $job['st'], $mCoder, $maxIter, $research, $task, $focus, $host, $job['log']);
                     @file_put_contents($resFile, json_encode(self::collectCoderResult($job, $baseCommit)));
                     exit(0);
                 } elseif ($pid > 0) {
                     $pids[$pid] = ['job' => $job, 'file' => $resFile];
                 } else { // fork failed: run inline as a fallback
-                    self::runCoder($job['wt'], $job['st'], $mCoder, $maxIter, $research, $task, $focus, $host);
+                    self::runCoder($job['wt'], $job['st'], $mCoder, $maxIter, $research, $task, $focus, $host, $job['log']);
                     $results[] = self::collectCoderResult($job, $baseCommit);
                 }
             }
@@ -144,7 +148,7 @@ class Crew {
             foreach ($jobs as $idx => $job) {
                 $host = $spread ? $hosts[$idx % count($hosts)] : '';
                 echo "\n{$b}▸ Coder {$job['n']}{$r} {$d}{$job['branch']}" . ($host !== '' ? " · {$host}" : '') . "{$r}\n";
-                self::runCoder($job['wt'], $job['st'], $mCoder, $maxIter, $research, $task, $focus, $host);
+                self::runCoder($job['wt'], $job['st'], $mCoder, $maxIter, $research, $task, $focus, $host, $job['log']);
                 $res = self::collectCoderResult($job, $baseCommit);
                 echo "  " . ($res['empty'] ? "{$d}no changes{$r}" : count($res['files']) . " file(s) changed") . "\n";
                 $results[] = $res;
@@ -270,11 +274,14 @@ class Crew {
 
     // Coder: a bounded agent loop in the worktree (auto permissions, isolated).
     // $host pins this coder to a specific Ollama host for parallel runs.
-    private static function runCoder(string $wt, array $st, string $model, int $maxIter, string $research = '', string $goal = '', string $focus = '', string $host = ''): void {
+    private static function runCoder(string $wt, array $st, string $model, int $maxIter, string $research = '', string $goal = '', string $focus = '', string $host = '', string $logFile = ''): void {
         $prevCwd = getcwd();
         $oldMode = Permission::getMode(); $oldInt = Permission::isInteractive();
         @chdir($wt);
         Permission::setMode('auto'); Permission::setInteractive(false);
+        // Tee coder activity to a per-coder log so the desktop can show a live pane.
+        $log = function (string $s) use ($logFile) { if ($logFile !== '') @file_put_contents($logFile, $s, FILE_APPEND); };
+        $log("▸ " . ($st['title'] ?? 'subtask') . "\n" . ($host !== '' ? "host: $host\n" : '') . "model: " . ($model ?: '(base)') . "\n\n");
         try {
             $agent = new Agent();
             if ($host !== '') $agent->setHost($host);
@@ -292,17 +299,25 @@ class Crew {
                 echo "\033[2m·\033[0m"; @flush();   // heartbeat
                 $turn = $agent->chatTurn($messages);
                 $calls = $turn['calls'] ?? [];
-                if ($dbg) fwrite(STDERR, "    [coder iter $i] calls=" . count($calls) . " content=" . substr(preg_replace('/\s+/', ' ', (string)($turn['content'] ?? '')), 0, 120) . "\n");
+                $think = trim(preg_replace('/\s+/', ' ', $agent->stripToolMarkup((string)($turn['content'] ?? ''))));
+                if ($dbg) fwrite(STDERR, "    [coder iter $i] calls=" . count($calls) . " content=" . substr($think, 0, 120) . "\n");
+                if ($think !== '') $log("· " . substr($think, 0, 300) . "\n");
                 $messages[] = ['role' => 'assistant', 'content' => (string)($turn['content'] ?? '')];
                 if (empty($calls)) break;
                 foreach ($agent->executeCalls($calls) as $rr) {
-                    if ($dbg) fwrite(STDERR, "      -> " . ($rr['name'] ?? '?') . ": " . substr(preg_replace('/\s+/', ' ', (string)($rr['content'] ?? '')), 0, 80) . "\n");
-                    $messages[] = ['role' => 'tool', 'content' => (string)($rr['content'] ?? ''), 'tool_name' => $rr['name'] ?? 'tool'];
+                    $name = $rr['name'] ?? '?';
+                    $args = isset($rr['arguments']) && is_array($rr['arguments']) ? implode(' ', array_map(fn($v) => is_scalar($v) ? substr((string)$v, 0, 40) : '', $rr['arguments'])) : '';
+                    $snippet = substr(preg_replace('/\s+/', ' ', (string)($rr['content'] ?? '')), 0, 100);
+                    if ($dbg) fwrite(STDERR, "      -> $name: " . substr($snippet, 0, 80) . "\n");
+                    $log("  → $name " . trim($args) . ($snippet !== '' ? "  ⇒ $snippet" : '') . "\n");
+                    $messages[] = ['role' => 'tool', 'content' => (string)($rr['content'] ?? ''), 'tool_name' => $name];
                 }
             }
             echo "\n";
+            $log("\n✓ done\n");
         } catch (\Throwable $e) {
             echo "  \033[31mcoder error: " . $e->getMessage() . "\033[0m\n";
+            $log("\n✗ error: " . $e->getMessage() . "\n");
         } finally {
             Permission::setMode($oldMode); Permission::setInteractive($oldInt);
             @chdir($prevCwd);
