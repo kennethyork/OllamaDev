@@ -347,17 +347,14 @@ var App = {
             if (e.key === 'Enter') self.submitFolder();
             else if (e.key === 'Escape') self.closeFolder();
         });
-        // Crew setup wizard
+        // Crew — single screen: type the task, Run. (Advanced section is optional.)
         var fb = $('#crewBtn'); if (fb) fb.onclick = function () { self.openCrew(); };
         var fc = $('#crewCancel'); if (fc) fc.onclick = function () { self.closeCrew(); };
-        var wn = $('#wizNext'); if (wn) wn.onclick = function () { self.wizNext(); };
-        var wbk = $('#wizBack'); if (wbk) wbk.onclick = function () { self.wizBack(); };
-        var fr = $('#crewRun'); if (fr) fr.onclick = function () { self.runCrewFromWizard(); };
+        var fr = $('#crewRun'); if (fr) fr.onclick = function () { self.submitCrew(); };
         var ov = $('#modalOverlay'); if (ov) ov.onclick = function (e) { if (e.target === ov) self.closeCrew(); };
-        var cfo = $('#crewFolder'); if (cfo) cfo.addEventListener('keydown', function (e) { if (e.key === 'Enter') self.wizNext(); else if (e.key === 'Escape') self.closeCrew(); });
         var ft = $('#crewTask'); if (ft) ft.addEventListener('keydown', function (e) {
             if (e.key === 'Escape') self.closeCrew();
-            else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') self.wizNext();
+            else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') self.submitCrew();
         });
         // Activity rail: switch the sidebar between Files and Tasks.
         document.querySelectorAll('.rail-btn').forEach(function (b) {
@@ -531,8 +528,10 @@ var App = {
             sel.innerHTML = opts.map(function (m) { return '<option' + (m === pick ? ' selected' : '') + '>' + esc(m) + '</option>'; }).join('');
         });
         this.renderTemplates();
+        var pl = $('#crewProjLine'); if (pl) pl.textContent = 'Runs in: ' + (this.cwd || '.') + ' · default team: Director + Researcher + 2 Coders + Auditor · review on';
+        var adv = document.querySelector('.crew-adv'); if (adv) adv.open = false;
         o.hidden = false;
-        this.wizGo(1);
+        var t = $('#crewTask'); if (t) { t.focus(); }
     },
     closeCrew: function () { var o = $('#modalOverlay'); if (o) o.hidden = true; },
     renderTemplates: function () {
@@ -552,73 +551,36 @@ var App = {
             };
         });
     },
-    // ---- wizard navigation ----
-    wizGo: function (step) {
-        this.wizStep = step;
-        document.querySelectorAll('.wiz-step').forEach(function (s) { s.hidden = (+s.dataset.step !== step); });
-        document.querySelectorAll('.wiz-dot').forEach(function (d) {
-            var s = +d.dataset.s; d.classList.toggle('active', s === step); d.classList.toggle('done', s < step);
-        });
-        $('#wizBack').hidden = step === 1;
-        $('#wizNext').hidden = step === 4;
-        $('#crewRun').hidden = step !== 4;
-        if (step === 4) this.buildSummary();
-        // focus the step's primary input
-        var f = step === 1 ? '#crewFolder' : step === 2 ? '#crewTask' : null;
-        if (f && $(f)) setTimeout(function () { $(f).focus(); }, 0);
-    },
-    wizBack: function () { if (this.wizStep > 1) this.wizGo(this.wizStep - 1); },
-    wizNext: function () {
-        var self = this;
-        if (this.wizStep === 1) {
-            var path = ($('#crewFolder').value || '').trim();
-            if (!path) { $('#crewFolder').focus(); banner('enter a project folder', 'err'); return; }
-            // Validate + set as the workspace folder, then advance.
-            Promise.resolve(window.setRoot ? window.setRoot(path) : { root: path }).then(function (r) {
-                if (!r || r.error) { banner('not a folder: ' + path, 'err'); $('#crewFolder').focus(); return; }
-                self.cwd = r.root; try { localStorage.setItem('ade.folder', r.root); } catch (e) {}
-                self.loadFiles(r.root);
-                self.wizGo(2);
-            }).catch(function (e) { banner('folder error: ' + e, 'err'); });
-            return;
-        }
-        if (this.wizStep === 2) {
-            if (!($('#crewTask').value || '').trim()) { $('#crewTask').focus(); banner('describe the task', 'err'); return; }
-            this.wizGo(3); return;
-        }
-        if (this.wizStep === 3) { this.wizGo(4); return; }
-    },
-    buildSummary: function () {
-        var box = $('#crewSummary'); if (!box) return;
-        var review = $('#crewReview') ? $('#crewReview').checked : true;
-        var researcher = $('#crewResearcher') ? $('#crewResearcher').checked : true;
-        var auditor = $('#crewAuditor') ? $('#crewAuditor').checked : true;
-        var self = this;
-        var team = ['🧭 Director <span class="dim">' + esc(this.mval('crewModelDirector')) + '</span>'];
-        if (researcher) team.push('🔎 Researcher <span class="dim">' + esc(this.mval('crewModelResearcher')) + '</span>');
-        team.push('👷 ' + ($('#crewMax').value || '2') + '× Coder <span class="dim">' + esc(this.mval('crewModelCoder')) + '</span>');
-        if (auditor) team.push('🔍 Auditor <span class="dim">' + esc(this.mval('crewModelAuditor')) + '</span>');
-        box.innerHTML =
-            '<div><b>Folder</b> <span class="val">' + esc(this.cwd || '.') + '</span></div>' +
-            '<div><b>Task</b> <span class="val">' + esc(($('#crewTask').value || '').trim()) + '</span></div>' +
-            '<div><b>Team</b><div class="val" style="margin-top:4px">' + team.map(function (t) { return '· ' + t; }).join('<br>') + '</div></div>' +
-            '<div><b>Landing</b> <span class="' + (review ? 'val' : 'warnv') + '">' + (review ? 'review every branch (safe)' : (auditor ? 'auto-merge audit-clean' : 'review (no auditor)')) + '</span></div>';
-    },
     mval: function (id) { var s = $('#' + id); return (s && s.value) || $('#modelSelect').value || 'llama3.2:latest'; },
-    runCrewFromWizard: function () {
-        var task = ($('#crewTask').value || '').trim(); if (!task) { this.wizGo(2); return; }
-        var opts = {
-            max: $('#crewMax').value || '2',
-            review: $('#crewReview') ? $('#crewReview').checked : true,
-            researcher: $('#crewResearcher') ? $('#crewResearcher').checked : true,
-            auditor: $('#crewAuditor') ? $('#crewAuditor').checked : true,
-            directorModel: this.mval('crewModelDirector'),
-            coderModel: this.mval('crewModelCoder'),
-            auditorModel: this.mval('crewModelAuditor'),
-            researcherModel: this.mval('crewModelResearcher')
+    // One screen: prompt the Director; the team handles the rest with smart
+    // defaults (advanced section overrides if the user opened it).
+    submitCrew: function () {
+        var self = this;
+        var task = ($('#crewTask').value || '').trim();
+        if (!task) { $('#crewTask').focus(); banner('tell the Director what to build', 'err'); return; }
+        var go = function () {
+            var opts = {
+                max: $('#crewMax').value || '2',
+                review: $('#crewReview') ? $('#crewReview').checked : true,
+                researcher: $('#crewResearcher') ? $('#crewResearcher').checked : true,
+                auditor: $('#crewAuditor') ? $('#crewAuditor').checked : true,
+                directorModel: self.mval('crewModelDirector'),
+                coderModel: self.mval('crewModelCoder'),
+                auditorModel: self.mval('crewModelAuditor'),
+                researcherModel: self.mval('crewModelResearcher')
+            };
+            self.closeCrew();
+            self.runCrew(task, opts);
         };
-        this.closeCrew();
-        this.runCrew(task, opts);
+        // If the user set a different folder in Advanced, switch to it first.
+        var folder = ($('#crewFolder') && $('#crewFolder').value || '').trim();
+        if (folder && folder !== this.cwd) {
+            Promise.resolve(window.setRoot ? window.setRoot(folder) : { root: folder }).then(function (r) {
+                if (!r || r.error) { banner('not a folder: ' + folder, 'err'); var a = document.querySelector('.crew-adv'); if (a) a.open = true; $('#crewFolder').focus(); return; }
+                self.cwd = r.root; try { localStorage.setItem('ade.folder', r.root); } catch (e) {}
+                self.loadFiles(r.root); go();
+            }).catch(function (e) { banner('folder error: ' + e, 'err'); });
+        } else { go(); }
     },
     // Launch `ollamadev crew "<task>"` in a fresh terminal and show it full-screen.
     runCrew: function (task, opts) {

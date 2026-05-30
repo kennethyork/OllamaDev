@@ -232,7 +232,13 @@ body {
 .wiz-summary b { color: var(--dim); font-weight: 600; display: inline-block; min-width: 84px; }
 .wiz-summary .val { color: var(--fg); }
 .wiz-summary .warnv { color: var(--warn); }
-.wiz-templates { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.crew-adv { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 10px; }
+.crew-adv > summary { cursor: pointer; font-size: 12px; font-weight: 700; color: var(--dim); list-style: none; user-select: none; }
+.crew-adv > summary::-webkit-details-marker { display: none; }
+.crew-adv > summary::before { content: '▸ '; color: var(--faint); }
+.crew-adv[open] > summary::before { content: '▾ '; }
+.crew-adv > summary:hover { color: var(--fg); }
+.wiz-templates { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 12px; }
 .wiz-tpl { font-size: 12px; padding: 6px 11px; border-radius: 20px; border: 1px solid var(--border); background: var(--bg3); color: var(--dim); cursor: pointer; transition: all .12s; }
 .wiz-tpl:hover { color: var(--fg); border-color: var(--faint); }
 .wiz-tpl.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }

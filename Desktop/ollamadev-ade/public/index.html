@@ -80,31 +80,19 @@
     </div>
 
     <div id="modalOverlay" class="modal-overlay" hidden>
-        <div class="modal wizard">
-            <div class="modal-title">👥 OllamaDev Crew — setup</div>
-            <div class="wiz-steps">
-                <span class="wiz-dot active" data-s="1">1 · Project</span>
-                <span class="wiz-dot" data-s="2">2 · Task</span>
-                <span class="wiz-dot" data-s="3">3 · Crew</span>
-                <span class="wiz-dot" data-s="4">4 · Review</span>
-            </div>
+        <div class="modal">
+            <div class="modal-title">👥 OllamaDev Crew</div>
+            <div class="modal-sub dim">Just tell the Director what you want — the team (Researcher, Coders, Auditor) does the rest.</div>
 
-            <div class="wiz-step" data-step="1">
+            <div id="crewTemplates" class="wiz-templates"></div>
+            <textarea id="crewTask" placeholder="Tell the Director what to build… e.g. add input validation + tests to the signup form"></textarea>
+            <div id="crewProjLine" class="modal-hint dim"></div>
+
+            <details class="crew-adv">
+                <summary>Advanced — folder, team &amp; models</summary>
                 <label class="modal-label">Project folder</label>
                 <input id="crewFolder" placeholder="~/projects/my-app">
-                <div class="modal-hint dim">Crew runs in this git repo (needs at least one commit). Defaults to the folder you have open.</div>
-            </div>
-
-            <div class="wiz-step" data-step="2" hidden>
-                <label class="modal-label">Template</label>
-                <div id="crewTemplates" class="wiz-templates"></div>
-                <label class="modal-label">Task</label>
-                <textarea id="crewTask" placeholder="Describe the high-level task… e.g. add a /health route and a test for it"></textarea>
-                <div class="modal-hint dim">Pick a template to prefill, then edit. The Director splits this into independent subtasks.</div>
-            </div>
-
-            <div class="wiz-step" data-step="3" hidden>
-                <label class="modal-label">Team &mdash; pick a model per role</label>
+                <label class="modal-label">Team — pick a model per role</label>
                 <div class="roster">
                     <div class="rmate locked" title="The Director always plans the work — it can't be turned off">
                         <span class="rico">🧭</span><span class="rname">Director</span><select id="crewModelDirector" class="rmodel"></select>
@@ -117,19 +105,12 @@
                     <label class="rmate"><input type="checkbox" id="crewAuditor" checked><span class="rico">🔍</span><span class="rname">Auditor</span><select id="crewModelAuditor" class="rmodel"></select></label>
                 </div>
                 <label class="modal-check"><input type="checkbox" id="crewReview" checked> 🧑 You — review before merge (hold every branch; nothing auto-merges)</label>
-            </div>
-
-            <div class="wiz-step" data-step="4" hidden>
-                <label class="modal-label">Review &amp; launch</label>
-                <div id="crewSummary" class="wiz-summary"></div>
-            </div>
+            </details>
 
             <div class="modal-actions">
                 <button id="crewCancel">Cancel</button>
                 <div class="spacer"></div>
-                <button id="wizBack" hidden>← Back</button>
-                <button id="wizNext" class="primary">Next →</button>
-                <button id="crewRun" class="primary" hidden>Run Crews</button>
+                <button id="crewRun" class="primary">Run Crews</button>
             </div>
         </div>
     </div>
