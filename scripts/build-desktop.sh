@@ -50,11 +50,14 @@ if [ -t 0 ] && [ -t 1 ] && [ ! -f "$marker" ] && ! command -v ollamadev >/dev/nu
     case "$ans" in
         y|Y|yes|YES)
             mkdir -p "$HOME/.local/bin"
-            if ln -sf "$here/bin/ollamadev" "$HOME/.local/bin/ollamadev" 2>/dev/null; then
-                echo "✓ linked ~/.local/bin/ollamadev — ensure ~/.local/bin is on your PATH."
-                echo "  (the link points into this folder; keep it in place or re-link if you move it)"
+            # Copy (not symlink): the CLI is one self-contained PHP file, so a copy
+            # keeps working even if this app folder is later moved or deleted.
+            if cp "$here/bin/ollamadev" "$HOME/.local/bin/ollamadev" 2>/dev/null; then
+                chmod +x "$HOME/.local/bin/ollamadev" 2>/dev/null
+                echo "✓ installed ~/.local/bin/ollamadev — ensure ~/.local/bin is on your PATH."
+                echo "  (a self-contained copy; survives moving or removing this app folder)"
             else
-                echo "✗ couldn't create the link; add ~/.local/bin manually if you want the command."
+                echo "✗ couldn't install it; add ~/.local/bin manually if you want the command."
             fi
             ;;
     esac
