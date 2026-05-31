@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.1.5 (2026-05-31)
+
+### Added
+- **Self-populating memory** — the graph knowledge base now fills itself: a crew run (and resume) distills durable project facts into notes, and an interactive session captures a few on exit if it changed files. Deduped against existing notes; disable with `--no-memory` or `memory.autoRemember:false`.
+
 ## v4.1.4 (2026-05-31)
 
 ### Added
