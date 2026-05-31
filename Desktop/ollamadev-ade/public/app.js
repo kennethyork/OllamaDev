@@ -856,8 +856,9 @@ var App = {
     // defaults (advanced section overrides if the user opened it).
     submitCrew: function () {
         var self = this;
+        // Task is optional: leave it blank to launch the crew with the Director
+        // waiting, then prompt it live in the crew terminal.
         var task = ($('#crewTask').value || '').trim();
-        if (!task) { $('#crewTask').focus(); banner('tell the Director what to build', 'err'); return; }
         var go = function () {
             var opts = {
                 max: $('#crewMax').value || '2',
@@ -890,10 +891,13 @@ var App = {
         if (this.terminals.length >= this.MAX_TERMINALS) { banner('close a terminal first (max ' + this.MAX_TERMINALS + ')', 'err'); return; }
         var base = opts.coderModel || opts.model || $('#modelSelect').value || 'llama3.2:latest';
         var cli = this.cli || 'ollamadev';
-        var q = "'" + String(task).replace(/'/g, "'\\''") + "'"; // shell single-quote
+        var interactive = !String(task || '').trim();
+        // With a task: run it. Without: launch interactive — the Director waits for
+        // your prompt in this terminal.
+        var q = interactive ? '' : " '" + String(task).replace(/'/g, "'\\''") + "'";
         var rmf = function (flag, m) { return m ? ' ' + flag + " '" + String(m).replace(/'/g, "'\\''") + "'" : ''; };
         // Run in the opened project folder, not the ADE's own directory.
-        var cmd = this.cdPrefix() + cli + ' crew ' + q + ' --max ' + (parseInt(opts.max, 10) || 2) + ' -m ' + base +
+        var cmd = this.cdPrefix() + cli + ' crew' + q + ' --max ' + (parseInt(opts.max, 10) || 2) + ' -m ' + base +
             (opts.review !== false ? ' --review' : '') +
             (opts.researcher === false ? ' --no-research' : '') +
             (opts.auditor === false ? ' --no-audit' : '') +
@@ -908,9 +912,11 @@ var App = {
         Promise.resolve(window.termCreate(id, model)).then(function () {
             self.terminals.push(t); self.render();
             setTimeout(function () { try { window.termWrite(id, strToB64(cmd + '\n')); } catch (e) {} }, 400);
-            self.setView('board');        // show the kanban so the Director's plan appears
+            // Interactive: stay on the terminal so you can prompt the Director.
+            // With a task: jump to the board so the plan appears as it's made.
+            self.setView(interactive ? 'code' : 'board');
             self.startCrewPoll();
-            banner('crew running…', 'ok');
+            banner(interactive ? 'crew ready — prompt the Director in the terminal' : 'crew running…', 'ok');
         }).catch(function (e) { banner('crew launch failed: ' + e, 'err'); });
     },
     // Poll the live crew board so the kanban reflects the Director's plan + progress.

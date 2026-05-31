@@ -493,6 +493,8 @@ ok('crew-watch subcommand dispatches', strpos($src, "\$cmd === 'crew-watch'") !=
 ok('Crew::watchPanes splits a tmux pane per coder', strpos($src, 'function watchPanes(') !== false && strpos($src, 'tmux split-window') !== false);
 ok('--panes degrades gracefully without tmux', strpos($src, '--panes needs tmux') !== false);
 ok('--panes uses tail -f on coder logs', strpos($src, "'tail -n +1 -f '") !== false);
+ok('crew supports interactive mode (no task → Director prompt)', strpos($src, 'Director ▸') !== false && strpos($src, 'posix_isatty(STDIN)') !== false);
+ok('interactive crew loops Crew::run per prompt', strpos($src, "in_array(strtolower(\$line), ['exit', 'quit', 'q', ':q']") !== false);
 ok('skill tool is read-only', strpos($src, "'summarize', 'skill'") !== false);
 
 echo "\n== Crew team skills ==\n";

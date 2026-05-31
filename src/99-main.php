@@ -1136,6 +1136,33 @@ if ($cmd === 'chat') {
     if (!empty($flags['hosts'])) $copts['hosts'] = array_values(array_filter(array_map('trim', explode(',', $flags['hosts']))));
     if (!empty($flags['runId'])) $copts['runId'] = $flags['runId'];
 
+    // No task given: drop into an interactive crew — the team is configured and the
+    // Director simply waits for you to prompt it (and keeps prompting after each run).
+    if ($task === '') {
+        if (!posix_isatty(STDIN)) { echo "Usage: ollamadev crew \"<task>\" [options]   (or run with no task in a terminal to prompt the Director live)\n"; exit(1); }
+        $c = "\033[36m"; $d = "\033[2m"; $b = "\033[1m"; $r = "\033[0m";
+        $bits = [];
+        if (!empty($copts['focus'])) $bits[] = 'focus set';
+        if (($copts['land'] ?? '') === 'review') $bits[] = 'review mode';
+        if (($copts['research'] ?? true) === false) $bits[] = 'no research';
+        if (($copts['audit'] ?? true) === false) $bits[] = 'no audit';
+        if (!empty($copts['hosts'])) $bits[] = count($copts['hosts']) . ' hosts';
+        echo "\n{$b}👥 OllamaDev Crew{$r} {$d}— the Director is ready" . ($bits ? ' · ' . implode(' · ', $bits) : '') . "{$r}\n";
+        echo "{$d}Type a task for the Director. Blank line re-prompts; 'exit' or Ctrl-D to leave.{$r}\n";
+        while (true) {
+            echo "\n{$c}Director ▸{$r} ";
+            $line = fgets(STDIN);
+            if ($line === false) break;                       // Ctrl-D / EOF
+            $line = trim($line);
+            if ($line === '') continue;
+            if (in_array(strtolower($line), ['exit', 'quit', 'q', ':q'], true)) break;
+            unset($copts['runId']);                            // fresh run id per task
+            Crew::run($line, $copts);
+        }
+        echo "\n{$d}Crew session ended.{$r}\n";
+        exit(0);
+    }
+
     // --panes: show one live tmux pane per coder (each tailing its log), with the
     // main crew output in pane 0. Needs tmux; otherwise runs normally (logs still written).
     if (!empty($flags['panes'])) {
