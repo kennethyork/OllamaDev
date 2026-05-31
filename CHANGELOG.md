@@ -1,5 +1,22 @@
 # Changelog
 
+## v4.1.0 (2026-05-31)
+
+### Added
+- **Standalone binaries + downloads** — true PHP-free CLI binaries (Linux/macOS/Windows, x64/arm64) built with phpacker; `install.sh` one-liner; an OS-detecting Downloads page; a `release.yml` workflow that builds and attaches everything on a version tag.
+- **Desktop app archive** — per-OS download-and-run archive (app + Boson runtime libs + bundled CLI + launcher). The launcher offers, on first run, to also add `ollamadev` to your PATH.
+- **Crew `--amplify N`** — trade free local compute for quality: N-sample plan self-consistency + an N-reviewer adversarial audit panel (strict majority).
+- **Air-gapped mode + attestation** — `--offline` / `OLLAMADEV_OFFLINE` hard-blocks every network tool (unwaivable); `ollamadev attest` prints a fingerprinted proof of the air-gap posture.
+- **Watch (background agent)** — `ollamadev watch "<task>"` re-runs a task whenever files change.
+- **Skill registry + crew packs** — `skills browse/search/add` over configurable registries; `crew pack save/list` and `crew --pack <name>` to reuse and share tuned teams.
+
+### Changed
+- Provider-aware startup onboarding for Ollama/LM Studio; environment variables now correctly override a config file.
+- Removed all PHP 8.4 compile-time deprecations so the standalone binary runs clean.
+
+### Fixed
+- Desktop `composer build` referenced a nonexistent `boson compile`; it now packages a portable app archive instead.
+
 ## v3.9.2 (2026-05-03)
 
 ### Added
