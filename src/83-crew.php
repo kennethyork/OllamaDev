@@ -251,7 +251,7 @@ class Crew {
         $ctx = $research !== '' ? "\n\nResearcher findings:\n" . substr($research, 0, 6000) : '';
         $fc = $focus !== '' ? "\n\nDomain/stack focus: $focus" : '';
         $user = ['role' => 'user', 'content' => "Task:\n$task" . $fc . $ctx];
-        $j = (new OllamaClient())->chatJson($model !== "" ? $model : $agent->getModel(), [$sys, $user]);
+        $j = ModelClient::default()->chatJson($model !== "" ? $model : $agent->getModel(), [$sys, $user]);
         $subs = is_array($j) && isset($j['subtasks']) && is_array($j['subtasks']) ? $j['subtasks'] : [];
         $clean = [];
         foreach ($subs as $s) {
@@ -337,7 +337,7 @@ class Crew {
             "the goal, introduces a language/framework the project doesn't use, or includes scaffolding that wasn't " .
             "requested. Minor style nits do not block."];
         $user = ['role' => 'user', 'content' => ($goal !== '' ? "Overall goal: $goal\n" : '') . "Subtask: $title\n\nDiff:\n$diff"];
-        $j = (new OllamaClient())->chatJson($model !== "" ? $model : $agent->getModel(), [$sys, $user]);
+        $j = ModelClient::default()->chatJson($model !== "" ? $model : $agent->getModel(), [$sys, $user]);
         if (!is_array($j)) return ['clean' => false, 'summary' => 'audit unavailable (could not parse review)', 'issues' => []];
         return [
             'clean' => (bool)($j['clean'] ?? false),

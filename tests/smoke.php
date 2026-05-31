@@ -495,6 +495,20 @@ ok('--panes degrades gracefully without tmux', strpos($src, '--panes needs tmux'
 ok('--panes uses tail -f on coder logs', strpos($src, "'tail -n +1 -f '") !== false);
 ok('crew supports interactive mode (no task → Director prompt)', strpos($src, 'Director ▸') !== false && strpos($src, 'posix_isatty(STDIN)') !== false);
 ok('interactive crew loops Crew::run per prompt', strpos($src, "in_array(strtolower(\$line), ['exit', 'quit', 'q', ':q']") !== false);
+
+echo "\n== LM Studio provider ==\n";
+if (preg_match('/class ModelClient \{.*?\n\}/s', $src, $mc)) {
+    eval($mc[0]);
+    ok('ModelClient detects LM Studio /v1 + :1234 hosts', ModelClient::isOpenAiStyle('http://localhost:1234/v1') === true && ModelClient::isOpenAiStyle('http://x:1234') === true);
+    ok('ModelClient treats a plain host as Ollama', ModelClient::isOpenAiStyle('http://localhost:11434') === false);
+} else { ok('ModelClient extractable', false); }
+ok('LMStudioClient speaks OpenAI /v1', strpos($src, 'class LMStudioClient') !== false && strpos($src, '/chat/completions') !== false && strpos($src, "response_format") !== false);
+ok('LMStudioClient mirrors the client surface', preg_match('/class LMStudioClient \{.*?\n\}/s', $src, $lm) === 1
+    && strpos($lm[0], 'function chatWithTools(') !== false && strpos($lm[0], 'function chatJson(') !== false
+    && strpos($lm[0], 'function chatWithModel(') !== false && strpos($lm[0], 'function listModels(') !== false);
+ok('Agent + Crew use the ModelClient factory', strpos($src, 'ModelClient::default()') !== false && strpos($src, 'ModelClient::for(') !== false);
+ok('--lmstudio / --host flags set the override', strpos($src, "\$a === '--lmstudio'") !== false && strpos($src, "\$a === '--host'") !== false && strpos($src, 'ModelClient::$override') !== false);
+ok('config has provider + lmstudio.host defaults', strpos($src, "'provider' =>") !== false && strpos($src, "'lmstudio' => ['host'") !== false);
 ok('skill tool is read-only', strpos($src, "'summarize', 'skill'") !== false);
 
 echo "\n== Crew team skills ==\n";

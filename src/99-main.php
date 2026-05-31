@@ -413,6 +413,8 @@ for ($i = 1; $i < $argc; $i++) {
     elseif ($a === '--researcher-model') { $flags['researcherModel'] = $argv[++$i] ?? null; }
     elseif ($a === '--focus') { $flags['focus'] = $argv[++$i] ?? null; }
     elseif ($a === '--hosts') { $flags['hosts'] = $argv[++$i] ?? null; }
+    elseif ($a === '--lmstudio') { $flags['lmstudio'] = true; }
+    elseif ($a === '--host') { $flags['host'] = $argv[++$i] ?? null; }
     elseif ($a === '--panes') { $flags['panes'] = true; }
     elseif ($a === '--run-id') { $flags['runId'] = $argv[++$i] ?? null; }
     elseif ($a === '-s' || $a === '--session') { $flags['session'] = $argv[++$i] ?? null; }
@@ -435,6 +437,11 @@ for ($i = 1; $i < $argc; $i++) {
 // Apply env overrides
 if (empty($flags['model']) && getenv('OLLAMA_MODEL')) $flags['model'] = getenv('OLLAMA_MODEL');
 if (empty($flags['model']) && getenv('MODEL')) $flags['model'] = getenv('MODEL');
+
+// Provider override for this run: --host <url> (auto-detects backend) or --lmstudio
+// (LM Studio's local OpenAI-compatible server). Both stay 100% local.
+if (!empty($flags['host'])) ModelClient::$override = $flags['host'];
+elseif (!empty($flags['lmstudio'])) ModelClient::$override = Config::get('lmstudio.host', 'http://localhost:1234/v1');
 
 // Completion Command
 if ($argc >= 2 && $argv[1] === 'completion') {
@@ -628,7 +635,7 @@ if ($argc >= 2 && $argv[1] === 'pull') {
 // Models Command
 if ($argc >= 2 && $argv[1] === 'models') {
     $config = Config::load();
-    $client = new OllamaClient($config['ollama']['host'] ?? 'http://localhost:11434');
+    $client = ModelClient::default(); // honors --lmstudio / --host / configured provider
     // Machine-readable status - single source for the desktop app.
     if (in_array('--json', $argv, true)) {
         $connected = $client->checkConnection();

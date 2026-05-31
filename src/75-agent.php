@@ -1,11 +1,11 @@
 class Agent {
-    private OllamaClient $client;
+    private $client; // OllamaClient or LMStudioClient (see ModelClient factory)
     private string $model;
     private array $systemPrompt;
     private bool $chatMode = false; // when true: pure conversation, no tools
 
     public function __construct() {
-        $this->client = new OllamaClient();
+        $this->client = ModelClient::default();
         $models = $this->client->listModels();
         $default = Config::get('ollama.defaultModel', '');
         // Prefer the configured/-m model if it's actually installed; otherwise
@@ -81,7 +81,7 @@ User: run the tests
 
     // Point this agent at a specific Ollama host (used by the Crew to spread coders
     // across multiple machines/GPUs for real parallel inference).
-    public function setHost(string $host): void { if (trim($host) !== '') $this->client = new OllamaClient(trim($host)); }
+    public function setHost(string $host): void { if (trim($host) !== '') $this->client = ModelClient::for(trim($host)); }
 
     // Resolve a user-typed model name to an actually-installed model. Matches
     // exactly, then "name:latest", then a unique prefix (so "/model qwen2.5-coder"
