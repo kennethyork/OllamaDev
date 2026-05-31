@@ -476,6 +476,12 @@ if (preg_match('/class Watcher \{.*?\n\}/s', $src, $wm)) {
 } else { ok('Watcher class extractable', false); }
 ok('watch command + flags wired', strpos($src, "cmd === 'watch'") !== false && strpos($src, "Watcher::run(") !== false);
 
+echo "\n== Per-repo session resume ==\n";
+ok('session save records cwd', strpos($src, "'cwd' => \$this->cwd") !== false);
+ok('Session::latestForCwd exists', strpos($src, 'function latestForCwd(') !== false);
+ok('bare run resumes this repo (autoResume)', strpos($src, 'Session::latestForCwd($config, getcwd()') !== false && strpos($src, "Config::get('session.autoResume'") !== false);
+ok('--new forces a fresh session', strpos($src, "\$flags['new']") !== false);
+
 echo "\n== Terminal multiplexer ==\n";
 if (preg_match('/class TerminalManager.*?\n\}/s', $src, $tmm)) {
     if (!class_exists('TerminalManager')) eval($tmm[0]);

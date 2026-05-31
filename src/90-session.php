@@ -3,6 +3,7 @@ class Session {
     private string $id;
     private string $title;
     private string $model;
+    private string $cwd = '';     // working dir this session belongs to (for per-repo resume)
     private array $messages = [];
     private array $history = []; // in-session input history for the line editor
     private Agent $agent;
@@ -15,7 +16,7 @@ class Session {
         Permission::setMode(Config::get('permissions.mode', 'ask'));
         $this->agent = new Agent();
         if ($sessionId) { $this->load($sessionId); }
-        else { $this->id = 'session_' . time() . '_' . substr(md5(mt_rand()), 0, 8); $this->title = "Session " . date('Y-m-d H:i'); $this->model = $this->agent->getModel(); }
+        else { $this->id = 'session_' . time() . '_' . substr(md5(mt_rand()), 0, 8); $this->title = "Session " . date('Y-m-d H:i'); $this->model = $this->agent->getModel(); $this->cwd = getcwd() ?: ''; }
         // Keep the agent and session pointed at the same model.
         $this->agent->setModel($this->model);
         $GLOBALS['currentSessionModel'] = $this->model;
@@ -36,13 +37,14 @@ class Session {
         $this->id = $data['id'] ?? $sessionId;
         $this->title = $data['title'] ?? '';
         $this->model = $data['model'] ?? 'llama3.2:latest';
+        $this->cwd = $data['cwd'] ?? '';
         $this->messages = $data['messages'] ?? [];
         return true;
     }
 
     public function save(): void {
         $path = Config::sessionsDir() . '/' . $this->id . '.json';
-        file_put_contents($path, json_encode(['id' => $this->id, 'title' => $this->title, 'model' => $this->model, 'messages' => $this->messages, 'created_at' => date('c'), 'updated_at' => date('c')], JSON_PRETTY_PRINT));
+        file_put_contents($path, json_encode(['id' => $this->id, 'title' => $this->title, 'model' => $this->model, 'cwd' => $this->cwd, 'messages' => $this->messages, 'created_at' => date('c'), 'updated_at' => date('c')], JSON_PRETTY_PRINT));
     }
 
     // $extra carries structured fields that must survive into the wire format
@@ -78,6 +80,7 @@ class Session {
                     'id' => basename($file, '.json'),
                     'title' => $data['title'] ?? 'Untitled',
                     'model' => $data['model'] ?? 'unknown',
+                    'cwd' => $data['cwd'] ?? '',
                     'created_at' => $data['created_at'] ?? '',
                     'updated_at' => $data['updated_at'] ?? '',
                     'count' => count($msgs),
@@ -87,6 +90,19 @@ class Session {
         }
         usort($sessions, fn($a, $b) => strcmp($b['updated_at'] ?? '', $a['updated_at'] ?? ''));
         return $sessions;
+    }
+
+    // Most-recent session id that belongs to $cwd (per-repo resume), or null.
+    // Only considers sessions with at least one message, so opening in a repo
+    // resumes real work rather than an empty just-created session.
+    public static function latestForCwd(array $config, string $cwd): ?string {
+        $target = realpath($cwd) ?: $cwd;
+        foreach (self::listAll($config) as $s) {           // already sorted newest-first
+            $scwd = (string)($s['cwd'] ?? '');
+            if ($scwd === '' || ($s['count'] ?? 0) < 1) continue;
+            if ((realpath($scwd) ?: $scwd) === $target) return $s['id'];
+        }
+        return null;
     }
 
     // Interactive "resume a previous session" picker. Lists recent sessions with

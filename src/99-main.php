@@ -421,6 +421,7 @@ for ($i = 1; $i < $argc; $i++) {
     elseif ($a === '--offline' || $a === '--air-gapped') { $flags['offline'] = true; }
     elseif ($a === '--interval') { $flags['interval'] = (int)($argv[++$i] ?? 2); }
     elseif ($a === '--once') { $flags['once'] = true; }
+    elseif ($a === '--new') { $flags['new'] = true; }
     elseif ($a === '--pack') { $flags['pack'] = $argv[++$i] ?? null; }
     elseif ($a === '--lmstudio') { $flags['lmstudio'] = true; }
     elseif ($a === '--host') { $flags['host'] = $argv[++$i] ?? null; }
@@ -1708,7 +1709,16 @@ if ($cmd === 'chat') {
         fclose($conn);
     }
 } elseif (empty($cmd)) {
-    (new Session($config))->start();
+    // Per-repo resume: bare `ollamadev` continues this directory's last session
+    // (so reopening in a project — CLI or desktop — picks up where you left off).
+    // `ollamadev --new` or `ollamadev new` forces a fresh session; disable globally
+    // with session.autoResume:false in config.
+    $resumeId = null;
+    if (empty($flags['new']) && Config::get('session.autoResume', true)) {
+        $resumeId = Session::latestForCwd($config, getcwd() ?: '.');
+    }
+    if ($resumeId) (new Session($config, $resumeId))->start();
+    else (new Session($config))->start();
 } else {
     echo "Unknown command: $cmd\n";
     echo "Run 'ollamadev help <topic>' for available topics.\n";
