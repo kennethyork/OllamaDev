@@ -423,6 +423,7 @@ for ($i = 1; $i < $argc; $i++) {
     elseif ($a === '--once') { $flags['once'] = true; }
     elseif ($a === '--new') { $flags['new'] = true; }
     elseif ($a === '--pack') { $flags['pack'] = $argv[++$i] ?? null; }
+    elseif ($a === '--num-ctx') { $flags['numCtx'] = (int)($argv[++$i] ?? 0); }
     elseif ($a === '--lmstudio') { $flags['lmstudio'] = true; }
     elseif ($a === '--host') { $flags['host'] = $argv[++$i] ?? null; }
     elseif ($a === '--panes') { $flags['panes'] = true; }
@@ -458,9 +459,22 @@ elseif (!empty($flags['lmstudio'])) ModelClient::$override = Config::get('lmstud
 $offlineMode = !empty($flags['offline']) || getenv('OLLAMADEV_OFFLINE') || Config::get('offline', false);
 if ($offlineMode) Permission::setOffline(true);
 
+// --num-ctx N: pin the context window to exactly N for this run (overrides auto).
+if (!empty($flags['numCtx']) && $flags['numCtx'] > 0) {
+    Config::set('ollama.contextWindow', (int)$flags['numCtx']);
+    Config::set('ollama.maxContextWindow', max((int)$flags['numCtx'], (int)Config::get('ollama.maxContextWindow', 32768)));
+    Config::set('ollama.autoContext', false);
+}
+
 // Attestation Command — audit + prove the air-gap posture.
 if ($argc >= 2 && $argv[1] === 'attest') {
     echo Attest::render(in_array('--json', $argv, true));
+    exit(0);
+}
+
+// Context Tuner — probe hardware + model, recommend a safe num_ctx.
+if ($argc >= 2 && $argv[1] === 'context') {
+    echo ContextTuner::report();
     exit(0);
 }
 

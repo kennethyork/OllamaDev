@@ -515,6 +515,18 @@ if (preg_match('/class TerminalManager.*?\n\}/s', $src, $tmm)) {
     @exec('rm -rf ' . escapeshellarg($thome));
 } else { ok('TerminalManager extractable', false); }
 
+echo "\n== Context tuning + smarter compaction ==\n";
+if (preg_match('/class ContextTuner \{.*?\n\}/s', $src, $ctm)) {
+    if (!class_exists('OllamaClient')) { if (preg_match('/class OllamaClient \{.*?\n\}/s', $src, $oc2)) eval($oc2[0]); }
+    if (!class_exists('ContextTuner')) eval($ctm[0]);
+    ok('ContextTuner reads system RAM', ContextTuner::ramBytes() > 0);
+    $p = ContextTuner::probe();
+    ok('ContextTuner::probe returns a suggestion', is_array($p) && ($p['suggested'] ?? 0) >= 4096 && ($p['suggested'] % 4096) === 0);
+} else { ok('ContextTuner extractable', false); }
+ok('context command + --num-ctx wired', strpos($src, "=== 'context'") !== false && strpos($src, "\$flags['numCtx']") !== false && strpos($src, "Config::set('ollama.autoContext', false)") !== false);
+ok('compaction preserves referenced tool output', strpos($src, 'still in use') !== false && strpos($src, '$preserved[$ref]') !== false);
+ok('compaction keeps recent window after preserving', strpos($src, 'Preserved tool output the recent steps still reference') !== false);
+
 // Vanilla guard — enforces the no-frameworks/no-deps rule on OLLAMADEV'S OWN code
 // only (CLI src/, the website site/, the desktop front-end public/). It does NOT
 // constrain other projects the agent works on — those can use any deps they need.

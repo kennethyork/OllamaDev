@@ -889,9 +889,29 @@ $GLOBALS['currentSessionModel'] = null;
         if (!$force && count($this->messages) < $threshold) return;
 
         $toSummarize = array_slice($this->messages, 0, -$keepLast);
+        $keep = array_slice($this->messages, -$keepLast);
         if (count($toSummarize) < 2) return;
 
         echo "\n\033[2m📝 compacting " . count($toSummarize) . " messages…\033[0m\n";
+
+        // Smarter compaction: don't summarize away tool output the recent turns
+        // still depend on. Collect file/path-like identifiers mentioned in the
+        // kept window, then preserve verbatim the LATEST tool result that touches
+        // each — so e.g. a `view foo.php` the next step edits survives compaction.
+        $refs = [];
+        foreach ($keep as $m) {
+            if (preg_match_all('#[A-Za-z0-9_][A-Za-z0-9_./-]*\.[A-Za-z0-9]{1,8}#', (string)($m['content'] ?? ''), $mm)) {
+                foreach ($mm[0] as $ref) $refs[$ref] = true;
+            }
+        }
+        $preserved = [];
+        foreach ($toSummarize as $msg) {
+            if (($msg['role'] ?? '') !== 'tool') continue;
+            $c = (string)($msg['content'] ?? '');
+            foreach (array_keys($refs) as $ref) {
+                if (strpos($c, $ref) !== false) $preserved[$ref] = ['t' => $msg['tool_name'] ?? 'tool', 'c' => substr($c, 0, 2000)];
+            }
+        }
 
         // Build a readable transcript and ask the model to summarize it. Fall
         // back to the old truncation join if the model is unavailable, so growth
@@ -913,13 +933,19 @@ $GLOBALS['currentSessionModel'] = null;
             }
         }
 
+        $kept = '';
+        foreach ($preserved as $ref => $p) $kept .= "\n[still in use — {$p['t']} output for $ref]\n{$p['c']}\n";
+        $content = "Summary of earlier conversation:\n" . $summary
+            . ($kept !== '' ? "\n\nPreserved tool output the recent steps still reference:\n" . $kept : '');
+
         $this->messages = array_merge(
-            [['id' => 'summary_' . time(), 'role' => 'system', 'content' => "Summary of earlier conversation:\n" . $summary, 'created_at' => date('c')]],
-            array_slice($this->messages, -$keepLast)
+            [['id' => 'summary_' . time(), 'role' => 'system', 'content' => $content, 'created_at' => date('c')]],
+            $keep
         );
         $this->save();
 
-        echo "\033[2m   compacted into a summary; keeping last $keepLast messages.\033[0m\n";
+        $extra = $preserved ? ' (kept ' . count($preserved) . ' referenced tool output' . (count($preserved) === 1 ? '' : 's') . ')' : '';
+        echo "\033[2m   compacted into a summary; keeping last $keepLast messages$extra.\033[0m\n";
     }
 
     public function runSingle(string $prompt): string {
