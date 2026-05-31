@@ -13,6 +13,6 @@
     },
     "scripts": {
         "start": "php -S localhost:8080 -t public",
-        "build": "php vendor/bin/boson compile"
+        "build": "bash ../../scripts/build-desktop.sh"
     }
 }

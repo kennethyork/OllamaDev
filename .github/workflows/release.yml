@@ -50,45 +50,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$TAG" dist/binaries/* --clobber
 
-  # ---- Desktop: Boson compiles a native app per OS. Runs on each platform
-  # because the WebView shell is platform-specific.
+  # ---- Desktop: Boson 0.19 is a runtime (FFI + shared libs), not a compiler, so
+  # there's no single-binary compile step. We package the app + its vendored Boson
+  # libs + the bundled CLI + a launcher into one archive per OS. The payload is
+  # portable (the right lib is picked at runtime), so one Linux runner builds all.
   desktop:
     needs: create-release
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { os: ubuntu-latest,  label: linux-x64 }
-          - { os: macos-latest,   label: mac-arm64 }
-          - { os: macos-13,       label: mac-x64 }
-          - { os: windows-latest, label: windows-x64 }
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
           tools: composer
-      - name: Build desktop app (Boson compile)
-        working-directory: Desktop/ollamadev-ade
-        run: |
-          composer install --no-interaction --no-progress
-          composer build
-      - name: Package + upload desktop app
-        shell: bash
-        working-directory: Desktop/ollamadev-ade
+      - name: Build desktop archives (CLI bundled)
+        run: scripts/build-desktop.sh
+      - name: Upload desktop archives
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          # boson compile drops a native executable under the project (commonly
-          # build/ or a dist/ dir). Grab the freshest non-vendor binary and give
-          # it a stable, download-friendly name.
-          art=$(find build dist . -maxdepth 2 -type f \
-                  \( -perm -u+x -o -name '*.exe' -o -name '*.app' -o -name '*.AppImage' \) \
-                  -not -path './vendor/*' -not -path './public/*' -newer composer.json 2>/dev/null \
-                | head -n1)
-          if [ -z "$art" ]; then echo "::error::no Boson build artifact found"; ls -R build dist 2>/dev/null; exit 1; fi
-          ext=""; case "$art" in *.exe) ext=".exe";; *.AppImage) ext=".AppImage";; esac
-          out="OllamaDev-ADE-${{ matrix.label }}${ext}"
-          cp "$art" "$out"
-          gh release upload "$TAG" "$out" --clobber
+        run: gh release upload "$TAG" dist/binaries/OllamaDev-ADE-* --clobber

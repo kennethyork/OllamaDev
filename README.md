@@ -134,10 +134,12 @@ ollamadev help
 ```bash
 cd Desktop/ollamadev-ade
 composer install
-
-composer start    # dev: serve at http://localhost:8080
-composer build    # compile a native desktop app (boson compile)
+php index.php        # launch the desktop window (needs PHP 8.4+)
 ```
+
+Or grab a prebuilt **desktop archive** for your OS from the [Downloads page](https://github.com/kennethyork/OllamaDev/releases/latest) — unzip and run `./OllamaDev-ADE` (Windows: `OllamaDev-ADE.bat`). The archive bundles the agent CLI and Boson's platform libraries; it only needs PHP 8.4+ for the window. Build the archives yourself with `scripts/build-desktop.sh` (or `composer build` from the app dir).
+
+> Note: Boson (`runtime ^0.19`) is a runtime, not a compiler — there's no single-file `boson compile`. The desktop ships as a portable app archive (app + Boson libs + bundled CLI + launcher), which is why it needs PHP 8.4+ to run, unlike the standalone CLI binary.
 
 ### VS Code extension
 

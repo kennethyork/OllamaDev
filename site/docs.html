@@ -81,11 +81,12 @@ make install
     <h3>Desktop app (ADE)</h3>
     <p><strong>OllamaDev ADE</strong> (Agentic Development Environment) is an optional desktop GUI in <code>Desktop/ollamadev-ade/</code> — a <a href="https://github.com/boson-php/boson">Boson</a> WebView app built with vanilla PHP/JS/HTML/CSS (no front-end frameworks). It wraps the agent in a windowed interface with a file browser and a real PTY terminal.</p>
     <div class="callout warn">Unlike the CLI binary (which is dependency-free), the desktop app uses Composer for the Boson runtime and needs <strong>PHP 8.4+</strong>.</div>
+<p>Grab a prebuilt <strong>desktop archive</strong> for your OS from the <a href="downloads.html">Downloads page</a> — unzip and run <code>./OllamaDev-ADE</code> (Windows: <code>OllamaDev-ADE.bat</code>). It bundles the agent CLI and Boson's platform libraries. Or run from source:</p>
 <pre class="code">cd Desktop/ollamadev-ade
 composer install
-
-composer start    <span class="cm"># dev: serve at http://localhost:8080</span>
-composer build    <span class="cm"># compile a native desktop app</span><button class="copy-btn">Copy</button></pre>
+php index.php        <span class="cm"># launch the desktop window (PHP 8.4+)</span>
+composer build       <span class="cm"># package OS archives → dist/binaries/</span><button class="copy-btn">Copy</button></pre>
+    <div class="callout">Boson <code>runtime ^0.19</code> is a runtime, not a compiler — there's no single-file <code>boson compile</code>. The desktop ships as a portable app archive (app + Boson libs + bundled CLI + launcher), so it needs PHP 8.4+ to run, unlike the standalone CLI binary.</div>
 
     <h3>VS Code extension</h3>
 <pre class="code">cd vscode-extension
