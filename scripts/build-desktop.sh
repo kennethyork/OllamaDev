@@ -39,6 +39,28 @@ cat > "$APP/OllamaDev-ADE" <<'SH'
 here="$(cd "$(dirname "$0")" && pwd)"
 command -v php >/dev/null 2>&1 || { echo "PHP 8.4+ is required to run the desktop app."; exit 1; }
 export OLLAMADEV_BINARY="$here/bin/ollamadev"
+
+# First interactive run: offer to put the `ollamadev` command on your PATH too,
+# so you get it in the terminal (not just inside the app). TTY-only — a
+# double-click launch (no terminal) skips this silently. Asked at most once.
+marker="${HOME:-/tmp}/.ollamadev/.desktop-cli-offered"
+if [ -t 0 ] && [ -t 1 ] && [ ! -f "$marker" ] && ! command -v ollamadev >/dev/null 2>&1; then
+    printf 'Also add the `ollamadev` command to your PATH (~/.local/bin)? [y/N] '
+    read ans
+    case "$ans" in
+        y|Y|yes|YES)
+            mkdir -p "$HOME/.local/bin"
+            if ln -sf "$here/bin/ollamadev" "$HOME/.local/bin/ollamadev" 2>/dev/null; then
+                echo "✓ linked ~/.local/bin/ollamadev — ensure ~/.local/bin is on your PATH."
+                echo "  (the link points into this folder; keep it in place or re-link if you move it)"
+            else
+                echo "✗ couldn't create the link; add ~/.local/bin manually if you want the command."
+            fi
+            ;;
+    esac
+    mkdir -p "$(dirname "$marker")" 2>/dev/null && : > "$marker" 2>/dev/null || true
+fi
+
 exec php "$here/index.php" "$@"
 SH
 chmod +x "$APP/OllamaDev-ADE"
@@ -57,6 +79,8 @@ Run it:
   Windows       :  OllamaDev-ADE.bat
 
 The agent CLI is bundled in bin/ — you do not need to install it separately.
+On first run from a terminal it also offers to add the `ollamadev` command to
+your PATH (~/.local/bin), so you get it in the shell too. (Optional, asked once.)
 TXT
 
 # 3. Emit one archive per platform label (identical portable payload — the right
