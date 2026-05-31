@@ -1242,6 +1242,9 @@ if ($cmd === 'chat') {
         exit(0);
     }
 
+    // Resume an interrupted run from disk: `crew resume [runId]`.
+    if ($arg1 === 'resume') { exit(Crew::resume($positional[2] ?? '')); }
+
     $taskParts = array_slice($positional, 1);
     $task = $arg1 === '' ? '' : implode(' ', $taskParts);
     // --pack <name>: load a saved team as the base; explicit flags override it.
@@ -1260,7 +1263,7 @@ if ($cmd === 'chat') {
     // Director simply waits for you to prompt it (and keeps prompting after each run).
     if ($task === '') {
         if (!posix_isatty(STDIN)) { echo "Usage: ollamadev crew \"<task>\" [options]   (or run with no task in a terminal to prompt the Director live)\n"; exit(1); }
-        $c = "\033[36m"; $d = "\033[2m"; $b = "\033[1m"; $r = "\033[0m";
+        $c = "\033[36m"; $d = "\033[2m"; $b = "\033[1m"; $y = "\033[33m"; $r = "\033[0m";
         $bits = [];
         if (!empty($copts['focus'])) $bits[] = 'focus set';
         if (($copts['land'] ?? '') === 'review') $bits[] = 'review mode';
@@ -1268,6 +1271,14 @@ if ($cmd === 'chat') {
         if (($copts['audit'] ?? true) === false) $bits[] = 'no audit';
         if (!empty($copts['hosts'])) $bits[] = count($copts['hosts']) . ' hosts';
         echo "\n{$b}👥 OllamaDev Crew{$r} {$d}— the Director is ready" . ($bits ? ' · ' . implode(' · ', $bits) : '') . "{$r}\n";
+        // Offer to resume an interrupted run for this repo before taking a new task.
+        $interrupted = Crew::findResumable();
+        if ($interrupted) {
+            echo "{$y}  ⚠ an unfinished crew run is here:{$r} {$d}\"" . substr((string)($interrupted['task'] ?? ''), 0, 60) . "\"{$r}\n";
+            echo "{$c}Resume it? [Y/n]{$r} ";
+            $ans = strtolower(trim((string)fgets(STDIN)));
+            if ($ans === '' || $ans === 'y' || $ans === 'yes') { Crew::resume((string)$interrupted['runId']); }
+        }
         echo "{$d}Type a task for the Director. Blank line re-prompts; 'exit' or Ctrl-D to leave.{$r}\n";
         while (true) {
             echo "\n{$c}Director ▸{$r} ";

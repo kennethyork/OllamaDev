@@ -416,6 +416,13 @@ ok('crew amplify: plan self-consistency', strpos($src, 'function planOnce(') !==
 ok('crew amplify: adversarial audit panel', strpos($src, 'function auditOnce(') !== false && strpos($src, '$clean > $passes / 2') !== false);
 ok('crew amplify: skeptic reviewer stance', strpos($src, 'SKEPTICAL adversarial reviewer') !== false);
 ok('--amplify flag wired to crew opts', strpos($src, "\$flagOpts['amplify']") !== false);
+// Resume-from-disk: persist the plan, detect interrupted runs, re-enter the pipeline.
+ok('crew persists a resumable plan (run.json + prompts)', strpos($src, "self::saveRun(") !== false && strpos($src, "'prompt' => \$st['prompt']") !== false);
+ok('crew resume + findResumable exist', strpos($src, 'function resume(') !== false && strpos($src, 'function findResumable(') !== false);
+ok('crew run marks status done', strpos($src, "self::setRunStatus(\$runId, 'done')") !== false);
+ok('audit+land shared by run and resume', strpos($src, 'function auditAndLand(') !== false);
+ok('crew resume subcommand wired', strpos($src, "\$arg1 === 'resume'") !== false && strpos($src, 'Crew::resume(') !== false);
+ok('interactive crew offers to resume', strpos($src, 'Crew::findResumable()') !== false && strpos($src, 'Resume it?') !== false);
 
 echo "\n== Air-gap + attestation ==\n";
 if (preg_match('/class Permission \{.*?\n\}/s', $src, $pm)) {

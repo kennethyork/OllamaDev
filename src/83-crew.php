@@ -90,6 +90,20 @@ class Crew {
         $setState = function (int $n, string $s) use (&$board, $writeBoard) { foreach ($board['subtasks'] as &$bs) { if ($bs['n'] === $n) $bs['state'] = $s; } unset($bs); $writeBoard(); };
         $writeBoard();
 
+        // Persist the full plan (incl. subtask prompts + branch names) so this run
+        // is resumable from disk if it's interrupted. Only the reusable opts are kept.
+        $resumeOpts = array_intersect_key($opts, array_flip(['directorModel', 'coderModel', 'auditorModel', 'researcherModel', 'focus', 'max', 'amplify', 'land', 'research', 'audit', 'skills', 'hosts']));
+        $diskPlan = [];
+        foreach ($subtasks as $i => $st) {
+            $n = $i + 1; $title = $st['title'] ?? ('task ' . $n);
+            $diskPlan[] = ['n' => $n, 'title' => $title, 'prompt' => $st['prompt'] ?? '', 'branch' => self::branchFor($runId, $n, $title)];
+        }
+        self::saveRun($runId, [
+            'runId' => $runId, 'task' => $task, 'base' => $base, 'baseCommit' => $baseCommit,
+            'repoRoot' => self::sh('git rev-parse --show-toplevel 2>/dev/null'),
+            'model' => $model, 'opts' => $resumeOpts, 'subtasks' => $diskPlan, 'status' => 'running',
+        ]);
+
         // ---- Coders: one git worktree/branch each ----
         $wtRoot = sys_get_temp_dir() . '/ollamadev-crew/' . $runId;
         @mkdir($wtRoot, 0755, true);
@@ -100,7 +114,7 @@ class Crew {
         $jobs = [];
         foreach ($subtasks as $i => $st) {
             $n = $i + 1;
-            $branch = 'crew/' . substr($runId, 6) . '-' . $n . '-' . self::slug($st['title'] ?? ('task' . $n));
+            $branch = self::branchFor($runId, $n, $st['title'] ?? ('task' . $n));
             $wt = $wtRoot . '/c' . $n;
             $add = self::sh('git worktree add -b ' . escapeshellarg($branch) . ' ' . escapeshellarg($wt) . ' ' . escapeshellarg($baseCommit) . ' 2>&1');
             if (!is_dir($wt)) { echo "  {$y}skipped (worktree failed): {$add}{$r}\n"; $setState($n, 'held'); continue; }
@@ -160,7 +174,23 @@ class Crew {
             }
         }
 
-        // ---- Auditor: review each diff (optional; without it, nothing auto-merges) ----
+        // ---- Auditor reviews each diff, then gated landing (shared with resume). ----
+        self::auditAndLand($agent, $results, $opts, $base, $baseCommit, $mAuditor, $amplify, $task, $setState);
+        $board['active'] = false; $writeBoard();
+        self::setRunStatus($runId, 'done');
+
+        // ---- Cleanup worktrees (keep branches) ----
+        foreach ($results as $res) self::sh('git worktree remove --force ' . escapeshellarg($res['wt']) . ' 2>&1');
+        @rmdir($wtRoot);
+        return 0;
+    }
+
+    // Auditor + gated landing over a set of coder results. Shared by run() and
+    // resume(). Audits each non-empty diff (amplify = N-reviewer panel), then lands:
+    // 'review' holds everything; 'auto' merges audit-clean branches and holds the
+    // rest (self-repo forces 'review' unless --auto-merge). Updates the board.
+    private static function auditAndLand(Agent $agent, array $results, array $opts, string $base, string $baseCommit, string $mAuditor, int $amplify, string $task, callable $setState): void {
+        $d = "\033[2m"; $b = "\033[1m"; $g = "\033[32m"; $y = "\033[33m"; $r = "\033[0m";
         $doAudit = ($opts['audit'] ?? true) !== false;
         echo "\n{$b}▸ Auditor{$r} " . ($doAudit ? ("reviewing…" . ($amplify > 1 ? " {$d}({$amplify}-reviewer panel, majority rules){$r}" : '')) : "{$d}(disabled — all branches held for your review){$r}") . "\n";
         foreach ($results as &$res) {
@@ -173,27 +203,19 @@ class Crew {
         }
         unset($res);
 
-        // ---- Landing — gated. 'review': nothing auto-merges (default-safe for
-        // self-modification). 'auto': merge audit-clean, hold flagged.
-        // Self-modification safeguard: when the crew is run on the OllamaDev source
-        // itself, default to review (hold everything) unless the user EXPLICITLY
-        // opted into auto-merge with --auto-merge. Other repos keep the auto default.
+        // Self-modification safeguard: on the OllamaDev source default to review
+        // (hold everything) unless --auto-merge was passed. Other repos auto-merge.
         $explicit = $opts['land'] ?? '';
-        if ($explicit !== '' ) {
-            $land = $explicit;
-        } elseif (self::isSelfRepo()) {
-            $land = 'review';
-            echo "  {$y}⚠ self-modification detected (this is the OllamaDev source) — review mode forced; nothing auto-merges. Use --auto-merge to override.{$r}\n";
-        } else {
-            $land = Config::get('crew.land', 'auto');
-        }
+        if ($explicit !== '') { $land = $explicit; }
+        elseif (self::isSelfRepo()) { $land = 'review'; echo "  {$y}⚠ self-modification detected (this is the OllamaDev source) — review mode forced; nothing auto-merges. Use --auto-merge to override.{$r}\n"; }
+        else { $land = Config::get('crew.land', 'auto'); }
         echo "\n{$b}▸ Landing{$r}" . ($land === 'review' ? " {$d}(review mode — nothing auto-merges){$r}" : '') . "\n";
         $merged = []; $held = [];
         foreach ($results as $res) {
             if ($res['empty']) { $setState($res['n'], 'held'); continue; }
             if ($land === 'review') { $held[] = $res; $setState($res['n'], 'held'); echo "  {$y}held{$r} #{$res['n']} {$res['branch']} {$d}(review mode){$r}\n"; continue; }
             if (empty($res['audit']['clean'])) { $held[] = $res; $setState($res['n'], 'held'); echo "  {$y}held{$r} #{$res['n']} {$res['branch']} {$d}(audit flagged){$r}\n"; continue; }
-            $m = self::sh('git merge --no-ff --no-edit ' . escapeshellarg($res['branch']) . ' 2>&1');
+            self::sh('git merge --no-ff --no-edit ' . escapeshellarg($res['branch']) . ' 2>&1');
             if (self::sh('git status --porcelain') !== '' && self::sh('git ls-files -u') !== '') {
                 self::sh('git merge --abort 2>&1');
                 $held[] = $res; $setState($res['n'], 'held'); echo "  {$y}held{$r} #{$res['n']} {$res['branch']} {$d}(merge conflict — review manually){$r}\n";
@@ -201,17 +223,86 @@ class Crew {
                 $merged[] = $res; $setState($res['n'], 'done'); echo "  {$g}merged{$r} #{$res['n']} {$res['branch']}\n";
             }
         }
-        $board['active'] = false; $writeBoard();
-
-        // ---- Cleanup worktrees (keep branches) ----
-        foreach ($results as $res) self::sh('git worktree remove --force ' . escapeshellarg($res['wt']) . ' 2>&1');
-        @rmdir($wtRoot);
-
         echo "\n{$b}Summary{$r}  {$g}" . count($merged) . " merged{$r} · {$y}" . count($held) . " held{$r}\n";
         if ($held) {
             echo "  {$d}Review held branches, then merge or discard:{$r}\n";
             foreach ($held as $res) echo "    git diff {$base}..{$res['branch']}   {$d}# then: git merge {$res['branch']}  (or: git branch -D {$res['branch']}){$r}\n";
         }
+    }
+
+    // Resume an interrupted run from disk: finish the coders that didn't complete,
+    // keep branches that already have work, then audit + land. Idempotent — safe to
+    // run repeatedly until everything has landed or been held.
+    public static function resume(string $runId = ''): int {
+        if (!self::isGitRepo()) { echo "\033[31mcrew needs a git repository.\033[0m\n"; return 1; }
+        $run = $runId !== '' ? self::loadRun($runId) : self::findResumable();
+        if (!$run) { echo "No resumable crew run found for this repo.\n"; return 1; }
+        $runId = (string)$run['runId'];
+        $agent = new Agent();
+        if (!$agent->checkConnection()) { echo "\033[31mCannot reach Ollama.\033[0m Start it with: ollama serve\n"; return 1; }
+
+        $c = "\033[36m"; $d = "\033[2m"; $b = "\033[1m"; $g = "\033[32m"; $y = "\033[33m"; $r = "\033[0m";
+        $opts = is_array($run['opts'] ?? null) ? $run['opts'] : [];
+        $model = $agent->getModel();
+        $rm = function ($key) use ($agent, $opts, $model) {
+            $m = trim((string)($opts[$key] ?? '')); return $m === '' ? $model : ($agent->resolveModel($m) ?: $m);
+        };
+        $mCoder = $rm('coderModel'); $mAuditor = $rm('auditorModel');
+        $baseCommit = (string)$run['baseCommit']; $base = (string)$run['base']; $task = (string)$run['task'];
+        $amplify = max(1, (int)($opts['amplify'] ?? 1));
+        $maxIter = max(2, (int)Config::get('crew.coderIterations', 10));
+        $focus = trim((string)($opts['focus'] ?? ''));
+        $teamSkills = ($opts['skills'] ?? true) !== false ? CrewSkills::forFocus($focus) : [];
+        $subtasks = is_array($run['subtasks'] ?? null) ? $run['subtasks'] : [];
+        // Re-use the shared research vault if it survived.
+        $research = (string)@file_get_contents(Config::dataDir() . '/crew/' . $runId . '/research.md') ?: '';
+
+        echo "\n{$b}👥 Resuming crew{$r} {$d}\"" . substr($task, 0, 60) . "\" · " . count($subtasks) . " subtasks · base {$base}@" . substr($baseCommit, 0, 7) . "{$r}\n";
+        self::setRunStatus($runId, 'running');
+
+        // Board so the desktop reflects the resumed run too.
+        $home = getenv('HOME') ?: sys_get_temp_dir();
+        $boardFile = $home . '/.ollamadev/crew/current.json'; @mkdir(dirname($boardFile), 0755, true);
+        $logDir = dirname($boardFile) . '/' . $runId; @mkdir($logDir, 0755, true);
+        $board = ['task' => $task, 'runId' => $runId, 'active' => true, 'model' => $model, 'logDir' => $logDir, 'subtasks' => []];
+        foreach ($subtasks as $st) $board['subtasks'][] = ['n' => $st['n'], 'title' => $st['title'] ?? ('task ' . $st['n']), 'state' => 'todo'];
+        $writeBoard = function () use (&$board, $boardFile) { $board['ts'] = time(); @file_put_contents($boardFile, json_encode($board)); };
+        $setState = function (int $n, string $s) use (&$board, $writeBoard) { foreach ($board['subtasks'] as &$bs) { if ($bs['n'] === $n) $bs['state'] = $s; } unset($bs); $writeBoard(); };
+        $writeBoard();
+
+        $wtRoot = sys_get_temp_dir() . '/ollamadev-crew/' . $runId; @mkdir($wtRoot, 0755, true);
+        $results = [];
+        echo "\n{$b}▸ Coders{$r} {$d}(finishing what didn't complete)…{$r}\n";
+        foreach ($subtasks as $st) {
+            $n = (int)$st['n']; $branch = (string)$st['branch']; $title = (string)($st['title'] ?? "task $n"); $prompt = (string)($st['prompt'] ?? '');
+            $hasBranch = self::sh('git rev-parse --verify ' . escapeshellarg($branch) . ' 2>/dev/null') !== '';
+            $built = $hasBranch && self::sh('git rev-list ' . escapeshellarg($baseCommit . '..' . $branch) . ' 2>/dev/null') !== '';
+            if ($built) {
+                $setState($n, 'doing');
+                $diff = self::sh('git diff ' . escapeshellarg($baseCommit) . ' ' . escapeshellarg($branch));
+                $files = array_values(array_filter(explode("\n", self::sh('git diff --name-only ' . escapeshellarg($baseCommit) . ' ' . escapeshellarg($branch)))));
+                echo "  {$g}✓{$r} #{$n} {$d}already built (" . count($files) . " file(s)){$r}\n";
+                $results[] = ['n' => $n, 'title' => $title, 'branch' => $branch, 'wt' => '', 'diff' => $diff, 'files' => $files, 'empty' => $diff === ''];
+                continue;
+            }
+            // Pending: clear any stale worktree/branch, then (re)build in a fresh one.
+            $wt = $wtRoot . '/c' . $n;
+            self::sh('git worktree remove --force ' . escapeshellarg($wt) . ' 2>&1'); self::sh('git worktree prune 2>&1');
+            if ($hasBranch) self::sh('git branch -D ' . escapeshellarg($branch) . ' 2>&1');
+            self::sh('git worktree add -b ' . escapeshellarg($branch) . ' ' . escapeshellarg($wt) . ' ' . escapeshellarg($baseCommit) . ' 2>&1');
+            if (!is_dir($wt)) { echo "  {$y}#{$n} skipped (worktree failed){$r}\n"; $setState($n, 'held'); continue; }
+            if (!empty($teamSkills)) CrewSkills::materialize($teamSkills, $wt);
+            $setState($n, 'doing');
+            echo "\n{$b}▸ Coder {$n}{$r} {$d}{$branch} (resuming){$r}\n";
+            self::runCoder($wt, ['title' => $title, 'prompt' => $prompt], $mCoder, $maxIter, $research, $task, $focus, '', $logDir . '/coder-' . $n . '.log');
+            $results[] = self::collectCoderResult(['n' => $n, 'st' => ['title' => $title], 'branch' => $branch, 'wt' => $wt], $baseCommit);
+        }
+
+        self::auditAndLand($agent, $results, $opts, $base, $baseCommit, $mAuditor, $amplify, $task, $setState);
+        $board['active'] = false; $writeBoard();
+        self::setRunStatus($runId, 'done');
+        foreach ($results as $res) if (!empty($res['wt'])) self::sh('git worktree remove --force ' . escapeshellarg($res['wt']) . ' 2>&1');
+        @rmdir($wtRoot);
         return 0;
     }
 
@@ -445,6 +536,45 @@ class Crew {
             if (is_array($board) && ($board['runId'] ?? '') === $runId && ($board['active'] ?? true) === false) break;
             sleep(1);
         }
+    }
+
+    // ---- Resume-from-disk: persist the plan + progress so an interrupted run
+    // (closed app, crash, reboot) can be picked up where it left off. -----------
+    private static function runFile(string $runId): string {
+        $home = getenv('HOME') ?: sys_get_temp_dir();
+        return $home . '/.ollamadev/crew/' . $runId . '/run.json';
+    }
+    private static function saveRun(string $runId, array $data): void {
+        $f = self::runFile($runId); @mkdir(dirname($f), 0755, true);
+        @file_put_contents($f, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    }
+    private static function loadRun(string $runId): ?array {
+        $d = is_file(self::runFile($runId)) ? json_decode((string)@file_get_contents(self::runFile($runId)), true) : null;
+        return is_array($d) ? $d : null;
+    }
+    private static function setRunStatus(string $runId, string $status): void {
+        $d = self::loadRun($runId); if (!$d) return;
+        $d['status'] = $status; self::saveRun($runId, $d);
+    }
+    // Newest unfinished run (status != 'done') belonging to the current repo, or null.
+    public static function findResumable(): ?array {
+        $home = getenv('HOME') ?: sys_get_temp_dir();
+        $root = self::sh('git rev-parse --show-toplevel 2>/dev/null');
+        if ($root === '') return null;
+        $cands = [];
+        foreach (glob($home . '/.ollamadev/crew/*/run.json') ?: [] as $f) {
+            $d = json_decode((string)@file_get_contents($f), true);
+            if (!is_array($d) || ($d['status'] ?? '') === 'done') continue;
+            if (($d['repoRoot'] ?? '') !== $root) continue;
+            $cands[] = $d;
+        }
+        if (!$cands) return null;
+        usort($cands, fn($a, $b) => strcmp((string)($b['runId'] ?? ''), (string)($a['runId'] ?? '')));
+        return $cands[0];
+    }
+    // Deterministic branch name for a subtask (so resume reuses the same branch).
+    private static function branchFor(string $runId, int $n, string $title): string {
+        return 'crew/' . substr($runId, 6) . '-' . $n . '-' . self::slug($title ?: ('task' . $n));
     }
 
     private static function isGitRepo(): bool { return self::sh('git rev-parse --is-inside-work-tree 2>/dev/null') === 'true'; }
