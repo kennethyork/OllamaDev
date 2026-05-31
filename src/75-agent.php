@@ -148,7 +148,7 @@ User: run the tests
         return $out;
     }
 
-    public function run(array $messages, callable $handler = null): string {
+    public function run(array $messages, ?callable $handler = null): string {
         $allMessages = array_merge([$this->systemPrompt], $this->wire($messages));
         $response = '';
         $this->client->chatWithModel($this->model, $allMessages, function($chunk) use (&$response, $handler) {

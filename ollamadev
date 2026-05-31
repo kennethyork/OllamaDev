@@ -6,6 +6,11 @@
 define('OLLAMADEV_VERSION', '4.0.0');
 $GLOBALS['editedFiles'] = [];
 
+// Shipped binary: keep warnings/errors visible but never spew engine
+// deprecation notices at users (the standalone php-micro runtime shows them
+// by default). Set OLLAMADEV_DEBUG=1 to see everything.
+if (!getenv('OLLAMADEV_DEBUG')) error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED);
+
 function isWindows(): bool { return stripos(PHP_OS, 'WIN') === 0; }
 
 function crossPlatformLs(string $path): string {
@@ -739,7 +744,7 @@ class OllamaClient {
         return [];
     }
 
-    public function completion(string $prompt, string $model = null, int $maxTokens = 200): string {
+    public function completion(string $prompt, ?string $model = null, int $maxTokens = 200): string {
         $model = $model ?: Config::get('ollama.defaultModel', 'llama3.2:latest');
         $params = ['model' => $model, 'prompt' => $prompt, 'stream' => false, 'options' => ['num_predict' => $maxTokens]];
         $ch = curl_init($this->host . '/api/generate');
@@ -760,7 +765,7 @@ class OllamaClient {
         return '';
     }
 
-    public function codeComplete(string $code, string $cursor, string $model = null): string {
+    public function codeComplete(string $code, string $cursor, ?string $model = null): string {
         $prompt = "Complete the following code. Only return the completion, no explanation. No markdown, just code:\n\n" . $code . "\n\nCursor position: " . strlen($code) . "\n=> ";
         $params = ['model' => $model ?: Config::get('ollama.defaultModel', 'llama3.2:latest'), 'prompt' => $prompt, 'stream' => true, 'options' => ['num_predict' => 150]];
         $ch = curl_init($this->host . '/api/generate');
@@ -784,7 +789,7 @@ class OllamaClient {
         return $this->chatWithModel($model ?? Config::get('ollama.defaultModel', 'llama3.2:latest'), $messages) ?: $this->completion($prompt, $model);
     }
 
-    public function chat(array $messages, callable $handler = null): string {
+    public function chat(array $messages, ?callable $handler = null): string {
         $model = Config::get('ollama.defaultModel', 'llama3.2:latest');
         return $this->chatWithModel($model, $messages, $handler);
     }
@@ -841,7 +846,7 @@ class OllamaClient {
         return self::$ctxCache[$model] = $max;
     }
 
-    public function chatWithModel(string $model, array $messages, callable $handler = null): string {
+    public function chatWithModel(string $model, array $messages, ?callable $handler = null): string {
         // Stream when a handler is present so tokens appear as they're produced;
         // fall back to a single blocking response when no handler wants chunks.
         $stream = $handler !== null && (bool)Config::get('ollama.stream', true);
@@ -1034,7 +1039,7 @@ class LMStudioClient {
         ]);
     }
 
-    public function chatWithModel(string $model, array $messages, callable $handler = null): string {
+    public function chatWithModel(string $model, array $messages, ?callable $handler = null): string {
         $stream = $handler !== null && (bool)Config::get('ollama.stream', true);
         $ch = curl_init($this->host . '/chat/completions');
         $opts = [
@@ -1465,7 +1470,7 @@ Tools::register('watch', function($p) {
         }
     }
 
-    if (empty($changed)) return "No file changes detected within ${timeout}s";
+    if (empty($changed)) return "No file changes detected within {$timeout}s";
     return "Changed:\n" . implode("\n", array_slice($changed, 0, 50));
 });
 
@@ -3095,7 +3100,7 @@ User: run the tests
         return $out;
     }
 
-    public function run(array $messages, callable $handler = null): string {
+    public function run(array $messages, ?callable $handler = null): string {
         $allMessages = array_merge([$this->systemPrompt], $this->wire($messages));
         $response = '';
         $this->client->chatWithModel($this->model, $allMessages, function($chunk) use (&$response, $handler) {
@@ -3764,7 +3769,7 @@ class TUI {
         echo self::RESET;
     }
 
-    public function input(string $prompt, int $row = null): string {
+    public function input(string $prompt, ?int $row = null): string {
         $row = $row ?: $this->height;
         $this->move($row, 1);
         echo "\033[7m$prompt\033[0m ";
@@ -7437,8 +7442,15 @@ if ($cmd === 'chat') {
     }
     echo "Update available: v$tag (current: v$current)\n\n";
     $assets = $data['assets'] ?? [];
+    // Pick the standalone binary matching this platform (ollamadev-<os>-<arch>),
+    // e.g. ollamadev-linux-x64 / ollamadev-mac-arm64 / ollamadev-windows-x64.exe.
+    $pos = isWindows() ? 'windows' : (stripos(PHP_OS, 'DARWIN') === 0 ? 'mac' : 'linux');
+    $m = strtolower(php_uname('m'));
+    $parch = (strpos($m, 'arm') !== false || strpos($m, 'aarch64') !== false) ? 'arm64' : 'x64';
+    $want = "ollamadev-$pos-$parch" . ($pos === 'windows' ? '.exe' : '');
     $binary = null;
-    foreach ($assets as $a) { if ($a['name'] === 'ollamadev') $binary = $a; }
+    foreach ($assets as $a) { if (($a['name'] ?? '') === $want) { $binary = $a; break; } }
+    if (!$binary) foreach ($assets as $a) { if (($a['name'] ?? '') === 'ollamadev') { $binary = $a; break; } } // legacy
     if (!$binary && count($assets) > 0) $binary = $assets[0];
     if ($binary) {
         echo "Download: {$binary['browser_download_url']}\n";

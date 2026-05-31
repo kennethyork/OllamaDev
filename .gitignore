@@ -6,3 +6,7 @@
 
 # Runtime data (sessions/terminals) wherever it appears, e.g. the desktop app
 **/.ollamadev/
+
+# Build-time artifacts (standalone-binary toolchain + outputs)
+.build/
+dist/binaries/

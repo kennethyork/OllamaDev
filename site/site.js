@@ -49,6 +49,31 @@
     copyText(text.replace(/\s+$/, ''), btn);
   });
 
+  // --- 1b. Downloads page: detect OS/arch, promote the matching buttons ----
+  var detected = document.getElementById('detected');
+  if (detected) {
+    var ua = navigator.userAgent;
+    var p = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
+    var os = 'linux', arch = 'x64', label = 'Linux';
+    if (/Win/i.test(p) || /Windows/i.test(ua)) { os = 'windows'; label = 'Windows'; }
+    else if (/Mac/i.test(p) || /Mac OS X|Macintosh/i.test(ua)) { os = 'mac'; label = 'macOS'; }
+    else if (/Linux|X11/i.test(p) || /Linux/i.test(ua)) { os = 'linux'; label = 'Linux'; }
+    // Apple Silicon and arm64 hints (best-effort — UA hides arch).
+    if (os === 'mac') arch = 'arm64';
+    if (/aarch64|arm64/i.test(ua)) arch = 'arm64';
+    label += arch === 'arm64' ? ' (arm64)' : '';
+
+    detected.textContent = 'Detected: ' + label + ' — your recommended downloads are highlighted below.';
+
+    ['cli-buttons', 'desktop-buttons'].forEach(function (groupId) {
+      var group = document.getElementById(groupId);
+      if (!group) return;
+      var exact = group.querySelector('[data-os="' + os + '"][data-arch="' + arch + '"]');
+      var match = exact || group.querySelector('[data-os="' + os + '"]');
+      if (match) { match.classList.add('primary'); group.insertBefore(match, group.firstChild); }
+    });
+  }
+
   // --- 2. Docs sidebar active-section highlight ---------------------------
   var links = Array.prototype.slice.call(document.querySelectorAll('.docs-side a[href^="#"]'));
   if (!links.length || !('IntersectionObserver' in window)) return;

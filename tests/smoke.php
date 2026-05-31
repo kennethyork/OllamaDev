@@ -417,6 +417,22 @@ ok('crew amplify: adversarial audit panel', strpos($src, 'function auditOnce(') 
 ok('crew amplify: skeptic reviewer stance', strpos($src, 'SKEPTICAL adversarial reviewer') !== false);
 ok('--amplify flag wired to crew opts', strpos($src, "\$copts['amplify']") !== false);
 
+echo "\n== Distribution (binaries) ==\n";
+$repoRoot = dirname(__DIR__);
+ok('install.sh present + executable', is_file($repoRoot . '/install.sh') && is_executable($repoRoot . '/install.sh'));
+ok('build-binary.sh present + executable', is_file($repoRoot . '/scripts/build-binary.sh') && is_executable($repoRoot . '/scripts/build-binary.sh'));
+ok('release workflow present', is_file($repoRoot . '/.github/workflows/release.yml'));
+$inst = (string)@file_get_contents($repoRoot . '/install.sh');
+ok('installer detects os/arch → asset name', strpos($inst, 'ollamadev-${pos}-${parch}') !== false);
+ok('update picks per-OS release asset', strpos($src, '"ollamadev-$pos-$parch"') !== false);
+ok('Makefile has binary targets', strpos((string)@file_get_contents($repoRoot . '/Makefile'), 'binary:') !== false);
+$dl = (string)@file_get_contents($repoRoot . '/site/downloads.html');
+ok('downloads page lists CLI + desktop assets', strpos($dl, 'ollamadev-linux-x64') !== false && strpos($dl, 'OllamaDev-ADE-mac-arm64') !== false);
+ok('no compile-time deprecations (implicit-nullable params)',
+   preg_match('/[(,] *(callable|string|int|float|bool|array|object|iterable) \$[a-zA-Z0-9_]+ = null/', $src) === 0);
+ok('no deprecated ${} interpolation outside nowdocs',
+   preg_match('/return "[^"]*\$\{[a-zA-Z_]/', $src) === 0);
+
 echo "\n== Skills ==\n";
 if (preg_match('/class Skills \{.*?\n\}/s', $src, $sk)) {
     eval($sk[0]);

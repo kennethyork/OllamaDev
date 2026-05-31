@@ -1,0 +1,94 @@
+name: release
+
+# Cut a release by pushing a tag:  git tag v4.1.0 && git push --tags
+# Produces standalone, PHP-free downloads for both the CLI (phpacker) and the
+# desktop app (Boson), attached to the GitHub Release the website links to.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build/upload for'
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  # Create (or reuse) the GitHub Release the other jobs upload assets to.
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure a release exists for ${{ env.TAG }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 \
+            || gh release create "$TAG" --title "$TAG" --generate-notes
+
+  # ---- CLI: one Linux runner cross-builds every target (phpacker fetches
+  # prebuilt php-micro runtimes per OS/arch), so all binaries come from here.
+  cli:
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer
+      - name: Build standalone CLI binaries (all platforms)
+        run: scripts/build-binary.sh all
+      - name: Upload CLI binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist/binaries/* --clobber
+
+  # ---- Desktop: Boson compiles a native app per OS. Runs on each platform
+  # because the WebView shell is platform-specific.
+  desktop:
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  label: linux-x64 }
+          - { os: macos-latest,   label: mac-arm64 }
+          - { os: macos-13,       label: mac-x64 }
+          - { os: windows-latest, label: windows-x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer
+      - name: Build desktop app (Boson compile)
+        working-directory: Desktop/ollamadev-ade
+        run: |
+          composer install --no-interaction --no-progress
+          composer build
+      - name: Package + upload desktop app
+        shell: bash
+        working-directory: Desktop/ollamadev-ade
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # boson compile drops a native executable under the project (commonly
+          # build/ or a dist/ dir). Grab the freshest non-vendor binary and give
+          # it a stable, download-friendly name.
+          art=$(find build dist . -maxdepth 2 -type f \
+                  \( -perm -u+x -o -name '*.exe' -o -name '*.app' -o -name '*.AppImage' \) \
+                  -not -path './vendor/*' -not -path './public/*' -newer composer.json 2>/dev/null \
+                | head -n1)
+          if [ -z "$art" ]; then echo "::error::no Boson build artifact found"; ls -R build dist 2>/dev/null; exit 1; fi
+          ext=""; case "$art" in *.exe) ext=".exe";; *.AppImage) ext=".AppImage";; esac
+          out="OllamaDev-ADE-${{ matrix.label }}${ext}"
+          cp "$art" "$out"
+          gh release upload "$TAG" "$out" --clobber

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Download — OllamaDev</title>
+<meta name="description" content="Download OllamaDev: standalone CLI binary (no PHP needed) and the desktop app (ADE), for Linux, macOS, and Windows. One-line install or direct download.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="index.html"><span class="dot">▰</span> OllamaDev</a>
+    <div class="nav-links">
+      <a href="index.html#features">Features</a>
+      <a href="docs.html">Docs</a>
+      <a href="downloads.html">Download</a>
+      <a class="pill" href="https://github.com/kennethyork/OllamaDev">GitHub ↗</a>
+    </div>
+  </div>
+</nav>
+
+<div class="wrap">
+  <header class="dl-hero">
+    <h1>Download OllamaDev</h1>
+    <p>Standalone binaries — PHP is bundled in, so there's nothing else to install. Pick the CLI, the desktop app, or both.</p>
+    <div class="dl-detected" id="detected">Detecting your platform…</div>
+  </header>
+
+  <!-- CLI one-liner: the fastest path -->
+  <div class="dl-oneliner">
+    <div class="install-line">
+      <span class="prompt">$</span>
+      <code id="oneliner">curl -fsSL https://raw.githubusercontent.com/kennethyork/OllamaDev/main/install.sh | sh</code>
+      <button data-copy="oneliner">Copy</button>
+    </div>
+  </div>
+
+  <section style="padding-top:40px;">
+    <div class="dl-cols">
+
+      <!-- ===== CLI ===== -->
+      <div class="dl-panel" id="panel-cli">
+        <h2>⌨️ CLI <span class="tag">standalone binary</span></h2>
+        <p>The terminal coding agent. Download, make it executable, and run — no PHP, no dependencies.</p>
+        <div id="cli-buttons">
+          <a class="dl-btn" data-os="linux"   data-arch="x64"   href="https://github.com/kennethyork/OllamaDev/releases/latest/download/ollamadev-linux-x64"><span class="os">🐧</span><span class="meta"><span class="name">Linux</span><span class="sub">x64 · ollamadev-linux-x64</span></span><span class="arrow">↓</span></a>
+          <a class="dl-btn" data-os="linux"   data-arch="arm64" href="https://github.com/kennethyork/OllamaDev/releases/latest/download/ollamadev-linux-arm64"><span class="os">🐧</span><span class="meta"><span class="name">Linux</span><span class="sub">arm64 · ollamadev-linux-arm64</span></span><span class="arrow">↓</span></a>
+          <a class="dl-btn" data-os="mac"     data-arch="arm64" href="https://github.com/kennethyork/OllamaDev/releases/latest/download/ollamadev-mac-arm64"><span class="os">🍎</span><span class="meta"><span class="name">macOS</span><span class="sub">Apple Silicon · ollamadev-mac-arm64</span></span><span class="arrow">↓</span></a>
+          <a class="dl-btn" data-os="mac"     data-arch="x64"   href="https://github.com/kennethyork/OllamaDev/releases/latest/download/ollamadev-mac-x64"><span class="os">🍎</span><span class="meta"><span class="name">macOS</span><span class="sub">Intel · ollamadev-mac-x64</span></span><span class="arrow">↓</span></a>
+          <a class="dl-btn" data-os="windows" data-arch="x64"   href="https://github.com/kennethyork/OllamaDev/releases/latest/download/ollamadev-windows-x64.exe"><span class="os">🪟</span><span class="meta"><span class="name">Windows</span><span class="sub">x64 · ollamadev-windows-x64.exe</span></span><span class="arrow">↓</span></a>
+        </div>
+        <p class="dl-fallback">After downloading on macOS/Linux: <code>chmod +x ollamadev-* &amp;&amp; mv ollamadev-* ~/.local/bin/ollamadev</code></p>
+      </div>
+
+      <!-- ===== Desktop ===== -->
+      <div class="dl-panel" id="panel-desktop">
+        <h2>🖥️ Desktop (ADE) <span class="tag">native app</span></h2>
+        <p>The Agentic Development Environment — a windowed GUI with a file browser, live terminal, crew board, and memory graph.</p>
+        <div id="desktop-buttons">
+          <a class="dl-btn" data-os="linux"   data-arch="x64"   href="https://github.com/kennethyork/OllamaDev/releases/latest/download/OllamaDev-ADE-linux-x64"><span class="os">🐧</span><span class="meta"><span class="name">Linux</span><span class="sub">x64 · OllamaDev-ADE-linux-x64</span></span><span class="arrow">↓</span></a>
+          <a class="dl-btn" data-os="mac"     data-arch="arm64" href="https://github.com/kennethyork/OllamaDev/releases/latest/download/OllamaDev-ADE-mac-arm64"><span class="os">🍎</span><span class="meta"><span class="name">macOS</span><span class="sub">Apple Silicon · OllamaDev-ADE-mac-arm64</span></span><span class="arrow">↓</span></a>
+          <a class="dl-btn" data-os="mac"     data-arch="x64"   href="https://github.com/kennethyork/OllamaDev/releases/latest/download/OllamaDev-ADE-mac-x64"><span class="os">🍎</span><span class="meta"><span class="name">macOS</span><span class="sub">Intel · OllamaDev-ADE-mac-x64</span></span><span class="arrow">↓</span></a>
+          <a class="dl-btn" data-os="windows" data-arch="x64"   href="https://github.com/kennethyork/OllamaDev/releases/latest/download/OllamaDev-ADE-windows-x64.exe"><span class="os">🪟</span><span class="meta"><span class="name">Windows</span><span class="sub">x64 · OllamaDev-ADE-windows-x64.exe</span></span><span class="arrow">↓</span></a>
+        </div>
+        <p class="dl-fallback">Needs <a href="https://ollama.com">Ollama</a> running locally — the desktop drives the same local agent.</p>
+      </div>
+
+    </div>
+
+    <p class="dl-note">
+      All downloads come from the latest <a href="https://github.com/kennethyork/OllamaDev/releases">GitHub Release</a>.
+      Prefer to build it yourself? <code>git clone</code> + <code>make install</code> (CLI) — see the <a href="docs.html#installation">install docs</a>.
+    </p>
+  </section>
+</div>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <div>OllamaDev · MIT licensed · 100% local AI coding</div>
+    <div class="links">
+      <a href="index.html">Home</a>
+      <a href="docs.html">Docs</a>
+      <a href="https://github.com/kennethyork/OllamaDev">GitHub</a>
+    </div>
+  </div>
+</footer>
+
+<script src="site.js"></script>
+</body>
+</html>

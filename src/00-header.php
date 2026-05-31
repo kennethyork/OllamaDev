@@ -6,6 +6,11 @@
 define('OLLAMADEV_VERSION', '4.0.0');
 $GLOBALS['editedFiles'] = [];
 
+// Shipped binary: keep warnings/errors visible but never spew engine
+// deprecation notices at users (the standalone php-micro runtime shows them
+// by default). Set OLLAMADEV_DEBUG=1 to see everything.
+if (!getenv('OLLAMADEV_DEBUG')) error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED);
+
 function isWindows(): bool { return stripos(PHP_OS, 'WIN') === 0; }
 
 function crossPlatformLs(string $path): string {

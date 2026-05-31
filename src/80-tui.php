@@ -82,7 +82,7 @@ class TUI {
         echo self::RESET;
     }
 
-    public function input(string $prompt, int $row = null): string {
+    public function input(string $prompt, ?int $row = null): string {
         $row = $row ?: $this->height;
         $this->move($row, 1);
         echo "\033[7m$prompt\033[0m ";

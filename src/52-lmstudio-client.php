@@ -78,7 +78,7 @@ class LMStudioClient {
         ]);
     }
 
-    public function chatWithModel(string $model, array $messages, callable $handler = null): string {
+    public function chatWithModel(string $model, array $messages, ?callable $handler = null): string {
         $stream = $handler !== null && (bool)Config::get('ollama.stream', true);
         $ch = curl_init($this->host . '/chat/completions');
         $opts = [

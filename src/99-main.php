@@ -1094,8 +1094,15 @@ if ($cmd === 'chat') {
     }
     echo "Update available: v$tag (current: v$current)\n\n";
     $assets = $data['assets'] ?? [];
+    // Pick the standalone binary matching this platform (ollamadev-<os>-<arch>),
+    // e.g. ollamadev-linux-x64 / ollamadev-mac-arm64 / ollamadev-windows-x64.exe.
+    $pos = isWindows() ? 'windows' : (stripos(PHP_OS, 'DARWIN') === 0 ? 'mac' : 'linux');
+    $m = strtolower(php_uname('m'));
+    $parch = (strpos($m, 'arm') !== false || strpos($m, 'aarch64') !== false) ? 'arm64' : 'x64';
+    $want = "ollamadev-$pos-$parch" . ($pos === 'windows' ? '.exe' : '');
     $binary = null;
-    foreach ($assets as $a) { if ($a['name'] === 'ollamadev') $binary = $a; }
+    foreach ($assets as $a) { if (($a['name'] ?? '') === $want) { $binary = $a; break; } }
+    if (!$binary) foreach ($assets as $a) { if (($a['name'] ?? '') === 'ollamadev') { $binary = $a; break; } } // legacy
     if (!$binary && count($assets) > 0) $binary = $assets[0];
     if ($binary) {
         echo "Download: {$binary['browser_download_url']}\n";

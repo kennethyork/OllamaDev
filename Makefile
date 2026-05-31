@@ -3,12 +3,20 @@
 
 INSTALL_PATH ?= $(HOME)/.local/bin/ollamadev
 
-.PHONY: all build test install lint clean rollback
+.PHONY: all build test install lint clean rollback binary binary-all
 
 all: build test
 
 build:
 	@./build.sh
+
+# Standalone, PHP-free native binary for the host platform (dist/binaries/).
+binary: test
+	@scripts/build-binary.sh
+
+# All platforms: linux + mac + windows, x64 + arm64.
+binary-all: test
+	@scripts/build-binary.sh all
 
 lint:
 	@php -l ollamadev >/dev/null && echo "✓ lint ok"

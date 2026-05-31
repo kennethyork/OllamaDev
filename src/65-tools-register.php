@@ -112,7 +112,7 @@ Tools::register('watch', function($p) {
         }
     }
 
-    if (empty($changed)) return "No file changes detected within ${timeout}s";
+    if (empty($changed)) return "No file changes detected within {$timeout}s";
     return "Changed:\n" . implode("\n", array_slice($changed, 0, 50));
 });
 

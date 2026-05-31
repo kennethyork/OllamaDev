@@ -85,7 +85,20 @@ OllamaDev is a terminal coding agent that runs entirely against your local [Olla
 
 ## Installation
 
-### From source (recommended)
+### Download a binary (easiest)
+
+Standalone, **PHP-free** native binaries for Linux, macOS, and Windows — PHP is bundled in, so there's nothing else to install.
+
+```bash
+# one-line install (Linux/macOS) — detects your OS/arch, drops it in ~/.local/bin
+curl -fsSL https://raw.githubusercontent.com/kennethyork/OllamaDev/main/install.sh | sh
+```
+
+Or grab the CLI binary and the **desktop app** for your platform from the [Downloads page](https://github.com/kennethyork/OllamaDev/releases/latest) (or the project website). CLI assets are named `ollamadev-<os>-<arch>`; the desktop app is `OllamaDev-ADE-<os>-<arch>`. Update in place anytime with `ollamadev update --install`.
+
+### From source
+
+> Use this if you'd rather build it yourself, or want to hack on OllamaDev. Requires PHP 8.0+.
 
 ```bash
 git clone https://github.com/kennethyork/OllamaDev.git
@@ -262,6 +275,8 @@ SMOKE_MODEL=qwen3-coder:latest php tests/smoke.php   # + end-to-end tests agains
 make                        # build + test
 make install                # build + test + install (with backup)
 make rollback               # restore the previously installed binary
+make binary                 # standalone PHP-free binary for this OS (dist/binaries/)
+make binary-all             # …for linux + mac + windows, x64 + arm64
 scripts/safe-apply.sh "msg" # build → test → install → commit, auto-reverting on failure
 ```
 

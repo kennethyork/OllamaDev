@@ -36,7 +36,7 @@ class OllamaClient {
         return [];
     }
 
-    public function completion(string $prompt, string $model = null, int $maxTokens = 200): string {
+    public function completion(string $prompt, ?string $model = null, int $maxTokens = 200): string {
         $model = $model ?: Config::get('ollama.defaultModel', 'llama3.2:latest');
         $params = ['model' => $model, 'prompt' => $prompt, 'stream' => false, 'options' => ['num_predict' => $maxTokens]];
         $ch = curl_init($this->host . '/api/generate');
@@ -57,7 +57,7 @@ class OllamaClient {
         return '';
     }
 
-    public function codeComplete(string $code, string $cursor, string $model = null): string {
+    public function codeComplete(string $code, string $cursor, ?string $model = null): string {
         $prompt = "Complete the following code. Only return the completion, no explanation. No markdown, just code:\n\n" . $code . "\n\nCursor position: " . strlen($code) . "\n=> ";
         $params = ['model' => $model ?: Config::get('ollama.defaultModel', 'llama3.2:latest'), 'prompt' => $prompt, 'stream' => true, 'options' => ['num_predict' => 150]];
         $ch = curl_init($this->host . '/api/generate');
@@ -81,7 +81,7 @@ class OllamaClient {
         return $this->chatWithModel($model ?? Config::get('ollama.defaultModel', 'llama3.2:latest'), $messages) ?: $this->completion($prompt, $model);
     }
 
-    public function chat(array $messages, callable $handler = null): string {
+    public function chat(array $messages, ?callable $handler = null): string {
         $model = Config::get('ollama.defaultModel', 'llama3.2:latest');
         return $this->chatWithModel($model, $messages, $handler);
     }
@@ -138,7 +138,7 @@ class OllamaClient {
         return self::$ctxCache[$model] = $max;
     }
 
-    public function chatWithModel(string $model, array $messages, callable $handler = null): string {
+    public function chatWithModel(string $model, array $messages, ?callable $handler = null): string {
         // Stream when a handler is present so tokens appear as they're produced;
         // fall back to a single blocking response when no handler wants chunks.
         $stream = $handler !== null && (bool)Config::get('ollama.stream', true);
