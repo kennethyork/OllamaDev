@@ -2,6 +2,15 @@
 
 declare(strict_types=1);
 
+// The Boson runtime requires PHP 8.4+. composer.json pins "php": "^8.4", but the
+// PHP that launches this file may differ from the one composer resolved against,
+// so fail fast with a clear message instead of a cryptic runtime error later.
+if (PHP_VERSION_ID < 80400) {
+    fwrite(STDERR, "OllamaDev ADE requires PHP 8.4 or newer (you have " . PHP_VERSION . ").\n");
+    fwrite(STDERR, "The CLI works on PHP 8.0+, but the desktop app's Boson runtime needs 8.4+.\n");
+    exit(1);
+}
+
 require_once __DIR__ . '/vendor/autoload.php';
 
 use Boson\Application;
