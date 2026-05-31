@@ -70,7 +70,8 @@ rm -rf "$OUT_RAW"; mkdir -p "$OUT_RAW"
 mkdir -p "$DIST"
 found=0
 while IFS= read -r -d '' f; do
-    base="$(basename "$f")"            # e.g. linux-x64 or windows-x64.exe
+    base="$(basename "$f")"            # e.g. linux-x64, mac-arm, windows-x64.exe
+    base="${base/-arm/-arm64}"         # normalize phpacker's "arm" → canonical "arm64"
     cp "$f" "$DIST/ollamadev-$base"
     chmod +x "$DIST/ollamadev-$base" 2>/dev/null || true
     echo "  ✓ dist/binaries/ollamadev-$base ($(du -h "$f" | cut -f1))"
