@@ -428,7 +428,7 @@ ok('crew auto-suggests next-step ideas', strpos($src, 'function offerIdeas(') !=
 ok('crew run + resume both call offerIdeas', substr_count($src, 'self::offerIdeas(') >= 2);
 ok('ideas are informational, not auto-applied', strpos($src, 'not applied') !== false);
 ok('--no-ideas flag wired', strpos($src, "\$flagOpts['ideas'] = false") !== false);
-$ideaJs = (string)@file_get_contents($repoRoot . '/Desktop/ollamadev-ade/public/app.js');
+$ideaJs = (string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/app.js');
 ok('desktop board renders idea cards', strpos($ideaJs, 'run-idea') !== false && strpos($ideaJs, 'crewBoard.ideas') !== false);
 
 echo "\n== Air-gap + attestation ==\n";
