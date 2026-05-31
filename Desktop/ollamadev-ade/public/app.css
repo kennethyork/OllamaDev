@@ -319,5 +319,7 @@ body {
 /* live crew cards (Director's plan) — read-only, accent-tinted */
 .card.crew { cursor: default; border-color: var(--accent); background: linear-gradient(var(--accent-soft), transparent), var(--elev); }
 .card.crew.held { border-color: var(--warn); }
+.card.idea { cursor: default; border-style: dashed; border-color: var(--warn); }
+.card.idea .actions { margin-top: 8px; }
 .card.crew .cmeta { margin-top: 6px; font-size: 11px; color: var(--dim); }
 .card.crew.held .cmeta { color: var(--warn); }

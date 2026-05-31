@@ -423,6 +423,13 @@ ok('crew run marks status done', strpos($src, "self::setRunStatus(\$runId, 'done
 ok('audit+land shared by run and resume', strpos($src, 'function auditAndLand(') !== false);
 ok('crew resume subcommand wired', strpos($src, "\$arg1 === 'resume'") !== false && strpos($src, 'Crew::resume(') !== false);
 ok('interactive crew offers to resume', strpos($src, 'Crew::findResumable()') !== false && strpos($src, 'Resume it?') !== false);
+// Auto-ideas: every crew run surfaces ranked next-step suggestions (not implemented).
+ok('crew auto-suggests next-step ideas', strpos($src, 'function offerIdeas(') !== false && strpos($src, 'function suggestNext(') !== false);
+ok('crew run + resume both call offerIdeas', substr_count($src, 'self::offerIdeas(') >= 2);
+ok('ideas are informational, not auto-applied', strpos($src, 'not applied') !== false);
+ok('--no-ideas flag wired', strpos($src, "\$flagOpts['ideas'] = false") !== false);
+$ideaJs = (string)@file_get_contents($repoRoot . '/Desktop/ollamadev-ade/public/app.js');
+ok('desktop board renders idea cards', strpos($ideaJs, 'run-idea') !== false && strpos($ideaJs, 'crewBoard.ideas') !== false);
 
 echo "\n== Air-gap + attestation ==\n";
 if (preg_match('/class Permission \{.*?\n\}/s', $src, $pm)) {

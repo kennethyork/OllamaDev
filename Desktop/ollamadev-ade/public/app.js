@@ -303,6 +303,8 @@ var Tasks = {
         var board = $('#board'); if (!board) return;
         var self = this;
         var crew = (App.crewBoard && Array.isArray(App.crewBoard.subtasks)) ? App.crewBoard.subtasks : [];
+        // Crew's auto-suggested next steps (ideas) land in To-do as 💡 cards.
+        var ideas = (App.crewBoard && Array.isArray(App.crewBoard.ideas)) ? App.crewBoard.ideas : [];
         board.innerHTML = this.COLS.map(function (c) {
             // Director's plan as live, read-only crew cards.
             var crewInCol = crew.filter(function (s) { return self.crewCol(s.state) === c[0]; });
@@ -311,6 +313,11 @@ var Tasks = {
                 return '<div class="card crew' + (held ? ' held' : '') + '">' +
                     '<div class="title">🤖 ' + esc(s.title) + '</div>' +
                     '<div class="cmeta">' + (held ? '⚠ held' : (s.state === 'doing' ? '● working' : s.state)) + '</div></div>';
+            }).join('');
+            // Suggested next-step ideas show as To-do cards you can run with one click.
+            var ideaCards = c[0] !== 'todo' ? '' : ideas.map(function (idea) {
+                return '<div class="card idea"><div class="title">💡 ' + esc(idea) + '</div>' +
+                    '<div class="actions"><button class="run" data-act="run-idea" data-idea="' + esc(idea) + '">▶ Run</button></div></div>';
             }).join('');
             // The user's own manual tasks.
             var cards = self.items.filter(function (t) { return t.col === c[0]; });
@@ -322,8 +329,8 @@ var Tasks = {
                     '<button data-act="back">◀</button><button data-act="fwd">▶</button>' +
                     '<button class="del" data-act="del">✕</button></div></div>';
             }).join('');
-            var body = (crewCards + manual) || '<div class="board-empty">—</div>';
-            var count = crewInCol.length + cards.length;
+            var body = (crewCards + ideaCards + manual) || '<div class="board-empty">—</div>';
+            var count = crewInCol.length + cards.length + (c[0] === 'todo' ? ideas.length : 0);
             return '<div class="col" data-col="' + c[0] + '"><div class="col-head"><span class="dotc"></span>' + c[1] +
                 '<span class="count">' + count + '</span></div><div class="col-body">' + body + '</div></div>';
         }).join('');
@@ -332,8 +339,14 @@ var Tasks = {
     order: ['todo', 'doing', 'done'],
     wire: function (board) {
         var self = this;
+        // Suggested-idea cards aren't in the manual list — hand the idea straight
+        // to an agent terminal (no id lookup).
+        board.querySelectorAll('[data-act="run-idea"]').forEach(function (btn) {
+            btn.onclick = function () { App.runTaskInAgent(btn.dataset.idea); };
+        });
         board.querySelectorAll('.card').forEach(function (card) {
             var id = card.dataset.id;
+            if (!id) return; // idea/crew cards have no manual id
             card.addEventListener('dragstart', function (e) { card.classList.add('dragging'); e.dataTransfer.setData('text/plain', id); });
             card.addEventListener('dragend', function () { card.classList.remove('dragging'); });
             card.querySelectorAll('[data-act]').forEach(function (b) {

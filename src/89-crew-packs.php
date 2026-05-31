@@ -7,7 +7,7 @@
 class CrewPacks {
     // Opt keys that make up a reusable team (NOT the one-off task/runId).
     private const KEYS = ['focus','directorModel','coderModel','auditorModel','researcherModel',
-        'max','amplify','land','research','audit','skills','hosts'];
+        'max','amplify','land','research','audit','skills','hosts','ideas'];
 
     public static function dir(): string {
         $d = (getenv('HOME') ?: sys_get_temp_dir()) . '/.ollamadev/crew-packs';

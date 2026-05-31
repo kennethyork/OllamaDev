@@ -92,7 +92,7 @@ class Crew {
 
         // Persist the full plan (incl. subtask prompts + branch names) so this run
         // is resumable from disk if it's interrupted. Only the reusable opts are kept.
-        $resumeOpts = array_intersect_key($opts, array_flip(['directorModel', 'coderModel', 'auditorModel', 'researcherModel', 'focus', 'max', 'amplify', 'land', 'research', 'audit', 'skills', 'hosts']));
+        $resumeOpts = array_intersect_key($opts, array_flip(['directorModel', 'coderModel', 'auditorModel', 'researcherModel', 'focus', 'max', 'amplify', 'land', 'research', 'audit', 'skills', 'hosts', 'ideas']));
         $diskPlan = [];
         foreach ($subtasks as $i => $st) {
             $n = $i + 1; $title = $st['title'] ?? ('task ' . $n);
@@ -176,6 +176,7 @@ class Crew {
 
         // ---- Auditor reviews each diff, then gated landing (shared with resume). ----
         self::auditAndLand($agent, $results, $opts, $base, $baseCommit, $mAuditor, $amplify, $task, $setState);
+        self::offerIdeas($runId, $agent, $task, $research, $results, $mDirector, $opts, $board, $writeBoard);
         $board['active'] = false; $writeBoard();
         self::setRunStatus($runId, 'done');
 
@@ -299,6 +300,7 @@ class Crew {
         }
 
         self::auditAndLand($agent, $results, $opts, $base, $baseCommit, $mAuditor, $amplify, $task, $setState);
+        self::offerIdeas($runId, $agent, $task, $research, $results, $mCoder, $opts, $board, $writeBoard);
         $board['active'] = false; $writeBoard();
         self::setRunStatus($runId, 'done');
         foreach ($results as $res) if (!empty($res['wt'])) self::sh('git worktree remove --force ' . escapeshellarg($res['wt']) . ' 2>&1');
@@ -485,6 +487,40 @@ class Crew {
             'summary' => (string)($j['summary'] ?? ''),
             'issues' => is_array($j['issues'] ?? null) ? $j['issues'] : [],
         ];
+    }
+
+    // Automatically surface the most valuable NEXT steps at the end of every crew
+    // run — improvement ideas, likely bugs, missing tests, risks. Informational
+    // only: it does NOT implement them (the auditor's off-scope guard keeps each
+    // run focused on the task you gave it). Disable with --no-ideas / crew.ideas:false.
+    private static function offerIdeas(string $runId, Agent $agent, string $task, string $research, array $results, string $model, array $opts, array &$board, callable $writeBoard): void {
+        if (($opts['ideas'] ?? Config::get('crew.ideas', true)) === false) return;
+        $c = "\033[36m"; $d = "\033[2m"; $b = "\033[1m"; $r = "\033[0m";
+        $ideas = self::suggestNext($agent, $task, $research, $results, $model);
+        echo "\n{$b}💡 Ideas to tackle next{$r} {$d}(suggestions — not applied){$r}\n";
+        if (!$ideas) { echo "  {$d}(none){$r}\n"; return; }
+        foreach ($ideas as $i => $idea) echo "  {$c}" . ($i + 1) . ".{$r} " . $idea . "\n";
+        $home = getenv('HOME') ?: sys_get_temp_dir();
+        @file_put_contents($home . '/.ollamadev/crew/' . $runId . '/ideas.md',
+            "# Ideas — next steps\n\nGoal: $task\n\n" . implode("\n", array_map(fn($x) => "- [ ] $x", $ideas)) . "\n");
+        $board['ideas'] = $ideas; $writeBoard();   // surfaced on the live board too
+        echo "  {$d}saved to ~/.ollamadev/crew/$runId/ideas.md{$r}\n";
+    }
+
+    // Ask the model for a short, ranked list of next-step ideas (JSON).
+    private static function suggestNext(Agent $agent, string $task, string $research, array $results, string $model): array {
+        $built = [];
+        foreach ($results as $res) if (empty($res['empty'])) $built[] = (string)($res['title'] ?? 'change');
+        $sys = ['role' => 'system', 'content' =>
+            "You are a pragmatic tech lead. Given the goal, codebase findings, and what was just built, propose the most " .
+            "VALUABLE next steps: concrete improvement ideas, likely bugs, missing tests, or risks. Output ONLY JSON: " .
+            '{"ideas":["one concise, actionable line", ...]} — at most 6, ranked most-valuable-first, no prose.'];
+        $ctx = ($research !== '' ? "Codebase findings:\n" . substr($research, 0, 3000) . "\n\n" : '') . ($built ? "Just built: " . implode('; ', $built) . "\n\n" : '');
+        $j = ModelClient::default()->chatJson($model !== '' ? $model : $agent->getModel(), [$sys, ['role' => 'user', 'content' => "Goal: $task\n\n" . $ctx . "List the next steps."]]);
+        $ideas = (is_array($j) && isset($j['ideas']) && is_array($j['ideas'])) ? $j['ideas'] : [];
+        $out = [];
+        foreach ($ideas as $x) { $x = trim((string)$x); if ($x !== '') $out[] = $x; }
+        return array_slice($out, 0, 6);
     }
 
     // Extract the first balanced JSON object from model text (handles ``` fences).
