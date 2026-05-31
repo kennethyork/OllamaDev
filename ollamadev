@@ -92,6 +92,7 @@ class Config {
             'ollama' => ['host' => getenv('OLLAMA_HOST') ?: 'http://localhost:11434', 'hosts' => [], 'defaultModel' => getenv('OLLAMA_MODEL') ?: 'llama3.2:latest', 'contextWindow' => (int)(getenv('OLLAMA_NUM_CTX') ?: 16384), 'maxContextWindow' => (int)(getenv('OLLAMA_MAX_NUM_CTX') ?: 32768), 'autoContext' => true, 'temperature' => 0.6, 'stream' => true],
             'agents' => ['coder' => ['temperature' => 0.7, 'maxTokens' => 4096], 'maxIterations' => 12, 'maxToolOutput' => 12000, 'subagentPermission' => 'readonly'],
             'session' => ['autoResume' => true], // bare `ollamadev` resumes this repo's last session (use `new`/--new for a fresh one)
+            'memory' => ['autoRemember' => true], // distill durable facts into graph memory after real work (--no-memory / false to disable)
             'data' => ['directory' => '.ollamadev']
         ];
         $home = getenv('HOME') ?: '/tmp';
@@ -4475,7 +4476,7 @@ class Crew {
 
         // Persist the full plan (incl. subtask prompts + branch names) so this run
         // is resumable from disk if it's interrupted. Only the reusable opts are kept.
-        $resumeOpts = array_intersect_key($opts, array_flip(['directorModel', 'coderModel', 'auditorModel', 'researcherModel', 'focus', 'max', 'amplify', 'land', 'research', 'audit', 'skills', 'hosts', 'ideas']));
+        $resumeOpts = array_intersect_key($opts, array_flip(['directorModel', 'coderModel', 'auditorModel', 'researcherModel', 'focus', 'max', 'amplify', 'land', 'research', 'audit', 'skills', 'hosts', 'ideas', 'memory']));
         $diskPlan = [];
         foreach ($subtasks as $i => $st) {
             $n = $i + 1; $title = $st['title'] ?? ('task ' . $n);
@@ -4560,6 +4561,7 @@ class Crew {
         // ---- Auditor reviews each diff, then gated landing (shared with resume). ----
         self::auditAndLand($agent, $results, $opts, $base, $baseCommit, $mAuditor, $amplify, $task, $setState);
         self::offerIdeas($runId, $agent, $task, $research, $results, $mDirector, $opts, $board, $writeBoard);
+        self::rememberFacts($task, $research, $results, $mDirector, $opts);
         $board['active'] = false; $writeBoard();
         self::setRunStatus($runId, 'done');
 
@@ -4684,6 +4686,7 @@ class Crew {
 
         self::auditAndLand($agent, $results, $opts, $base, $baseCommit, $mAuditor, $amplify, $task, $setState);
         self::offerIdeas($runId, $agent, $task, $research, $results, $mCoder, $opts, $board, $writeBoard);
+        self::rememberFacts($task, $research, $results, $mCoder, $opts);
         $board['active'] = false; $writeBoard();
         self::setRunStatus($runId, 'done');
         foreach ($results as $res) if (!empty($res['wt'])) self::sh('git worktree remove --force ' . escapeshellarg($res['wt']) . ' 2>&1');
@@ -4888,6 +4891,17 @@ class Crew {
             "# Ideas — next steps\n\nGoal: $task\n\n" . implode("\n", array_map(fn($x) => "- [ ] $x", $ideas)) . "\n");
         $board['ideas'] = $ideas; $writeBoard();   // surfaced on the live board too
         echo "  {$d}saved to ~/.ollamadev/crew/$runId/ideas.md{$r}\n";
+    }
+
+    // Auto-remember: after a run, distill durable project facts into graph memory
+    // so the knowledge base fills itself as the crew works. Disable: --no-memory.
+    private static function rememberFacts(string $task, string $research, array $results, string $model, array $opts): void {
+        if (($opts['memory'] ?? Config::get('memory.autoRemember', true)) === false || !class_exists('Memory')) return;
+        $built = [];
+        foreach ($results as $res) if (empty($res['empty'])) $built[] = (string)($res['title'] ?? '');
+        $ctx = "Task: $task\n" . ($research !== '' ? "Findings:\n" . substr($research, 0, 3000) . "\n" : '') . ($built ? "Built: " . implode('; ', $built) : '');
+        $saved = Memory::autoRemember($ctx, $model);
+        if ($saved) echo "\n\033[1m🧠 Remembered\033[0m \033[2m" . implode(', ', $saved) . " — see `ollamadev memory`\033[0m\n";
     }
 
     // Ask the model for a short, ranked list of next-step ideas (JSON).
@@ -5693,6 +5707,41 @@ class Memory {
         return implode("\n", $lines);
     }
 
+    // Auto-capture: from recent work ($context), extract DURABLE, reusable project
+    // facts and save them as notes — deduped against existing ones. Best-effort:
+    // any failure (model down, unparseable JSON) returns []. Returns saved slugs.
+    public static function autoRemember(string $context, string $model = ''): array {
+        $context = trim($context);
+        if ($context === '' || !class_exists('ModelClient')) return [];
+        $have = self::all();
+        $existing = [];
+        foreach ($have as $slug => $m) $existing[] = $slug . ' (' . $m['title'] . ')';
+        $sys = ['role' => 'system', 'content' =>
+            "Extract DURABLE, reusable facts about THIS PROJECT worth remembering across sessions — architecture, " .
+            "conventions, key decisions, gotchas, where things live. NOT transient task details or chatter. Skip " .
+            "anything already covered by the existing notes. Output ONLY JSON: " .
+            '{"notes":[{"title":"short title","body":"1-3 sentences; link related notes with [[slug]]"}]} — at most 4, ' .
+            "or an empty array if nothing durable is worth saving."];
+        $ex = $existing ? "Existing notes (do NOT duplicate):\n- " . implode("\n- ", array_slice($existing, 0, 40)) . "\n\n" : '';
+        $j = ModelClient::default()->chatJson($model !== '' ? $model : Config::get('ollama.defaultModel', ''),
+            [$sys, ['role' => 'user', 'content' => $ex . "Recent work:\n" . substr($context, 0, 6000) . "\n\nExtract durable facts worth keeping."]]);
+        $notes = (is_array($j) && isset($j['notes']) && is_array($j['notes'])) ? $j['notes'] : [];
+        $saved = [];
+        foreach (array_slice($notes, 0, 4) as $n) {
+            if (!is_array($n)) continue;
+            $title = trim((string)($n['title'] ?? '')); $body = trim((string)($n['body'] ?? ''));
+            if ($title === '' || $body === '') continue;
+            $slug = self::slugify($title);
+            if (isset($have[$slug])) continue;                          // exact dedupe
+            $dupe = false; foreach ($have as $m) if (strcasecmp($m['title'], $title) === 0) { $dupe = true; break; }
+            if ($dupe) continue;                                        // title dedupe
+            self::save($title, $body);
+            $saved[] = $slug;
+            $have[$slug] = ['title' => $title, 'tags' => [], 'links' => [], 'body' => $body]; // dedupe within this batch
+        }
+        return $saved;
+    }
+
     // Graph of nodes + edges (edges resolved to existing memories by slug or title).
     public static function graph(): array {
         $all = self::all();
@@ -5877,7 +5926,7 @@ class Watcher {
 class CrewPacks {
     // Opt keys that make up a reusable team (NOT the one-off task/runId).
     private const KEYS = ['focus','directorModel','coderModel','auditorModel','researcherModel',
-        'max','amplify','land','research','audit','skills','hosts','ideas'];
+        'max','amplify','land','research','audit','skills','hosts','ideas','memory'];
 
     public static function dir(): string {
         $d = (getenv('HOME') ?: sys_get_temp_dir()) . '/.ollamadev/crew-packs';
@@ -5939,6 +5988,7 @@ class Session {
     private string $title;
     private string $model;
     private string $cwd = '';     // working dir this session belongs to (for per-repo resume)
+    private bool $didEdit = false; // did this session change files? (gates auto-remember on exit)
     private array $messages = [];
     private array $history = []; // in-session input history for the line editor
     private Agent $agent;
@@ -6811,10 +6861,22 @@ $GLOBALS['currentSessionModel'] = null;
                 echo "\033[2m  ✎ " . implode(', ', array_unique($edited)) . "\033[0m\n";
                 Hooks::run('afterEdit', array_values(array_unique($edited)));
                 $GLOBALS['editedFiles'] = [];
+                $this->didEdit = true;
             }
 
             $this->compactMessages();
             $this->save();
+        }
+
+        // On exit, if the session did real work, distill a few durable project
+        // facts into graph memory so the knowledge base fills itself over time.
+        if ($this->didEdit && Config::get('memory.autoRemember', true) && class_exists('Memory')) {
+            $ctx = '';
+            foreach (array_slice($this->messages, -16) as $m) {
+                $ctx .= strtoupper($m['role'] ?? '') . ': ' . substr((string)($m['content'] ?? ''), 0, 600) . "\n";
+            }
+            $saved = Memory::autoRemember($ctx, $this->model);
+            if ($saved) echo "\033[2m  🧠 remembered " . implode(', ', $saved) . " (see /memory)\033[0m\n";
         }
     }
 
@@ -8213,6 +8275,7 @@ if ($cmd === 'chat') {
     if (in_array('--no-audit', $argv, true)) $flagOpts['audit'] = false;
     if (in_array('--no-skills', $argv, true)) $flagOpts['skills'] = false;
     if (in_array('--no-ideas', $argv, true)) $flagOpts['ideas'] = false;
+    if (in_array('--no-memory', $argv, true)) $flagOpts['memory'] = false;
     if (!empty($flags['hosts'])) $flagOpts['hosts'] = array_values(array_filter(array_map('trim', explode(',', $flags['hosts']))));
 
     // Crew team-packs: save/list/remove shareable team configs.

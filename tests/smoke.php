@@ -515,6 +515,12 @@ if (preg_match('/class TerminalManager.*?\n\}/s', $src, $tmm)) {
     @exec('rm -rf ' . escapeshellarg($thome));
 } else { ok('TerminalManager extractable', false); }
 
+echo "\n== Auto-remember (self-populating memory) ==\n";
+ok('Memory::autoRemember exists + dedupes', strpos($src, 'function autoRemember(') !== false && strpos($src, 'title dedupe') !== false);
+ok('crew auto-remembers after a run (run + resume)', strpos($src, 'function rememberFacts(') !== false && substr_count($src, 'self::rememberFacts(') >= 2);
+ok('interactive session auto-remembers on exit when it did work', strpos($src, '$this->didEdit') !== false && strpos($src, 'Memory::autoRemember($ctx') !== false);
+ok('--no-memory flag + config default wired', strpos($src, "\$flagOpts['memory'] = false") !== false && strpos($src, "'autoRemember' => true") !== false);
+
 echo "\n== Context tuning + smarter compaction ==\n";
 if (preg_match('/class ContextTuner \{.*?\n\}/s', $src, $ctm)) {
     if (!class_exists('OllamaClient')) { if (preg_match('/class OllamaClient \{.*?\n\}/s', $src, $oc2)) eval($oc2[0]); }

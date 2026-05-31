@@ -97,6 +97,41 @@ class Memory {
         return implode("\n", $lines);
     }
 
+    // Auto-capture: from recent work ($context), extract DURABLE, reusable project
+    // facts and save them as notes — deduped against existing ones. Best-effort:
+    // any failure (model down, unparseable JSON) returns []. Returns saved slugs.
+    public static function autoRemember(string $context, string $model = ''): array {
+        $context = trim($context);
+        if ($context === '' || !class_exists('ModelClient')) return [];
+        $have = self::all();
+        $existing = [];
+        foreach ($have as $slug => $m) $existing[] = $slug . ' (' . $m['title'] . ')';
+        $sys = ['role' => 'system', 'content' =>
+            "Extract DURABLE, reusable facts about THIS PROJECT worth remembering across sessions — architecture, " .
+            "conventions, key decisions, gotchas, where things live. NOT transient task details or chatter. Skip " .
+            "anything already covered by the existing notes. Output ONLY JSON: " .
+            '{"notes":[{"title":"short title","body":"1-3 sentences; link related notes with [[slug]]"}]} — at most 4, ' .
+            "or an empty array if nothing durable is worth saving."];
+        $ex = $existing ? "Existing notes (do NOT duplicate):\n- " . implode("\n- ", array_slice($existing, 0, 40)) . "\n\n" : '';
+        $j = ModelClient::default()->chatJson($model !== '' ? $model : Config::get('ollama.defaultModel', ''),
+            [$sys, ['role' => 'user', 'content' => $ex . "Recent work:\n" . substr($context, 0, 6000) . "\n\nExtract durable facts worth keeping."]]);
+        $notes = (is_array($j) && isset($j['notes']) && is_array($j['notes'])) ? $j['notes'] : [];
+        $saved = [];
+        foreach (array_slice($notes, 0, 4) as $n) {
+            if (!is_array($n)) continue;
+            $title = trim((string)($n['title'] ?? '')); $body = trim((string)($n['body'] ?? ''));
+            if ($title === '' || $body === '') continue;
+            $slug = self::slugify($title);
+            if (isset($have[$slug])) continue;                          // exact dedupe
+            $dupe = false; foreach ($have as $m) if (strcasecmp($m['title'], $title) === 0) { $dupe = true; break; }
+            if ($dupe) continue;                                        // title dedupe
+            self::save($title, $body);
+            $saved[] = $slug;
+            $have[$slug] = ['title' => $title, 'tags' => [], 'links' => [], 'body' => $body]; // dedupe within this batch
+        }
+        return $saved;
+    }
+
     // Graph of nodes + edges (edges resolved to existing memories by slug or title).
     public static function graph(): array {
         $all = self::all();

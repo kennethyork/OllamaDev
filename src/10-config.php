@@ -12,6 +12,7 @@ class Config {
             'ollama' => ['host' => getenv('OLLAMA_HOST') ?: 'http://localhost:11434', 'hosts' => [], 'defaultModel' => getenv('OLLAMA_MODEL') ?: 'llama3.2:latest', 'contextWindow' => (int)(getenv('OLLAMA_NUM_CTX') ?: 16384), 'maxContextWindow' => (int)(getenv('OLLAMA_MAX_NUM_CTX') ?: 32768), 'autoContext' => true, 'temperature' => 0.6, 'stream' => true],
             'agents' => ['coder' => ['temperature' => 0.7, 'maxTokens' => 4096], 'maxIterations' => 12, 'maxToolOutput' => 12000, 'subagentPermission' => 'readonly'],
             'session' => ['autoResume' => true], // bare `ollamadev` resumes this repo's last session (use `new`/--new for a fresh one)
+            'memory' => ['autoRemember' => true], // distill durable facts into graph memory after real work (--no-memory / false to disable)
             'data' => ['directory' => '.ollamadev']
         ];
         $home = getenv('HOME') ?: '/tmp';

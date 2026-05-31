@@ -92,7 +92,7 @@ class Crew {
 
         // Persist the full plan (incl. subtask prompts + branch names) so this run
         // is resumable from disk if it's interrupted. Only the reusable opts are kept.
-        $resumeOpts = array_intersect_key($opts, array_flip(['directorModel', 'coderModel', 'auditorModel', 'researcherModel', 'focus', 'max', 'amplify', 'land', 'research', 'audit', 'skills', 'hosts', 'ideas']));
+        $resumeOpts = array_intersect_key($opts, array_flip(['directorModel', 'coderModel', 'auditorModel', 'researcherModel', 'focus', 'max', 'amplify', 'land', 'research', 'audit', 'skills', 'hosts', 'ideas', 'memory']));
         $diskPlan = [];
         foreach ($subtasks as $i => $st) {
             $n = $i + 1; $title = $st['title'] ?? ('task ' . $n);
@@ -177,6 +177,7 @@ class Crew {
         // ---- Auditor reviews each diff, then gated landing (shared with resume). ----
         self::auditAndLand($agent, $results, $opts, $base, $baseCommit, $mAuditor, $amplify, $task, $setState);
         self::offerIdeas($runId, $agent, $task, $research, $results, $mDirector, $opts, $board, $writeBoard);
+        self::rememberFacts($task, $research, $results, $mDirector, $opts);
         $board['active'] = false; $writeBoard();
         self::setRunStatus($runId, 'done');
 
@@ -301,6 +302,7 @@ class Crew {
 
         self::auditAndLand($agent, $results, $opts, $base, $baseCommit, $mAuditor, $amplify, $task, $setState);
         self::offerIdeas($runId, $agent, $task, $research, $results, $mCoder, $opts, $board, $writeBoard);
+        self::rememberFacts($task, $research, $results, $mCoder, $opts);
         $board['active'] = false; $writeBoard();
         self::setRunStatus($runId, 'done');
         foreach ($results as $res) if (!empty($res['wt'])) self::sh('git worktree remove --force ' . escapeshellarg($res['wt']) . ' 2>&1');
@@ -505,6 +507,17 @@ class Crew {
             "# Ideas — next steps\n\nGoal: $task\n\n" . implode("\n", array_map(fn($x) => "- [ ] $x", $ideas)) . "\n");
         $board['ideas'] = $ideas; $writeBoard();   // surfaced on the live board too
         echo "  {$d}saved to ~/.ollamadev/crew/$runId/ideas.md{$r}\n";
+    }
+
+    // Auto-remember: after a run, distill durable project facts into graph memory
+    // so the knowledge base fills itself as the crew works. Disable: --no-memory.
+    private static function rememberFacts(string $task, string $research, array $results, string $model, array $opts): void {
+        if (($opts['memory'] ?? Config::get('memory.autoRemember', true)) === false || !class_exists('Memory')) return;
+        $built = [];
+        foreach ($results as $res) if (empty($res['empty'])) $built[] = (string)($res['title'] ?? '');
+        $ctx = "Task: $task\n" . ($research !== '' ? "Findings:\n" . substr($research, 0, 3000) . "\n" : '') . ($built ? "Built: " . implode('; ', $built) : '');
+        $saved = Memory::autoRemember($ctx, $model);
+        if ($saved) echo "\n\033[1m🧠 Remembered\033[0m \033[2m" . implode(', ', $saved) . " — see `ollamadev memory`\033[0m\n";
     }
 
     // Ask the model for a short, ranked list of next-step ideas (JSON).

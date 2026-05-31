@@ -4,6 +4,7 @@ class Session {
     private string $title;
     private string $model;
     private string $cwd = '';     // working dir this session belongs to (for per-repo resume)
+    private bool $didEdit = false; // did this session change files? (gates auto-remember on exit)
     private array $messages = [];
     private array $history = []; // in-session input history for the line editor
     private Agent $agent;
@@ -876,10 +877,22 @@ $GLOBALS['currentSessionModel'] = null;
                 echo "\033[2m  ✎ " . implode(', ', array_unique($edited)) . "\033[0m\n";
                 Hooks::run('afterEdit', array_values(array_unique($edited)));
                 $GLOBALS['editedFiles'] = [];
+                $this->didEdit = true;
             }
 
             $this->compactMessages();
             $this->save();
+        }
+
+        // On exit, if the session did real work, distill a few durable project
+        // facts into graph memory so the knowledge base fills itself over time.
+        if ($this->didEdit && Config::get('memory.autoRemember', true) && class_exists('Memory')) {
+            $ctx = '';
+            foreach (array_slice($this->messages, -16) as $m) {
+                $ctx .= strtoupper($m['role'] ?? '') . ': ' . substr((string)($m['content'] ?? ''), 0, 600) . "\n";
+            }
+            $saved = Memory::autoRemember($ctx, $this->model);
+            if ($saved) echo "\033[2m  🧠 remembered " . implode(', ', $saved) . " (see /memory)\033[0m\n";
         }
     }
 

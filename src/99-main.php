@@ -1232,6 +1232,7 @@ if ($cmd === 'chat') {
     if (in_array('--no-audit', $argv, true)) $flagOpts['audit'] = false;
     if (in_array('--no-skills', $argv, true)) $flagOpts['skills'] = false;
     if (in_array('--no-ideas', $argv, true)) $flagOpts['ideas'] = false;
+    if (in_array('--no-memory', $argv, true)) $flagOpts['memory'] = false;
     if (!empty($flags['hosts'])) $flagOpts['hosts'] = array_values(array_filter(array_map('trim', explode(',', $flags['hosts']))));
 
     // Crew team-packs: save/list/remove shareable team configs.
