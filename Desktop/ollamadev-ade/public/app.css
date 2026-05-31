@@ -167,7 +167,9 @@ body {
 .term-head { display: flex; align-items: center; gap: 8px; padding: 7px 11px; background: var(--bg2); border-bottom: 1px solid var(--border); font-size: 12px; user-select: none; }
 .term-head > .nm { font-weight: 600; color: var(--fg); }
 .term-head .id { color: var(--faint); font-family: var(--mono); font-size: 11px; }
-.term-head .x { margin-left: auto; cursor: pointer; color: var(--faint); border: none; background: none; font-size: 16px; line-height: 1; border-radius: 4px; padding: 0 4px; }
+.term-head .zoom { margin-left: auto; cursor: pointer; color: var(--faint); border: none; background: none; font-size: 14px; line-height: 1; border-radius: 4px; padding: 0 5px; }
+.term-head .zoom:hover { color: var(--accent); background: rgba(88,166,255,.12); }
+.term-head .x { margin-left: 2px; cursor: pointer; color: var(--faint); border: none; background: none; font-size: 16px; line-height: 1; border-radius: 4px; padding: 0 4px; }
 .term-head .x:hover { color: var(--err); background: rgba(248,81,73,.12); }
 /* agent status badge */
 .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 2px 8px; border-radius: 20px; border: 1px solid var(--border); color: var(--dim); }

@@ -87,13 +87,21 @@ Terminal.prototype.mount = function (host) {
     host.innerHTML =
         '<div class="term-head"><span class="nm">' + esc(this.model) + '</span><span class="id">' + this.id.slice(-6) + '</span>' +
         '<span class="badge ' + this.status + '"><span class="b-dot"></span><span class="b-label">' + this.status + '</span></span>' +
+        '<button class="zoom" title="Focus (make this terminal bigger)">⤢</button>' +
         '<button class="x" title="Close">&times;</button></div>' +
         '<div class="term-screen" tabindex="0" title="Click and type — this is the live ollamadev CLI"></div>';
     this.screen = host.querySelector('.term-screen');
     this.badgeEl = host.querySelector('.badge');
     var head = host.querySelector('.term-head');
-    head.title = 'Double-click to zoom / restore';
-    head.ondblclick = function (e) { if (e.target.classList.contains('x')) return; app.toggleZoom(self.id); };
+    head.title = 'Double-click to focus / restore';
+    head.ondblclick = function (e) { if (e.target.classList.contains('x') || e.target.classList.contains('zoom')) return; app.toggleZoom(self.id); };
+    // Focus button: enlarge this terminal to fill the area; click again to restore
+    // it back into the grid with the rest. Reflects the current state per render.
+    var zb = host.querySelector('.zoom');
+    var focused = app.zoomed === self.id;
+    zb.textContent = focused ? '⤡' : '⤢';
+    zb.title = focused ? 'Restore (back to the other terminals)' : 'Focus (make this terminal bigger)';
+    zb.onclick = function (e) { e.stopPropagation(); app.toggleZoom(self.id); };
     host.querySelector('.x').onclick = function () { app.closeTerminal(self.id); };
     // The screen IS the terminal: forward every keystroke straight to the pty.
     this.screen.addEventListener('keydown', function (e) {
