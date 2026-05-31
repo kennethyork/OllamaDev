@@ -285,6 +285,12 @@ body {
 .cpane-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--bg3); }
 .cpane-title { font-weight: 600; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cpane-badge { margin-left: auto; font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--dim); white-space: nowrap; }
+.cpane-zoom { margin-left: 6px; cursor: pointer; color: var(--faint); border: none; background: none; font-size: 13px; line-height: 1; border-radius: 4px; padding: 0 5px; }
+.cpane-zoom:hover { color: var(--accent); background: rgba(88,166,255,.12); }
+#crewPanes.zoomed { grid-template-columns: 1fr; }
+#crewPanes.zoomed .cpane { display: none; }
+#crewPanes.zoomed .cpane.focused { display: flex; }
+#crewPanes.zoomed .cpane.focused .cpane-body { max-height: 60vh; }
 .cpane-badge.st-doing { color: var(--accent); border-color: var(--accent); }
 .cpane-badge.st-done { color: #3fb950; border-color: #3fb950; }
 .cpane-badge.st-held { color: #d29922; border-color: #d29922; }

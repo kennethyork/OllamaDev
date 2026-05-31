@@ -476,11 +476,11 @@ var Graph = {
 // Live per-coder panes: one read-only terminal-style pane per crew coder,
 // tailing its log so you watch the whole team build in parallel.
 var CrewPanes = {
-    runId: null, offsets: {}, text: {}, bodies: {}, count: 0,
+    runId: null, offsets: {}, text: {}, bodies: {}, count: 0, zoomed: null,
     sync: function (board) {
         var host = $('#crewPanes'); if (!host) return;
         var subs = (board && Array.isArray(board.subtasks)) ? board.subtasks : [];
-        if (!board || !board.runId || !subs.length) { host.hidden = true; host.innerHTML = ''; this.runId = null; this.count = 0; return; }
+        if (!board || !board.runId || !subs.length) { host.hidden = true; host.innerHTML = ''; this.runId = null; this.count = 0; this.zoomed = null; return; }
         host.hidden = false;
         // (Re)build the panes when the run or the coder count changes.
         if (board.runId !== this.runId || subs.length !== this.count) {
@@ -489,10 +489,19 @@ var CrewPanes = {
             host.innerHTML = subs.map(function (s) {
                 return '<div class="cpane" data-n="' + s.n + '">' +
                     '<div class="cpane-head"><span class="cpane-title">👷 ' + esc(s.title || ('coder ' + s.n)) + '</span>' +
-                    '<span class="cpane-badge" data-n="' + s.n + '"></span></div>' +
+                    '<span class="cpane-badge" data-n="' + s.n + '"></span>' +
+                    '<button class="cpane-zoom" data-n="' + s.n + '" title="Focus this coder">⤢</button></div>' +
                     '<pre class="cpane-body" data-n="' + s.n + '"></pre></div>';
             }).join('');
             host.querySelectorAll('.cpane-body').forEach(function (el) { self.bodies[el.dataset.n] = el; });
+            // Focus button (and double-click the head) enlarges one coder; click
+            // again to put it back among the others.
+            host.querySelectorAll('.cpane-zoom').forEach(function (btn) {
+                btn.onclick = function (e) { e.stopPropagation(); self.toggleZoom(parseInt(btn.dataset.n, 10)); };
+            });
+            host.querySelectorAll('.cpane-head').forEach(function (h) {
+                h.ondblclick = function (e) { if (e.target.classList.contains('cpane-zoom')) return; self.toggleZoom(parseInt(h.parentNode.dataset.n, 10)); };
+            });
         }
         // Update state badges every sync.
         subs.forEach(function (s) {
@@ -501,7 +510,22 @@ var CrewPanes = {
             badge.textContent = map[s.state] || s.state || '';
             badge.className = 'cpane-badge st-' + (s.state || 'todo');
         });
+        // A focused coder that vanished on rebuild reverts to the grid.
+        if (this.zoomed != null && !subs.some(function (s) { return s.n === this.zoomed; }, this)) this.zoomed = null;
+        this.applyZoom();
         this.poll(subs);
+    },
+    toggleZoom: function (n) { this.zoomed = this.zoomed === n ? null : n; this.applyZoom(); },
+    applyZoom: function () {
+        var host = $('#crewPanes'); if (!host) return;
+        var z = this.zoomed;
+        host.classList.toggle('zoomed', z != null);
+        host.querySelectorAll('.cpane').forEach(function (p) {
+            var isF = z != null && parseInt(p.dataset.n, 10) === z;
+            p.classList.toggle('focused', isF);
+            var btn = p.querySelector('.cpane-zoom');
+            if (btn) { btn.textContent = isF ? '⤡' : '⤢'; btn.title = isF ? 'Restore (back to the other coders)' : 'Focus this coder'; }
+        });
     },
     poll: function (subs) {
         if (!this.runId || !window.crewCoderLog) return;
