@@ -18,7 +18,13 @@ class Config {
         foreach ($paths as $path) {
             if (file_exists($path)) {
                 $json = json_decode(file_get_contents($path), true);
-                if ($json) { self::$config = array_replace_recursive($defaults, $json); return self::$config; }
+                if ($json) {
+                    // Precedence: defaults < config file < environment. Env vars are
+                    // documented as overrides, so they must win over a config file
+                    // that hardcodes the same key (e.g. ollama.host).
+                    self::$config = array_replace_recursive($defaults, $json, $envOverrides);
+                    return self::$config;
+                }
             }
         }
         self::$config = $defaults;

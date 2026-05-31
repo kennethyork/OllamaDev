@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Docs — OllamaDev</title>
+<meta name="description" content="OllamaDev documentation: install, commands, permission modes, Crew, skills, graph memory, MCP/LSP, configuration, and troubleshooting.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="index.html"><span class="dot">▰</span> OllamaDev</a>
+    <div class="nav-links">
+      <a href="index.html#features">Features</a>
+      <a href="index.html#install">Install</a>
+      <a href="docs.html">Docs</a>
+      <a class="pill" href="https://github.com/kennethyork/OllamaDev">GitHub ↗</a>
+    </div>
+  </div>
+</nav>
+
+<div class="docs">
+  <aside class="docs-side">
+    <h4>Start here</h4>
+    <a href="#getting-started">Getting started</a>
+    <a href="#installation">Installation</a>
+    <a href="#quick-start">Quick start</a>
+    <h4>Using it</h4>
+    <a href="#commands">CLI commands</a>
+    <a href="#slash">Slash commands</a>
+    <a href="#permissions">Permission modes</a>
+    <a href="#context">Context &amp; input</a>
+    <h4>Power features</h4>
+    <a href="#crew">Crew (multi-agent)</a>
+    <a href="#skills">Skills</a>
+    <a href="#memory">Graph memory</a>
+    <a href="#mcp-lsp">MCP &amp; LSP</a>
+    <h4>Reference</h4>
+    <a href="#config">Configuration</a>
+    <a href="#env">Environment vars</a>
+    <a href="#storage">Data storage</a>
+    <a href="#troubleshooting">Troubleshooting</a>
+  </aside>
+
+  <main class="docs-main">
+    <h1>OllamaDev Documentation</h1>
+    <p class="sub">A local, private, dependency-free AI coding agent for your terminal.</p>
+
+    <h2 id="getting-started" class="anchor">Getting started</h2>
+    <p>OllamaDev is a terminal coding agent that runs entirely against your local <a href="https://ollama.com">Ollama</a> instance (or LM Studio). It's a single self-contained <strong>vanilla PHP</strong> binary — no Composer, no extensions beyond PHP core + curl — with diff-previewed edits, undo, an interruptible agent loop, real context management, and 60+ tools.</p>
+    <p><strong>Requirements:</strong></p>
+    <ul>
+      <li><strong>PHP 8.0+</strong> (CLI) with curl — that's it.</li>
+      <li><strong>Ollama</strong> running locally (<code>ollama serve</code>).</li>
+      <li>At least one model pulled, e.g. <code>ollama pull qwen2.5-coder</code>.</li>
+    </ul>
+    <div class="callout">
+      <strong>Recommended models</strong> for reliable tool use: <code>qwen2.5-coder</code>, <code>qwen3-coder</code>, <code>mistral</code>, <code>codestral</code>, <code>llama3.1</code>, <code>gpt-oss</code>.
+    </div>
+
+    <h2 id="installation" class="anchor">Installation</h2>
+    <h3>From source (recommended)</h3>
+<pre class="code">git clone https://github.com/kennethyork/OllamaDev.git
+cd OllamaDev
+
+<span class="cm"># Build + run the test suite + install to ~/.local/bin/ollamadev</span>
+make install
+
+<span class="cm"># or just build the single-file binary in place</span>
+./build.sh        <span class="cm"># produces ./ollamadev</span><button class="copy-btn">Copy</button></pre>
+    <p><code>make install</code> only installs if the build and the offline smoke suite pass, and it backs up the previously installed binary so you can <code>make rollback</code> instantly. Make sure <code>~/.local/bin</code> is on your <code>PATH</code>, then run <code>ollamadev help</code>.</p>
+
+    <h3>Desktop app (ADE)</h3>
+    <p><strong>OllamaDev ADE</strong> (Agentic Development Environment) is an optional desktop GUI in <code>Desktop/ollamadev-ade/</code> — a <a href="https://github.com/boson-php/boson">Boson</a> WebView app built with vanilla PHP/JS/HTML/CSS (no front-end frameworks). It wraps the agent in a windowed interface with a file browser and a real PTY terminal.</p>
+    <div class="callout warn">Unlike the CLI binary (which is dependency-free), the desktop app uses Composer for the Boson runtime and needs <strong>PHP 8.4+</strong>.</div>
+<pre class="code">cd Desktop/ollamadev-ade
+composer install
+
+composer start    <span class="cm"># dev: serve at http://localhost:8080</span>
+composer build    <span class="cm"># compile a native desktop app</span><button class="copy-btn">Copy</button></pre>
+
+    <h3>VS Code extension</h3>
+<pre class="code">cd vscode-extension
+code --install-extension ollamadev-extension.vsix<button class="copy-btn">Copy</button></pre>
+
+    <h2 id="quick-start" class="anchor">Quick start</h2>
+    <h3>Interactive</h3>
+<pre class="code">ollamadev                      <span class="cm"># start a chat session</span>
+ollamadev --auto               <span class="cm"># auto-approve all tools (no prompts)</span>
+ollamadev --readonly           <span class="cm"># plan mode: block all mutating tools</span>
+ollamadev -m qwen2.5-coder     <span class="cm"># pick a model for this session</span>
+ollamadev resume               <span class="cm"># pick a recent session to resume</span>
+ollamadev -c                   <span class="cm"># continue the most recent session</span><button class="copy-btn">Copy</button></pre>
+    <h3>One-shot</h3>
+<pre class="code">ollamadev -p "explain @src/app.js"
+echo "summarize this" | ollamadev chat<button class="copy-btn">Copy</button></pre>
+
+    <h2 id="commands" class="anchor">CLI commands</h2>
+    <table>
+      <thead><tr><th>Command</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>ollamadev new</code></td><td>New session</td></tr>
+        <tr><td><code>ollamadev list</code></td><td>List sessions</td></tr>
+        <tr><td><code>ollamadev resume</code></td><td>Interactive resume picker</td></tr>
+        <tr><td><code>ollamadev load &lt;id&gt;</code></td><td>Load a session by id</td></tr>
+        <tr><td><code>ollamadev pull &lt;model&gt;</code></td><td>Download a model from Ollama</td></tr>
+        <tr><td><code>ollamadev init</code></td><td>Generate <code>OLLAMADEV.md</code> project memory</td></tr>
+        <tr><td><code>ollamadev models</code></td><td>List installed models</td></tr>
+        <tr><td><code>ollamadev crew &lt;task&gt;</code></td><td>Run a multi-agent Crew</td></tr>
+        <tr><td><code>ollamadev skills</code></td><td>List / scaffold / install / export skills</td></tr>
+        <tr><td><code>ollamadev memory</code></td><td>Inspect the graph memory knowledge base</td></tr>
+        <tr><td><code>ollamadev git &lt;cmd&gt;</code></td><td>Run git</td></tr>
+        <tr><td><code>ollamadev terminal ...</code></td><td>Terminal multiplexer</td></tr>
+        <tr><td><code>ollamadev lsp</code></td><td>LSP server mode (for editors)</td></tr>
+        <tr><td><code>ollamadev help [topic]</code></td><td>Help (commands, tools, git, terminal, session, tips)</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="slash" class="anchor">In-chat slash commands</h2>
+    <p>Type <code>/help</code> in a session for the full, grouped list. Highlights:</p>
+    <table>
+      <thead><tr><th>Command</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>/model &lt;name&gt;</code> · <code>/models</code> · <code>/pull &lt;m&gt;</code></td><td>Switch / list / download models</td></tr>
+        <tr><td><code>@path/to/file</code></td><td>Inline a file into your message</td></tr>
+        <tr><td><code>/image &lt;path&gt;</code></td><td>Attach an image (vision models)</td></tr>
+        <tr><td><code>/undo</code> · <code>/checkpoints</code></td><td>Revert the last edit / list checkpoints</td></tr>
+        <tr><td><code>/retry</code></td><td>Regenerate the last response</td></tr>
+        <tr><td><code>/init</code></td><td>Generate <code>OLLAMADEV.md</code> project memory</td></tr>
+        <tr><td><code>/context</code> · <code>/status</code></td><td>Context fill &amp; real token usage</td></tr>
+        <tr><td><code>/permission &lt;mode|allow|deny&gt;</code></td><td>Manage tool approval</td></tr>
+        <tr><td><code>/crew</code> · <code>/skills</code> · <code>/memory</code></td><td>Launch a crew · manage skills · browse memory</td></tr>
+        <tr><td><code>/chat</code> · <code>/agent</code></td><td>Toggle chat-only vs. tool-using mode</td></tr>
+        <tr><td><code>/compact</code> · <code>/new</code> · <code>/tools</code> · <code>/commands</code></td><td>Compact, new session, list tools/custom commands</td></tr>
+      </tbody>
+    </table>
+    <p>The input line supports history (↑/↓), cursor editing, <strong>Tab completion</strong> (commands, paths, model names), and <strong>Ctrl-C</strong> to interrupt a response without quitting.</p>
+
+    <h2 id="permissions" class="anchor">Permission modes</h2>
+    <table>
+      <thead><tr><th>Mode</th><th>Behavior</th><th>Flag</th></tr></thead>
+      <tbody>
+        <tr><td><code>ask</code> (default)</td><td>Prompts before mutating tools (shows the diff)</td><td>—</td></tr>
+        <tr><td><code>auto</code></td><td>Runs every tool without asking</td><td><code>--auto</code> / <code>--yolo</code></td></tr>
+        <tr><td><code>readonly</code></td><td>Blocks all mutating tools (plan mode)</td><td><code>--readonly</code> / <code>--plan</code></td></tr>
+      </tbody>
+    </table>
+    <p>Switch at runtime with <code>/permission mode &lt;auto|ask|readonly&gt;</code>. Sub-agents run <strong>read-only</strong> regardless of the parent mode unless explicitly granted writes.</p>
+
+    <h2 id="context" class="anchor">Context &amp; input</h2>
+    <ul>
+      <li><strong><code>@file</code> mentions</strong> — <code>explain @src/foo.php</code> inlines the file into your message.</li>
+      <li><strong>Image / vision input</strong> — attach images with <code>@image.png</code> or <code>/image &lt;path&gt;</code> for multimodal models.</li>
+      <li><strong>Real token/context meter</strong> — <code>/status</code> and <code>/context</code> show actual token counts and context fill.</li>
+      <li><strong>Auto-compaction</strong> — older messages are summarized by the model to stay within the window.</li>
+      <li><strong>Checkpoint &amp; undo</strong> — every file change is snapshotted; <code>/undo</code> reverts the last one, <code>/checkpoints</code> lists them.</li>
+    </ul>
+
+    <h2 id="crew" class="anchor">Crew — multi-agent</h2>
+    <p>Crew is a bench of agents: a <strong>Researcher</strong> gathers context, a <strong>Director</strong> plans and decomposes the task, parallel <strong>Coders</strong> implement in isolated git worktrees, and an <strong>Auditor</strong> reviews before anything lands.</p>
+<pre class="code"><span class="cm"># run a task</span>
+ollamadev crew "add a /health route and tests"
+
+<span class="cm"># interactive — configure the team, then prompt the Director live</span>
+ollamadev crew
+
+<span class="cm"># pick a model per role</span>
+ollamadev crew "refactor auth" \
+  --director-model qwen2.5-coder --coder-model codestral
+
+<span class="cm"># run coders across multiple local hosts, in live tmux panes</span>
+ollamadev crew "big refactor" --hosts host-a,host-b --panes<button class="copy-btn">Copy</button></pre>
+    <ul>
+      <li><strong>Per-role models</strong> — <code>--director-model</code>, <code>--coder-model</code>, <code>--auditor-model</code>, <code>--researcher-model</code>.</li>
+      <li><strong>Parallel + multi-host</strong> — <code>--hosts a,b,c</code> spreads Coders across local model servers.</li>
+      <li><strong>Live panes</strong> — <code>--panes</code> opens one tmux pane per Coder (logs still written without tmux).</li>
+      <li><strong>Review gating</strong> — <code>--review</code> holds every branch for review; nothing auto-merges. Self-repo edits are gated automatically.</li>
+      <li><strong>Team skill packs</strong> — Crews are seeded with relevant skills by focus; disable with <code>--no-skills</code>.</li>
+    </ul>
+
+    <h2 id="skills" class="anchor">Skills</h2>
+    <p>Skills are reusable instruction packs (<code>SKILL.md</code> folders) the model loads on demand via progressive disclosure — only the catalog of names/descriptions sits in the prompt; the full body is fetched when a skill is invoked. You can author your own and share them.</p>
+<pre class="code">ollamadev skills                       <span class="cm"># list discovered skills</span>
+ollamadev skills new my-skill          <span class="cm"># scaffold a SKILL.md</span>
+ollamadev skills install &lt;dir|git-url|.tar.gz|.zip&gt;
+ollamadev skills export my-skill       <span class="cm"># package to share</span>
+ollamadev skills remove my-skill<button class="copy-btn">Copy</button></pre>
+    <div class="callout warn">A skill is instructions the model may follow. Review what you install — your permission mode (auto/ask/readonly) still gates writes and shell.</div>
+
+    <h2 id="memory" class="anchor">Graph memory</h2>
+    <p>A wiki-linked knowledge base that persists across sessions. Notes link to each other with <code>[[slug]]</code>; the agent sees an index in its prompt and recalls full notes on demand. Two tools drive it: <code>recall</code> (read-only) and <code>remember</code> (write).</p>
+<pre class="code">ollamadev memory                  <span class="cm"># list notes</span>
+ollamadev memory new "API design"  <span class="cm"># create a note</span>
+ollamadev memory show &lt;slug&gt;        <span class="cm"># read a note</span>
+ollamadev memory search &lt;query&gt;     <span class="cm"># search notes</span>
+ollamadev memory graph             <span class="cm"># print the link graph (--json for data)</span><button class="copy-btn">Copy</button></pre>
+    <p>The desktop ADE renders this graph visually in its Memory tab.</p>
+
+    <h2 id="mcp-lsp" class="anchor">MCP &amp; LSP</h2>
+    <p><strong>MCP</strong> — connect Model Context Protocol servers over the standard stdio transport (JSON-RPC 2.0) or an HTTP/SSE fallback. Configure them under <code>mcpServers</code> in your config, or manage at runtime:</p>
+<pre class="code">ollamadev mcp list
+ollamadev mcp add filesystem "npx -y @modelcontextprotocol/server-filesystem /path"<button class="copy-btn">Copy</button></pre>
+    <p><strong>LSP</strong> — built-in code intelligence (goto, find_refs, symbols, hover, diagnostics, format) plus an LSP <em>server</em> mode so editors can use OllamaDev for AI completions and diagnostics: <code>ollamadev lsp --port 4389</code>.</p>
+
+    <h2 id="config" class="anchor">Configuration</h2>
+    <p>Config is read from the first of: <code>~/.ollamadev/config.json</code>, <code>~/.config/ollamadev/config.json</code>, <code>.ollamadev.json</code> (project-local). Environment variables override the config file.</p>
+<pre class="code">{
+  "provider": "ollama",
+  "ollama": {
+    "host": "http://localhost:11434",
+    "defaultModel": "qwen2.5-coder:latest",
+    "contextWindow": 16384,
+    "temperature": 0.6,
+    "stream": true
+  },
+  "lmstudio": { "host": "http://localhost:1234/v1" },
+  "agents": {
+    "maxIterations": 12,
+    "maxToolOutput": 12000,
+    "subagentPermission": "readonly"
+  },
+  "permissions": { "mode": "ask" },
+  "ui": { "markdown": true },
+  "hooks": { "afterEdit": "echo edited" },
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
+    }
+  }
+}<button class="copy-btn">Copy</button></pre>
+
+    <h3>LM Studio (opt-in local backend)</h3>
+    <p>Ollama is the default. To use LM Studio's local OpenAI-compatible server instead, start its server (Developer → Start Server, port 1234), then:</p>
+<pre class="code">ollamadev --lmstudio              <span class="cm"># this session</span>
+ollamadev --host http://localhost:1234/v1
+<span class="cm"># or set "provider": "lmstudio" in config</span><button class="copy-btn">Copy</button></pre>
+    <div class="callout">Still 100% local: LM Studio uses the OpenAI <em>wire format</em>, but the server runs on your machine. The cloud ban holds — the format is fine, hitting a hosted provider is not.</div>
+
+    <h2 id="env" class="anchor">Environment variables</h2>
+    <table>
+      <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>OLLAMA_HOST</code></td><td><code>http://localhost:11434</code></td><td>Ollama API endpoint</td></tr>
+        <tr><td><code>OLLAMA_MODEL</code></td><td>first installed model</td><td>Default model</td></tr>
+        <tr><td><code>OLLAMA_NUM_CTX</code></td><td><code>16384</code></td><td>Context window size</td></tr>
+        <tr><td><code>OLLAMADEV_PROVIDER</code></td><td><code>ollama</code></td><td>Backend: <code>ollama</code> or <code>lmstudio</code></td></tr>
+        <tr><td><code>LMSTUDIO_HOST</code></td><td><code>http://localhost:1234/v1</code></td><td>LM Studio endpoint</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="storage" class="anchor">Data storage</h2>
+    <ul>
+      <li>Sessions: <code>~/.ollamadev/sessions/</code></li>
+      <li>Checkpoints: <code>~/.ollamadev/checkpoints/</code></li>
+      <li>Terminals: <code>~/.ollamadev/terminals/</code></li>
+      <li>Custom commands: <code>~/.ollamadev/commands/</code></li>
+    </ul>
+    <p>Put a prompt template in <code>~/.ollamadev/commands/review.md</code> (supports <code>$ARGS</code> / <code>$1</code>) and invoke it as <code>/review ...</code>. Configure <code>hooks.beforePrompt</code> / <code>hooks.afterEdit</code> shell commands to run at those points.</p>
+
+    <h2 id="troubleshooting" class="anchor">Troubleshooting</h2>
+    <p><strong>Cannot connect to Ollama</strong> — start it with <code>ollama serve</code>, or set <code>OLLAMA_HOST</code>. (On launch, OllamaDev prints the exact fix-up steps for whichever backend is configured.)</p>
+    <p><strong>Model not found / no models installed</strong> — <code>ollama pull qwen2.5-coder</code>, or just <code>/pull qwen2.5-coder</code> in-session.</p>
+    <p><strong>Unreliable tool use</strong> — small models struggle with tool-calling; try a recommended model (qwen2.5-coder, mistral, codestral) or use <code>/chat</code> for plain conversation.</p>
+    <p><strong>Permission denied running the binary</strong> — <code>chmod +x ~/.local/bin/ollamadev</code>.</p>
+    <p><strong>Need to undo a change</strong> — <code>/undo</code> reverts the last edit; <code>/checkpoints</code> lists every snapshot. Rolling back an install: <code>make rollback</code>.</p>
+  </main>
+</div>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <div>OllamaDev · MIT licensed · 100% local AI coding</div>
+    <div class="links">
+      <a href="index.html">Home</a>
+      <a href="https://github.com/kennethyork/OllamaDev">GitHub</a>
+      <a href="https://ollama.com">Ollama</a>
+    </div>
+  </div>
+</footer>
+
+<script src="site.js"></script>
+</body>
+</html>

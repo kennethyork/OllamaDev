@@ -233,6 +233,23 @@ if (preg_match('/class Config \{.*?\n\}/s', $src, $cfg) && preg_match('/class Ol
     ok('chatOptions extractable', false, 'Config or OllamaClient not found');
 }
 
+// Env vars are documented overrides — a config file must NOT silently win over
+// OLLAMA_HOST/OLLAMA_MODEL. Guard the merge order so the latent "built but never
+// applied" $envOverrides bug can't come back.
+ok('Config applies env overrides over the config file',
+   preg_match('/array_replace_recursive\(\s*\$defaults\s*,\s*\$json\s*,\s*\$envOverrides\s*\)/', $src) === 1,
+   'env overrides not merged last in Config::load');
+
+// Provider-aware onboarding (preflight) needs a host() getter on every client and
+// on the Agent facade so it can name the backend and print the right fix-up steps.
+ok('OllamaClient exposes host()', strpos($src, 'function host()') !== false && strpos($src, 'class OllamaClient') !== false);
+ok('LMStudioClient exposes host()', preg_match('/class LMStudioClient \{.*?function host\(\).*?\n\}/s', $src) === 1);
+ok('Agent forwards host() to its client', strpos($src, "method_exists(\$this->client, 'host')") !== false);
+ok('start() runs a preflight backend check', strpos($src, '$ready = $this->preflight();') !== false);
+ok('preflight surfaces the no-models case', strpos($src, 'no models installed') !== false);
+ok('first run hints recovery (/undo + /checkpoints)',
+   strpos($src, '/undo') !== false && strpos($src, '/checkpoints') !== false);
+
 // Tab-completion's common-prefix helper underpins completion behaviour.
 if (preg_match('/private static function commonPrefix\(array \$strs\): string \{.*?\n    \}/s', $src, $cp2)
  && preg_match('/private static function split\(string \$s\): array \{.*?\n    \}/s', $src, $sp)) {

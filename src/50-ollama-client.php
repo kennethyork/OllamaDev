@@ -6,6 +6,8 @@ class OllamaClient {
         $this->host = $host ?? Config::get('ollama.host', 'http://localhost:11434');
     }
 
+    public function host(): string { return $this->host; }
+
     public function checkConnection(): bool {
         $ch = curl_init($this->host . '/api/tags');
         curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 5]);

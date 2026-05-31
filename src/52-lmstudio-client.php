@@ -15,6 +15,8 @@ class LMStudioClient {
         $this->host = rtrim($h, '/');
     }
 
+    public function host(): string { return $this->host; }
+
     private function get(string $path): ?array {
         $ch = curl_init($this->host . $path);
         curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 8, CURLOPT_HTTPHEADER => ['Authorization: Bearer lm-studio']]);

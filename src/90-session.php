@@ -731,24 +731,62 @@ $GLOBALS['currentSessionModel'] = null;
         }
     }
 
+    // Provider-aware startup check. Returns true if the backend is reachable and
+    // has at least one model; otherwise prints actionable, copy-pasteable steps so
+    // a first run never dead-ends on a cryptic failure mid-prompt. The chat loop
+    // still opens either way — the user can fix the backend and retry without restarting.
+    private function preflight(): bool {
+        $cyan = "\033[36m"; $dim = "\033[2m"; $yel = "\033[33m"; $r = "\033[0m";
+        $host = $this->agent->host();
+        $isLM = class_exists('ModelClient') && ModelClient::isOpenAiStyle($host);
+        $name = $isLM ? 'LM Studio' : 'Ollama';
+
+        if (!$this->agent->checkConnection()) {
+            echo "\n{$yel}  ⚠ Can't reach {$name}{$r}{$dim} at " . ($host ?: 'the configured host') . "{$r}\n";
+            if ($isLM) {
+                echo "{$dim}    1. In LM Studio open the {$r}Developer{$dim} tab and {$r}Start Server{$dim} (default port 1234).{$r}\n";
+                echo "{$dim}    2. Load a model in the server panel.{$r}\n";
+                echo "{$dim}    Prefer Ollama? Drop {$r}{$cyan}--lmstudio{$r}{$dim} / unset {$r}{$cyan}OLLAMADEV_PROVIDER{$r}{$dim}.{$r}\n";
+            } else {
+                echo "{$dim}    1. Start the server:  {$r}{$cyan}ollama serve{$r}\n";
+                echo "{$dim}    2. Pull a model:      {$r}{$cyan}ollama pull qwen2.5-coder{$r}\n";
+                echo "{$dim}    Using a remote/other host? Set {$r}{$cyan}OLLAMA_HOST{$r}{$dim} or pass {$r}{$cyan}--host <url>{$r}{$dim}.{$r}\n";
+            }
+            echo "\n";
+            return false;
+        }
+
+        // Reachable but empty — the next prompt would fail with no obvious reason.
+        if (empty($this->agent->listModels())) {
+            echo "\n{$yel}  ⚠ {$name} is running but has no models installed.{$r}\n";
+            if ($isLM) echo "{$dim}    Download a model in LM Studio and load it in the server panel.{$r}\n";
+            else echo "{$dim}    Pull one:  {$r}{$cyan}ollama pull qwen2.5-coder{$r}{$dim}  — or {$r}{$cyan}/pull <model>{$r}{$dim} once you're in.{$r}\n";
+            echo "\n";
+            return false;
+        }
+        return true;
+    }
+
     public function start(): void {
         Permission::setInteractive(true); // enable approval prompts for mutating tools
         // Hosts that show their own model/title chrome (e.g. the desktop ADE) set
         // OLLAMADEV_NO_BANNER to suppress the ASCII banner and the model tip.
         $showBanner = !getenv('OLLAMADEV_NO_BANNER');
         if ($showBanner) echo $this->renderBanner();
-        if (!$this->agent->checkConnection()) {
-            echo "\033[33m  ⚠ Cannot connect to Ollama at " . Config::get('ollama.host') . "\033[0m\n";
-            echo "\033[2m    Start it with: ollama serve\033[0m\n\n";
-        }
+        $ready = $this->preflight();
 
         if (!empty($this->messages)) {
             echo "\033[2m  resumed session · " . count($this->messages) . " messages\033[0m\n";
         }
 
         // Nudge new users toward a capable model for agentic work.
-        if ($showBanner && !$this->isRecommended($this->model)) {
+        if ($showBanner && $ready && !$this->isRecommended($this->model)) {
             echo "\033[2m  tip: for reliable tool use try a recommended model — \033[0m\033[36mollama pull qwen2.5-coder\033[0m\033[2m, then /model qwen2.5-coder:latest\033[0m\n";
+        }
+
+        // First-run hint: surface recovery/help so new users know edits are reversible.
+        if ($showBanner && empty($this->messages)) {
+            echo "\033[2m  /help for commands · edits preview a diff and are reversible with \033[0m\033[36m/undo\033[0m\033[2m (\033[0m\033[36m/checkpoints\033[0m\033[2m lists them)\033[0m\n";
         }
 
         while (true) {

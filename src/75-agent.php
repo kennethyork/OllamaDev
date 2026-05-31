@@ -114,6 +114,7 @@ User: run the tests
     public function listModels(): array { return $this->client->listModels(); }
     public function listModelsDetailed(): array { return $this->client->listModelsDetailed(); }
     public function checkConnection(): bool { return $this->client->checkConnection(); }
+    public function host(): string { return method_exists($this->client, 'host') ? $this->client->host() : ''; }
 
     // Summarize a transcript with the model itself (one-shot, no tools). Used by
     // session compaction. Returns '' on any failure so the caller can fall back.
