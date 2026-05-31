@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.1.1 (2026-05-31)
+
+### Fixed
+- `ollamadev terminal list` no longer warns (`Undefined array key "name"`) when the desktop app's PTY sessions share `~/.ollamadev/terminals/`. Records are normalized across both schemas, so desktop sessions also list cleanly.
+
 ## v4.1.0 (2026-05-31)
 
 ### Added
