@@ -1,5 +1,13 @@
 # Changelog
 
+## v4.1.3 (2026-05-31)
+
+### Added
+- **Crew auto-ideas** — every crew run (and resume) ends by proposing a short, ranked list of the most valuable next steps (improvements, likely bugs, missing tests, risks), printed, saved to `ideas.md`, and surfaced on the live board as 💡 To-do cards with one-click Run. Suggestions only — not auto-implemented. Disable with `--no-ideas`.
+
+### Changed
+- A build-time guard now enforces the vanilla constraint on OllamaDev's own code (CLI `src/`, `site/`, desktop `public/`): no frameworks, no `package.json`/`node_modules`, no CDN, desktop deps limited to PHP + Boson. Does not affect other projects.
+
 ## v4.1.2 (2026-05-31)
 
 ### Added
