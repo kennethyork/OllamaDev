@@ -1,5 +1,15 @@
 # Changelog
 
+## v4.1.2 (2026-05-31)
+
+### Added
+- **Crew resume from disk** — an interrupted crew run (closed app, crash, reboot) can be resumed: `ollamadev crew resume [runId]`, and opening interactive `crew` in a repo with an unfinished run offers to continue it. Already-built branches are kept; only unfinished subtasks re-run, then audit + land. The plan is persisted to `~/.ollamadev/crew/<runId>/run.json`.
+- **Per-repo session resume** — bare `ollamadev` (and the desktop, which launches in the project folder) resumes that directory's most recent session. `ollamadev new` / `--new` starts fresh; disable with `session.autoResume:false`.
+- **Desktop Focus/Restore** — a ⤢ button on every terminal *and* every live crew pane enlarges it to fill the area, ⤡ puts it back in the grid (double-click works too).
+
+### Fixed
+- `terminal list` no longer warns on desktop-app session records (normalized across schemas). *(also in v4.1.1)*
+
 ## v4.1.1 (2026-05-31)
 
 ### Fixed
