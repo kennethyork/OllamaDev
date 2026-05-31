@@ -53,6 +53,10 @@ OllamaDev is a terminal coding agent that runs entirely against your local [Olla
 - **Project memory** — `/init` (or `ollamadev init`) scans the project and generates an `OLLAMADEV.md` the agent reads on startup.
 
 ### Power tools
+- **Crew (multi-agent)** — a Director plans, parallel Coders build in isolated git worktrees, an Auditor reviews. `--amplify N` trades free local compute for quality (N-sample plan self-consistency + an N-reviewer adversarial audit panel); `crew pack save <name>` / `--pack <name>` reuse and share tuned teams.
+- **Watch (background agent)** — `ollamadev watch "<task>"` re-runs a task (tests, auto-fix, docs) whenever files change. Continuous agents are cheap because the compute is local.
+- **Air-gapped mode** — `--offline` (or `OLLAMADEV_OFFLINE=1`) hard-blocks every network tool, unwaivable even in `auto` mode. `ollamadev attest` audits and prints a fingerprinted report proving nothing can leave the machine.
+- **Skill registry** — discover and share skills: `ollamadev skills browse` / `skills search <q>` / `skills add <name>`, with registry sources configurable under `skills.registries`.
 - **60+ built-in tools** — files, search, shell, git, web fetch/search, code navigation.
 - **Custom slash commands** — drop prompt templates in `~/.ollamadev/commands/*.md` and invoke them as `/name`.
 - **Hooks** — run shell commands on `beforePrompt` / `afterEdit` via config.
@@ -172,6 +176,10 @@ ollamadev load <id>      # load a session by id
 ollamadev pull <model>   # download a model from Ollama
 ollamadev init           # generate OLLAMADEV.md project memory
 ollamadev models         # list installed models
+ollamadev crew <task>    # multi-agent crew (--amplify N, --pack <name>)
+ollamadev watch <task>   # re-run a task on file changes (background agent)
+ollamadev attest         # prove the air-gap posture (pair with --offline)
+ollamadev skills browse  # discover shareable skills (search/add/install)
 ollamadev git <cmd>      # run git
 ollamadev terminal ...   # terminal multiplexer
 ollamadev lsp            # LSP server mode (for editors)

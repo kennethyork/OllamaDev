@@ -67,6 +67,60 @@ class Skills {
 
     public static function homeDir(): string { return (getenv('HOME') ?: sys_get_temp_dir()) . '/.ollamadev/skills'; }
 
+    // ---- Registry / discovery ------------------------------------------------
+    // A registry is just a place to DISCOVER shareable skills before installing.
+    // Sources (local-first, air-gap friendly): the local registry dir plus any
+    // dirs/URLs in config `skills.registries`. Git/archive URLs are install-only
+    // (browse can't list them without fetching); local dirs are browsable.
+    public static function registryDir(): string { return (getenv('HOME') ?: sys_get_temp_dir()) . '/.ollamadev/registry'; }
+
+    public static function registries(): array {
+        $sources = [self::registryDir()];
+        $cfg = Config::get('skills.registries', []);
+        if (is_array($cfg)) foreach ($cfg as $s) { $s = trim((string)$s); if ($s !== '') $sources[] = $s; }
+        return array_values(array_unique($sources));
+    }
+
+    // Skills available to install from local registry sources, keyed by name.
+    // Each: ['name','description','dir','source','installed'=>bool].
+    public static function browse(): array {
+        $installed = array_change_key_case(self::all(), CASE_LOWER);
+        $avail = [];
+        foreach (self::registries() as $src) {
+            if (!is_dir($src)) continue; // remote sources aren't browsable until installed
+            foreach (self::findSkillDirs($src) as $dir) {
+                $meta = self::parse($dir . '/SKILL.md', basename($dir));
+                $key = strtolower($meta['name']);
+                if (isset($avail[$key])) continue;
+                $avail[$key] = $meta + ['dir' => $dir, 'source' => $src, 'installed' => isset($installed[$key])];
+            }
+        }
+        ksort($avail);
+        return $avail;
+    }
+
+    // Search installed + registry skills by name/description substring.
+    public static function search(string $query): array {
+        $q = strtolower(trim($query));
+        $pool = [];
+        foreach (self::all() as $s) $pool[strtolower($s['name'])] = $s + ['installed' => true];
+        foreach (self::browse() as $k => $s) if (!isset($pool[$k])) $pool[$k] = $s;
+        if ($q === '') { ksort($pool); return array_values($pool); }
+        $hits = [];
+        foreach ($pool as $s) {
+            if (strpos(strtolower($s['name']), $q) !== false || strpos(strtolower((string)($s['description'] ?? '')), $q) !== false) $hits[] = $s;
+        }
+        return $hits;
+    }
+
+    // Install a skill discovered by name in a registry source.
+    public static function addFromRegistry(string $name, bool $force = false): array {
+        foreach (self::browse() as $s) {
+            if (strcasecmp($s['name'], $name) === 0) return self::install($s['dir'], $force);
+        }
+        return ['installed' => [], 'messages' => ["not found in any registry: $name"]];
+    }
+
     // Install skills from a local directory, a git URL, or a .tar.gz/.zip archive
     // (local path or http(s) URL). Each skill folder (one containing a SKILL.md) is
     // copied into ~/.ollamadev/skills/<name>. Returns ['installed'=>[], 'messages'=>[]].

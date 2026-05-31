@@ -419,6 +419,9 @@ for ($i = 1; $i < $argc; $i++) {
         else $flags['amplify'] = 3;
     }
     elseif ($a === '--offline' || $a === '--air-gapped') { $flags['offline'] = true; }
+    elseif ($a === '--interval') { $flags['interval'] = (int)($argv[++$i] ?? 2); }
+    elseif ($a === '--once') { $flags['once'] = true; }
+    elseif ($a === '--pack') { $flags['pack'] = $argv[++$i] ?? null; }
     elseif ($a === '--lmstudio') { $flags['lmstudio'] = true; }
     elseif ($a === '--host') { $flags['host'] = $argv[++$i] ?? null; }
     elseif ($a === '--panes') { $flags['panes'] = true; }
@@ -448,6 +451,17 @@ if (empty($flags['model']) && getenv('MODEL')) $flags['model'] = getenv('MODEL')
 // (LM Studio's local OpenAI-compatible server). Both stay 100% local.
 if (!empty($flags['host'])) ModelClient::$override = $flags['host'];
 elseif (!empty($flags['lmstudio'])) ModelClient::$override = Config::get('lmstudio.host', 'http://localhost:1234/v1');
+
+// Air-gapped mode (--offline / --air-gapped, OLLAMADEV_OFFLINE=1, or config
+// offline:true): hard-block every network tool for the rest of this process.
+$offlineMode = !empty($flags['offline']) || getenv('OLLAMADEV_OFFLINE') || Config::get('offline', false);
+if ($offlineMode) Permission::setOffline(true);
+
+// Attestation Command — audit + prove the air-gap posture.
+if ($argc >= 2 && $argv[1] === 'attest') {
+    echo Attest::render(in_array('--json', $argv, true));
+    exit(0);
+}
 
 // Completion Command
 if ($argc >= 2 && $argv[1] === 'completion') {
@@ -696,6 +710,47 @@ if ($argc >= 2 && $argv[1] === 'skills') {
         if (Skills::remove($name)) { echo "Removed: $name\n"; exit(0); }
         echo "No such skill: $name\n"; exit(1);
     }
+    if ($sub === 'search' || $sub === 'find') {
+        $q = trim(implode(' ', array_slice($argv, 3)));
+        $hits = Skills::search($q);
+        if (!$hits) { echo "No skills match" . ($q !== '' ? " \"$q\"" : '') . ".\n"; exit(0); }
+        echo "Skills (" . count($hits) . ($q !== '' ? " matching \"$q\"" : '') . "):\n";
+        foreach ($hits as $s) {
+            $tag = !empty($s['installed']) ? "\033[32m[installed]\033[0m" : "\033[2m[available]\033[0m";
+            echo "  " . $s['name'] . " $tag — " . ($s['description'] ?: '(no description)') . "\n";
+        }
+        echo "\n\033[2mInstall an available one with: ollamadev skills add <name>\033[0m\n";
+        exit(0);
+    }
+    if ($sub === 'browse') {
+        $avail = Skills::browse();
+        if (!$avail) {
+            echo "No registry skills found. Registry sources are scanned from:\n";
+            foreach (Skills::registries() as $rdir) echo "  $rdir/<name>/SKILL.md\n";
+            echo "Add local dirs or git URLs under \"skills.registries\" in config, or drop skills in the first path.\n";
+            exit(0);
+        }
+        echo "Registry skills (" . count($avail) . "):\n";
+        foreach ($avail as $s) {
+            $tag = $s['installed'] ? "\033[32m[installed]\033[0m" : "\033[36m[available]\033[0m";
+            echo "  " . $s['name'] . " $tag — " . ($s['description'] ?: '(no description)') . "\n";
+        }
+        echo "\n\033[2mInstall with: ollamadev skills add <name>\033[0m\n";
+        exit(0);
+    }
+    if ($sub === 'add') {
+        $rest = array_slice($argv, 3);
+        $force = in_array('--force', $rest, true);
+        $name = trim((string)($rest[array_key_first(array_filter($rest, fn($a) => $a !== '--force')) ?? 0] ?? ''));
+        $name = '';
+        foreach ($rest as $rv) { if ($rv !== '--force') { $name = $rv; break; } }
+        if ($name === '') { echo "Usage: ollamadev skills add <name> [--force]   (discover names with: ollamadev skills browse)\n"; exit(1); }
+        $res = Skills::addFromRegistry($name, $force);
+        foreach ($res['messages'] as $m) echo "  $m\n";
+        if (empty($res['installed'])) { echo "Nothing installed.\n"; exit(1); }
+        echo "Installed: " . implode(', ', $res['installed']) . "\n";
+        exit(0);
+    }
     $all = Skills::all();
     if (!$all) {
         echo "No skills found.\n";
@@ -873,6 +928,11 @@ Commands:
   ollamadev pull <m>   Download a model from Ollama
   ollamadev init       Generate OLLAMADEV.md project memory
   ollamadev crew <task> Run OllamaDev Crew (Director/Coders/Auditor)
+                        (--amplify N for a self-consistency + adversarial panel;
+                         --pack <name> to reuse a saved team; crew pack save/list)
+  ollamadev watch <task> Re-run a task whenever files change (background agent)
+  ollamadev skills      Manage skills (list/search/browse/add/install/export)
+  ollamadev attest      Audit + prove the air-gap posture (--offline to lock down)
   ollamadev git        Git commands (status, diff, commit, etc.)
   ollamadev terminal   Terminal multiplexer
   ollamadev lsp        LSP server for IDEs (AI completions, linter diagnostics)
@@ -1081,6 +1141,7 @@ if ($cmd === 'chat') {
 } elseif ($cmd === 'list') {
     foreach (Session::listAll($config) as $s) echo "{$s['id']} | {$s['title']} | {$s['model']} | {$s['updated_at']}\n";
 } elseif ($cmd === 'update') {
+    if (Permission::isOffline()) { echo "✗ offline mode is on — `update` reaches GitHub and is blocked. Drop --offline to update.\n"; exit(1); }
     $install = isset($flags['install']);
     $current = OLLAMADEV_VERSION;
     $ctx = stream_context_create(['http' => ['timeout' => 10, 'ignore_errors' => true, 'header' => "User-Agent: OllamaDev/" . OLLAMADEV_VERSION . "\r\n"]]);
@@ -1143,19 +1204,56 @@ if ($cmd === 'chat') {
 } elseif ($cmd === 'crew') {
     // Bench of agents: Researcher → Director → Coders (git worktrees) → Auditor → land.
     // --review gates landing: nothing auto-merges, every branch is held for review.
+
+    // Build the team-shaped opts from the current flags (used for `pack save` and
+    // as the override layer on top of a loaded --pack).
+    $flagOpts = [];
+    foreach (['directorModel', 'coderModel', 'auditorModel', 'researcherModel', 'focus'] as $fk) if (!empty($flags[$fk])) $flagOpts[$fk] = $flags[$fk];
+    if (!empty($flags['max'])) $flagOpts['max'] = (int)$flags['max'];
+    if (!empty($flags['amplify'])) $flagOpts['amplify'] = (int)$flags['amplify'];
+    if (in_array('--review', $argv, true)) $flagOpts['land'] = 'review';
+    elseif (in_array('--auto-merge', $argv, true)) $flagOpts['land'] = 'auto';
+    if (in_array('--no-research', $argv, true)) $flagOpts['research'] = false;
+    if (in_array('--no-audit', $argv, true)) $flagOpts['audit'] = false;
+    if (in_array('--no-skills', $argv, true)) $flagOpts['skills'] = false;
+    if (!empty($flags['hosts'])) $flagOpts['hosts'] = array_values(array_filter(array_map('trim', explode(',', $flags['hosts']))));
+
+    // Crew team-packs: save/list/remove shareable team configs.
+    if ($arg1 === 'pack') {
+        $packSub = $positional[2] ?? 'list';
+        if ($packSub === 'save') {
+            $pn = $positional[3] ?? '';
+            if ($pn === '') { echo "Usage: ollamadev crew pack save <name> [--focus .. --coder-model .. --amplify N ..]\n"; exit(1); }
+            $path = CrewPacks::save($pn, $flagOpts);
+            echo "Saved crew pack: $pn\n  $path\n  Use it with: ollamadev crew --pack $pn \"<task>\"\n";
+            exit(0);
+        }
+        if ($packSub === 'rm' || $packSub === 'remove' || $packSub === 'delete') {
+            $pn = $positional[3] ?? '';
+            echo CrewPacks::remove($pn) ? "Removed pack: $pn\n" : "No such pack: $pn\n";
+            exit(CrewPacks::load($pn) === null ? 0 : 1);
+        }
+        $packs = CrewPacks::all();
+        if (!$packs) { echo "No crew packs yet. Create one:\n  ollamadev crew pack save <name> --focus \"...\" --coder-model <m>\n"; exit(0); }
+        echo "Crew packs (" . count($packs) . "):\n";
+        foreach ($packs as $pn => $summary) echo "  $pn — \033[2m$summary\033[0m\n";
+        echo "\n\033[2mUse one: ollamadev crew --pack <name> \"<task>\"\033[0m\n";
+        exit(0);
+    }
+
     $taskParts = array_slice($positional, 1);
     $task = $arg1 === '' ? '' : implode(' ', $taskParts);
-    $copts = ['max' => $flags['max'] ?? null];
-    if (in_array('--review', $argv, true)) $copts['land'] = 'review';
-    elseif (in_array('--auto-merge', $argv, true)) $copts['land'] = 'auto'; // explicit opt-in (overrides self-repo guard)
-    if (in_array('--no-research', $argv, true)) $copts['research'] = false;
-    if (in_array('--no-audit', $argv, true)) $copts['audit'] = false;
-    if (in_array('--no-skills', $argv, true)) $copts['skills'] = false;
-    foreach (['directorModel', 'coderModel', 'auditorModel', 'researcherModel'] as $rk) if (!empty($flags[$rk])) $copts[$rk] = $flags[$rk];
-    if (!empty($flags['amplify'])) $copts['amplify'] = (int)$flags['amplify'];
-    if (!empty($flags['focus'])) $copts['focus'] = $flags['focus'];
-    if (!empty($flags['hosts'])) $copts['hosts'] = array_values(array_filter(array_map('trim', explode(',', $flags['hosts']))));
-    if (!empty($flags['runId'])) $copts['runId'] = $flags['runId'];
+    // --pack <name>: load a saved team as the base; explicit flags override it.
+    $copts = [];
+    if (!empty($flags['pack'])) {
+        $loaded = CrewPacks::load($flags['pack']);
+        if ($loaded === null) { echo "No such crew pack: {$flags['pack']}  (list with: ollamadev crew pack list)\n"; exit(1); }
+        $copts = $loaded;
+        echo "\033[2mLoaded crew pack: {$flags['pack']}\033[0m\n";
+    }
+    $copts = array_merge($copts, $flagOpts);          // explicit flags win over the pack
+    if (!array_key_exists('max', $copts)) $copts['max'] = $flags['max'] ?? null;
+    if (!empty($flags['runId'])) $copts['runId'] = $flags['runId']; // one-off, never part of a pack
 
     // No task given: drop into an interactive crew — the team is configured and the
     // Director simply waits for you to prompt it (and keeps prompting after each run).
@@ -1225,6 +1323,16 @@ if ($cmd === 'chat') {
     foreach ($argv as $ai => $av) if ($av === '--session') { $sess = $argv[$ai + 1] ?? ''; break; }
     Crew::watchPanes($arg1, $sess, $inTmux);
     exit(0);
+} elseif ($cmd === 'watch') {
+    // Always-on local agent: re-run a task whenever files change.
+    $watchTask = $arg1;
+    $watchPaths = array_slice($positional, 2); // positional[0]=watch, [1]=task, rest=paths
+    Permission::setMode(Config::get('permissions.mode', 'ask'));
+    Permission::setInteractive(posix_isatty(STDIN));
+    $wopts = [];
+    if (!empty($flags['interval'])) $wopts['interval'] = (int)$flags['interval'];
+    if (!empty($flags['once'])) $wopts['once'] = true;
+    exit(Watcher::run($watchTask, $watchPaths, $wopts));
 } elseif ($cmd === 'load' && $arg1) {
     $session = new Session($config, $arg1);
     if (!file_exists(Config::sessionsDir() . '/' . $arg1 . '.json')) { echo "Session not found: $arg1\n"; exit(1); }

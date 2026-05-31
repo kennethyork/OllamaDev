@@ -415,7 +415,66 @@ ok('crew Auditor + auto-merge wired', strpos($src, "git merge --no-ff") !== fals
 ok('crew amplify: plan self-consistency', strpos($src, 'function planOnce(') !== false && strpos($src, 'array_count_values(array_map(\'count\'') !== false);
 ok('crew amplify: adversarial audit panel', strpos($src, 'function auditOnce(') !== false && strpos($src, '$clean > $passes / 2') !== false);
 ok('crew amplify: skeptic reviewer stance', strpos($src, 'SKEPTICAL adversarial reviewer') !== false);
-ok('--amplify flag wired to crew opts', strpos($src, "\$copts['amplify']") !== false);
+ok('--amplify flag wired to crew opts', strpos($src, "\$flagOpts['amplify']") !== false);
+
+echo "\n== Air-gap + attestation ==\n";
+if (preg_match('/class Permission \{.*?\n\}/s', $src, $pm)) {
+    if (!class_exists('Permission')) eval($pm[0]);
+    Permission::setOffline(true);
+    ok('offline blocks network tools', Permission::check('fetch') === false && Permission::check('git_push') === false);
+    ok('offline keeps local readonly tools', Permission::check('view') === true);
+    Permission::allow('fetch');
+    ok('offline overrides an explicit allow()', Permission::check('fetch') === false);
+    Permission::setOffline(false);
+    ok('online lets network tools through (auto)', (function () { Permission::setMode('auto'); return Permission::check('fetch'); })() === true);
+    Permission::setMode('ask');
+} else { ok('Permission class extractable for air-gap', false); }
+if (preg_match('/class Attest \{.*?\n\}/s', $src, $am)) {
+    if (!class_exists('Attest')) eval($am[0]);
+    ok('Attest detects loopback hosts', Attest::isLoopbackHost('http://localhost:11434') && Attest::isLoopbackHost('http://127.0.0.1:1234/v1') && Attest::isLoopbackHost('http://[::1]:11434'));
+    ok('Attest rejects remote hosts', !Attest::isLoopbackHost('http://192.168.1.9:11434') && !Attest::isLoopbackHost('https://api.example.com'));
+} else { ok('Attest class extractable', false); }
+ok('attest command + offline flag wired', strpos($src, "=== 'attest'") !== false && strpos($src, 'Permission::setOffline(true)') !== false);
+ok('update blocked when offline', strpos($src, 'offline mode is on') !== false);
+
+echo "\n== Skill registry + crew packs ==\n";
+ok('skills search/browse/add wired', strpos($src, "\$sub === 'browse'") !== false && strpos($src, 'Skills::addFromRegistry(') !== false);
+ok('Skills has registry methods', strpos($src, 'function browse(') !== false && strpos($src, 'function search(') !== false && strpos($src, 'function registries(') !== false);
+if (preg_match('/class CrewPacks \{.*?\n\}/s', $src, $cpm)) {
+    if (!class_exists('CrewPacks')) eval($cpm[0]);
+    $packName = 'smoke_pack_' . getmypid();
+    $path = CrewPacks::save($packName, ['focus' => 'Test stack', 'coderModel' => 'codestral', 'amplify' => 3, 'max' => 2, 'runId' => 'should-not-persist']);
+    ok('CrewPacks::save writes a pack', is_file($path));
+    $loaded = CrewPacks::load($packName);
+    ok('CrewPacks::load round-trips team keys', is_array($loaded) && ($loaded['focus'] ?? '') === 'Test stack' && (int)($loaded['amplify'] ?? 0) === 3);
+    ok('CrewPacks drops one-off keys (runId)', is_array($loaded) && !isset($loaded['runId']));
+    ok('CrewPacks::all lists the pack', array_key_exists($packName, CrewPacks::all()));
+    ok('CrewPacks::remove deletes it', CrewPacks::remove($packName) && CrewPacks::load($packName) === null);
+} else { ok('CrewPacks class extractable', false); }
+ok('crew --pack flag + pack subcommands wired', strpos($src, "\$arg1 === 'pack'") !== false && strpos($src, 'CrewPacks::load($flags[') !== false);
+
+echo "\n== Watch (background agent) ==\n";
+[$wout] = run_bin(['watch']);
+ok('watch with no task prints usage', stripos($wout, 'Usage: ollamadev watch') !== false, trim($wout));
+if (preg_match('/class Watcher \{.*?\n\}/s', $src, $wm)) {
+    if (!class_exists('Watcher')) eval($wm[0]);
+    $snap = new ReflectionMethod('Watcher', 'snapshot');  $snap->setAccessible(true);
+    $diff = new ReflectionMethod('Watcher', 'diff');      $diff->setAccessible(true);
+    $wd = sys_get_temp_dir() . '/odv_watch_' . getmypid(); @mkdir($wd, 0755, true);
+    file_put_contents("$wd/a.php", "<?php // 1");
+    @mkdir("$wd/node_modules", 0755, true); file_put_contents("$wd/node_modules/skip.js", "x"); // must be ignored
+    file_put_contents("$wd/pic.png", "binary");  // wrong extension — ignored
+    $s1 = $snap->invoke(null, [$wd]);
+    ok('watch snapshot picks source files', isset($s1["$wd/a.php"]));
+    ok('watch snapshot skips node_modules + non-source', !isset($s1["$wd/node_modules/skip.js"]) && !isset($s1["$wd/pic.png"]));
+    clearstatcache();
+    touch("$wd/a.php", time() + 5); file_put_contents("$wd/b.php", "<?php // new");
+    $s2 = $snap->invoke(null, [$wd]);
+    $changed = $diff->invoke(null, $s1, $s2);
+    ok('watch diff detects modified + new files', in_array("$wd/a.php", $changed, true) && in_array("$wd/b.php", $changed, true));
+    @exec('rm -rf ' . escapeshellarg($wd));
+} else { ok('Watcher class extractable', false); }
+ok('watch command + flags wired', strpos($src, "cmd === 'watch'") !== false && strpos($src, "Watcher::run(") !== false);
 
 echo "\n== Distribution (binaries) ==\n";
 $repoRoot = dirname(__DIR__);

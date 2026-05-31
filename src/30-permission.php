@@ -3,6 +3,15 @@ class Permission {
     private static array $denied = [];    // tools blocked for this session
     private static string $mode = 'ask';  // auto | ask | readonly
     private static bool $interactive = false;
+    private static bool $offline = false; // air-gapped: hard-block all network tools
+
+    // Tools that reach the network. Blocked outright in offline mode, regardless
+    // of permission mode — the air-gap guarantee cannot be waived by 'auto' or by
+    // a prior allow(). (git_fetch is read-only but still hits the network.)
+    private static array $network = [
+        'fetch', 'search', 'web_search', 'web_fetch',
+        'git_fetch', 'git_push', 'git_pull', 'git_clone',
+    ];
 
     // Tools that only read state - always safe to run without approval.
     private static array $readonly = [
@@ -20,6 +29,10 @@ class Permission {
     public static function getMode(): string { return self::$mode; }
     public static function setInteractive(bool $v): void { self::$interactive = $v; }
     public static function isInteractive(): bool { return self::$interactive; }
+    public static function setOffline(bool $v): void { self::$offline = $v; }
+    public static function isOffline(): bool { return self::$offline; }
+    public static function isNetwork(string $tool): bool { return in_array($tool, self::$network, true); }
+    public static function listNetwork(): array { return self::$network; }
 
     // Legacy compatibility shims.
     public static function autoAllow(): void { self::$mode = 'auto'; }
@@ -35,6 +48,7 @@ class Permission {
     // The gate enforced by Tools::run. Returns true if the tool may run.
     public static function check(string $tool, array $params = []): bool {
         if (isset(self::$denied[$tool])) return false;
+        if (self::$offline && self::isNetwork($tool)) return false; // air-gap: nothing leaves the machine
         if (isset(self::$allowed[$tool])) return true;
         if (self::$mode === 'auto') return true;
         if (self::isReadonly($tool)) return true;     // read-only is always fine
