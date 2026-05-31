@@ -26,6 +26,7 @@
     <h4>Start here</h4>
     <a href="#getting-started">Getting started</a>
     <a href="#installation">Installation</a>
+    <a href="#why-php">Why PHP &amp; make</a>
     <a href="#quick-start">Quick start</a>
     <h4>Using it</h4>
     <a href="#commands">CLI commands</a>
@@ -84,6 +85,16 @@ composer build    <span class="cm"># compile a native desktop app</span><button 
     <h3>VS Code extension</h3>
 <pre class="code">cd vscode-extension
 code --install-extension ollamadev-extension.vsix<button class="copy-btn">Copy</button></pre>
+
+    <h2 id="why-php" class="anchor">Why PHP &amp; <code>make install</code>?</h2>
+    <p>OllamaDev is written in <strong>vanilla PHP</strong>. The <code>ollamadev</code> "binary" is a PHP script with a <code>#!/usr/bin/env php</code> shebang — not a compiled executable — so <code>php</code> is its runtime. There's no compile step: you edit the modules in <code>src/</code>, and <code>build.sh</code> concatenates them into one self-contained file you can read and audit.</p>
+    <ul>
+      <li><strong>Why PHP?</strong> It's the project's language and ships almost everywhere. The CLI needs only <code>php</code> 8.0+ and <code>curl</code> — no Composer, no npm, no toolchain. (The desktop app needs PHP 8.4+ for its Boson runtime.)</li>
+      <li><strong>Why <code>make</code>?</strong> It's just a convenience wrapper around the workflow. <code>make install</code> runs <strong>build → test → install</strong> in order, and because each step depends on the previous, it <strong>only installs when the build lints clean and all tests pass</strong> — then backs up the old binary so <code>make rollback</code> is instant.</li>
+    </ul>
+    <p>You can always skip <code>make</code> and do it by hand:</p>
+<pre class="code">./build.sh                    <span class="cm"># concatenate src/ into ./ollamadev</span>
+cp ollamadev ~/.local/bin/    <span class="cm"># install it yourself</span><button class="copy-btn">Copy</button></pre>
 
     <h2 id="quick-start" class="anchor">Quick start</h2>
     <h3>Interactive</h3>

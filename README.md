@@ -100,6 +100,8 @@ make install
 
 `make install` only installs if the build and the offline smoke suite pass, and it backs up the previously installed binary so you can `make rollback` instantly.
 
+> **Why PHP, and why `make install`?** OllamaDev is written in **vanilla PHP** — the `ollamadev` "binary" is a PHP script with a `#!/usr/bin/env php` shebang, not a compiled executable, so `php` is its runtime (CLI needs 8.0+; the desktop app needs 8.4+). There's no compile step: you edit the modules in `src/`, and `build.sh` concatenates them into one file. `make` is just a convenience wrapper around that workflow — `make install` runs **build → test → install** in order, and because `install` depends on `test` depends on `build`, **it only installs when the build lints clean and all tests pass** (and it backs up the old binary first). You can always do it by hand: `./build.sh && cp ollamadev ~/.local/bin/`.
+
 Make sure `~/.local/bin` is on your `PATH`, then:
 
 ```bash
