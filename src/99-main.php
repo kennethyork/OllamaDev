@@ -413,6 +413,12 @@ for ($i = 1; $i < $argc; $i++) {
     elseif ($a === '--researcher-model') { $flags['researcherModel'] = $argv[++$i] ?? null; }
     elseif ($a === '--focus') { $flags['focus'] = $argv[++$i] ?? null; }
     elseif ($a === '--hosts') { $flags['hosts'] = $argv[++$i] ?? null; }
+    elseif ($a === '--amplify') {
+        // Bare --amplify means the default panel size; --amplify N sets it.
+        if (isset($argv[$i + 1]) && ctype_digit((string)$argv[$i + 1])) $flags['amplify'] = (int)$argv[++$i];
+        else $flags['amplify'] = 3;
+    }
+    elseif ($a === '--offline' || $a === '--air-gapped') { $flags['offline'] = true; }
     elseif ($a === '--lmstudio') { $flags['lmstudio'] = true; }
     elseif ($a === '--host') { $flags['host'] = $argv[++$i] ?? null; }
     elseif ($a === '--panes') { $flags['panes'] = true; }
@@ -1139,6 +1145,7 @@ if ($cmd === 'chat') {
     if (in_array('--no-audit', $argv, true)) $copts['audit'] = false;
     if (in_array('--no-skills', $argv, true)) $copts['skills'] = false;
     foreach (['directorModel', 'coderModel', 'auditorModel', 'researcherModel'] as $rk) if (!empty($flags[$rk])) $copts[$rk] = $flags[$rk];
+    if (!empty($flags['amplify'])) $copts['amplify'] = (int)$flags['amplify'];
     if (!empty($flags['focus'])) $copts['focus'] = $flags['focus'];
     if (!empty($flags['hosts'])) $copts['hosts'] = array_values(array_filter(array_map('trim', explode(',', $flags['hosts']))));
     if (!empty($flags['runId'])) $copts['runId'] = $flags['runId'];

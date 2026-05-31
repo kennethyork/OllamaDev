@@ -411,6 +411,11 @@ ok('crew has a Researcher role', strpos($src, 'Researcher worker') !== false || 
 ok('crew Director uses JSON mode', strpos($src, 'chatJson(') !== false);
 ok('crew Coder uses git worktrees', strpos($src, 'git worktree add') !== false);
 ok('crew Auditor + auto-merge wired', strpos($src, "git merge --no-ff") !== false && strpos($src, 'function audit(') !== false);
+// Amplify: self-consistency planning + an adversarial multi-pass audit panel.
+ok('crew amplify: plan self-consistency', strpos($src, 'function planOnce(') !== false && strpos($src, 'array_count_values(array_map(\'count\'') !== false);
+ok('crew amplify: adversarial audit panel', strpos($src, 'function auditOnce(') !== false && strpos($src, '$clean > $passes / 2') !== false);
+ok('crew amplify: skeptic reviewer stance', strpos($src, 'SKEPTICAL adversarial reviewer') !== false);
+ok('--amplify flag wired to crew opts', strpos($src, "\$copts['amplify']") !== false);
 
 echo "\n== Skills ==\n";
 if (preg_match('/class Skills \{.*?\n\}/s', $src, $sk)) {

@@ -28,6 +28,9 @@ class Crew {
         $maxCoders = max(1, min(6, (int)($opts['max'] ?? Config::get('crew.maxCoders', 4))));
         $maxIter = max(2, (int)($opts['iterations'] ?? Config::get('crew.coderIterations', 10)));
         $focus = trim((string)($opts['focus'] ?? '')); // domain/stack steer from a specialized team
+        // Amplify: trade abundant free local compute for quality — N-sample plan
+        // self-consistency + an N-pass adversarial audit panel. 0/1 = off.
+        $amplify = max(1, (int)($opts['amplify'] ?? Config::get('crew.amplify', 1)));
         // Per-team skill packs: starter skills matched to the team's focus, loaded
         // into each coder's worktree so they pick up domain conventions on demand.
         $teamSkills = ($opts['skills'] ?? true) !== false ? CrewSkills::forFocus($focus) : [];
@@ -42,7 +45,7 @@ class Crew {
         // runId may be supplied (by --panes, so the pane watcher knows it up front).
         $runId = (string)($opts['runId'] ?? '');
         if (!preg_match('/^crew_[0-9_]+$/', $runId)) $runId = 'crew_' . date('Ymd_His');
-        echo "\n{$b}👥 OllamaDev Crew{$r}  {$d}model {$c}{$model}{$r}{$d} · base {$base}@" . substr($baseCommit, 0, 7) . "{$r}\n";
+        echo "\n{$b}👥 OllamaDev Crew{$r}  {$d}model {$c}{$model}{$r}{$d} · base {$base}@" . substr($baseCommit, 0, 7) . ($amplify > 1 ? " · amplify ×{$amplify}" : '') . "{$r}\n";
         if (!empty($teamSkills)) echo "  {$d}team skills: " . implode(', ', array_map(fn($s) => $s['name'], $teamSkills)) . "{$r}\n";
         // Show per-role models when any role differs from the base (mix-and-match).
         if ($mDirector !== $model || $mResearcher !== $model || $mCoder !== $model || $mAuditor !== $model) {
@@ -66,8 +69,8 @@ class Crew {
         }
 
         // ---- Director: decompose the task (informed by research) ----
-        echo "\n{$b}▸ Director{$r} planning…\n";
-        $subtasks = self::plan($agent, $task, $maxCoders, $research, $mDirector, $focus);
+        echo "\n{$b}▸ Director{$r} planning…" . ($amplify > 1 ? " {$d}(self-consistency ×{$amplify}){$r}" : '') . "\n";
+        $subtasks = self::plan($agent, $task, $maxCoders, $research, $mDirector, $focus, $amplify);
         if (empty($subtasks)) { echo "  Director produced no subtasks; treating the whole task as one.\n"; $subtasks = [['title' => 'Task', 'prompt' => $task]]; }
         $subtasks = array_slice($subtasks, 0, $maxCoders);
         foreach ($subtasks as $i => $st) echo "  {$c}" . ($i + 1) . ".{$r} " . ($st['title'] ?? 'subtask') . "\n";
@@ -159,11 +162,11 @@ class Crew {
 
         // ---- Auditor: review each diff (optional; without it, nothing auto-merges) ----
         $doAudit = ($opts['audit'] ?? true) !== false;
-        echo "\n{$b}▸ Auditor{$r} " . ($doAudit ? "reviewing…" : "{$d}(disabled — all branches held for your review){$r}") . "\n";
+        echo "\n{$b}▸ Auditor{$r} " . ($doAudit ? ("reviewing…" . ($amplify > 1 ? " {$d}({$amplify}-reviewer panel, majority rules){$r}" : '')) : "{$d}(disabled — all branches held for your review){$r}") . "\n";
         foreach ($results as &$res) {
             if ($res['empty']) { $res['audit'] = ['clean' => false, 'summary' => 'no changes', 'issues' => []]; echo "  {$d}#{$res['n']} skipped (empty){$r}\n"; continue; }
             if (!$doAudit) { $res['audit'] = ['clean' => false, 'summary' => 'no auditor — review manually', 'issues' => []]; continue; }
-            $res['audit'] = self::audit($agent, $res['title'], $res["diff"], $task, $mAuditor);
+            $res['audit'] = self::audit($agent, $res['title'], $res["diff"], $task, $mAuditor, $amplify);
             $vc = $res['audit']['clean'] ? "{$g}clean{$r}" : "{$y}flagged{$r}";
             echo "  #{$res['n']} {$vc} {$d}" . substr((string)($res['audit']['summary'] ?? ''), 0, 80) . "{$r}\n";
             foreach (($res['audit']['issues'] ?? []) as $iss) echo "      {$y}- " . substr((string)$iss, 0, 100) . "{$r}\n";
@@ -241,8 +244,29 @@ class Crew {
         return trim($findings);
     }
 
-    // Director: ask the model for a JSON list of independent subtasks.
-    private static function plan(Agent $agent, string $task, int $max, string $research = '', string $model = '', string $focus = ''): array {
+    // Director: decompose into subtasks. With $samples > 1 (amplify mode) it draws
+    // several independent plans and keeps the one whose subtask COUNT is the mode —
+    // cheap self-consistency that damps a weak model's planning variance.
+    private static function plan(Agent $agent, string $task, int $max, string $research = '', string $model = '', string $focus = '', int $samples = 1): array {
+        $samples = max(1, $samples);
+        if ($samples === 1) return self::planOnce($agent, $task, $max, $research, $model, $focus);
+        $cands = [];
+        for ($i = 0; $i < $samples; $i++) {
+            echo "\033[2m·\033[0m"; @flush();
+            $p = self::planOnce($agent, $task, $max, $research, $model, $focus);
+            if (!empty($p)) $cands[] = $p;
+        }
+        echo "\n";
+        if (empty($cands)) return [];
+        // Pick the candidate matching the most common subtask count (consensus shape).
+        $freq = array_count_values(array_map('count', $cands));
+        arsort($freq);
+        $mode = (int) array_key_first($freq);
+        foreach ($cands as $c) if (count($c) === $mode) return $c;
+        return $cands[0];
+    }
+
+    private static function planOnce(Agent $agent, string $task, int $max, string $research = '', string $model = '', string $focus = ''): array {
         $sys = ['role' => 'system', 'content' =>
             "You are the Director of a team of coding agents. Decompose the user's task into at most $max " .
             "INDEPENDENT subtasks that, where possible, touch DIFFERENT files so they can be built in parallel " .
@@ -327,10 +351,36 @@ class Crew {
     }
 
     // Auditor: review a diff, return ['clean'=>bool,'summary'=>string,'issues'=>[]].
-    private static function audit(Agent $agent, string $title, string $diff, string $goal = '', string $model = ''): array {
+    // With $passes > 1 (amplify mode) it runs an adversarial panel — alternating
+    // neutral and skeptic reviewers — and only calls the diff clean on a STRICT
+    // majority of clean votes. A change must survive scrutiny, not just pass once.
+    private static function audit(Agent $agent, string $title, string $diff, string $goal = '', string $model = '', int $passes = 1): array {
+        $passes = max(1, $passes);
+        if ($passes === 1) return self::auditOnce($agent, $title, $diff, $goal, $model, false);
+        $clean = 0; $issues = []; $summary = '';
+        for ($i = 0; $i < $passes; $i++) {
+            $a = self::auditOnce($agent, $title, $diff, $goal, $model, $i % 2 === 1); // odd passes = skeptic
+            if (!empty($a['clean'])) $clean++;
+            else foreach ($a['issues'] as $x) $issues[] = (string)$x;
+            if ($summary === '' && ($a['summary'] ?? '') !== '') $summary = (string)$a['summary'];
+        }
+        $verdict = $clean > $passes / 2; // strict majority
+        return [
+            'clean' => $verdict,
+            'summary' => "$clean/$passes reviewers clean" . ($summary !== '' ? " · $summary" : ''),
+            'issues' => array_values(array_unique($issues)),
+            'votes' => "$clean/$passes",
+        ];
+    }
+
+    private static function auditOnce(Agent $agent, string $title, string $diff, string $goal = '', string $model = '', bool $skeptic = false): array {
         $diff = substr($diff, 0, 16000);
+        $stance = $skeptic
+            ? "You are a SKEPTICAL adversarial reviewer. Actively hunt for a reason to reject this diff; when in doubt, mark clean=false. "
+            : "You are a meticulous code Auditor. ";
         $sys = ['role' => 'system', 'content' =>
-            "You are a meticulous code Auditor. Review the git diff for correctness, security (secrets, injection, " .
+            $stance .
+            "Review the git diff for correctness, security (secrets, injection, " .
             "unsafe shell), and whether it accomplishes the subtask WITHIN the overall goal. Output ONLY JSON: " .
             '{"clean": true|false, "summary": "one line", "issues": ["..."]}. ' .
             "Mark clean=false if there are real problems, OR if the change is OFF-SCOPE: it adds files unrelated to " .
