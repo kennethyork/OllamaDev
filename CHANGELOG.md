@@ -1,5 +1,13 @@
 # Changelog
 
+## v4.1.4 (2026-05-31)
+
+### Added
+- **`ollamadev context`** — probes RAM/VRAM + the active model (weights, native max context) and recommends a safe `num_ctx`, with the command to set it. New **`--num-ctx N`** flag pins the window for a run.
+
+### Changed
+- **Smarter compaction** — keeps tool output the recent turns still reference (by file/path), instead of summarizing it away, so long sessions lose less context that's still in use.
+
 ## v4.1.3 (2026-05-31)
 
 ### Added
