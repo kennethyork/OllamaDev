@@ -515,6 +515,27 @@ if (preg_match('/class TerminalManager.*?\n\}/s', $src, $tmm)) {
     @exec('rm -rf ' . escapeshellarg($thome));
 } else { ok('TerminalManager extractable', false); }
 
+// Vanilla guard — enforces the no-frameworks/no-deps rule on OLLAMADEV'S OWN code
+// only (CLI src/, the website site/, the desktop front-end public/). It does NOT
+// constrain other projects the agent works on — those can use any deps they need.
+// Exempt: vscode-extension/ (a Node VS Code extension by nature) and vendor/.
+echo "\n== Vanilla constraint (OllamaDev's own code) ==\n";
+$vroot = dirname(__DIR__);
+$pkgs = array_filter(['/package.json', '/src/package.json', '/site/package.json', '/Desktop/ollamadev-ade/public/package.json'], fn($p) => is_file($vroot . $p));
+ok('no package.json in CLI / site / desktop-public', empty($pkgs), implode(',', $pkgs));
+ok('no node_modules in the vanilla dirs', !is_dir($vroot . '/src/node_modules') && !is_dir($vroot . '/site/node_modules') && !is_dir($vroot . '/Desktop/ollamadev-ade/public/node_modules'));
+$extHtml = '';
+foreach (array_merge(glob($vroot . '/site/*.html') ?: [], glob($vroot . '/Desktop/ollamadev-ade/public/*.html') ?: []) as $h) {
+    if (preg_match('/<script[^>]*src="(https?:|\/\/)|<link[^>]*href="https?:[^"]*\.css/i', (string)@file_get_contents($h))) { $extHtml = basename($h); break; }
+}
+ok('site/desktop HTML pulls no external scripts or styles (no CDN/framework)', $extHtml === '', $extHtml);
+$cliDep = '';
+foreach (glob($vroot . '/src/*.php') ?: [] as $f) if (strpos((string)@file_get_contents($f), 'vendor/autoload') !== false) { $cliDep = basename($f); break; }
+ok('CLI source loads no composer/vendor autoload (pure vanilla PHP)', $cliDep === '', $cliDep);
+$dc = json_decode((string)@file_get_contents($vroot . '/Desktop/ollamadev-ade/composer.json'), true);
+$extraDeps = array_values(array_diff(is_array($dc['require'] ?? null) ? array_keys($dc['require']) : [], ['php', 'boson-php/runtime']));
+ok('desktop dependencies limited to PHP + Boson runtime', empty($extraDeps), 'unexpected: ' . implode(',', $extraDeps));
+
 echo "\n== Distribution (binaries) ==\n";
 $repoRoot = dirname(__DIR__);
 ok('install.sh present + executable', is_file($repoRoot . '/install.sh') && is_executable($repoRoot . '/install.sh'));
