@@ -476,6 +476,25 @@ if (preg_match('/class Watcher \{.*?\n\}/s', $src, $wm)) {
 } else { ok('Watcher class extractable', false); }
 ok('watch command + flags wired', strpos($src, "cmd === 'watch'") !== false && strpos($src, "Watcher::run(") !== false);
 
+echo "\n== Terminal multiplexer ==\n";
+if (preg_match('/class TerminalManager.*?\n\}/s', $src, $tmm)) {
+    if (!class_exists('TerminalManager')) eval($tmm[0]);
+    $thome = sys_get_temp_dir() . '/odv_term_' . getmypid();
+    @mkdir($thome . '/.ollamadev/terminals/term_desktop_x', 0755, true);
+    // A desktop-app record: keyed by 'id', with no 'name'/'status' (the schema
+    // that used to make `terminal list` warn).
+    file_put_contents($thome . '/.ollamadev/terminals/term_desktop_x/session.json',
+        json_encode(['id' => 'term_desktop_x', 'model' => 'wizardlm', 'cwd' => '/x', 'pid' => '99']));
+    $oldHome = getenv('HOME'); putenv("HOME=$thome");
+    $tm = new TerminalManager();
+    $rec = $tm->loadTerminal('term_desktop_x');
+    ok('terminal loadTerminal backfills name/status from desktop schema',
+       is_array($rec) && ($rec['name'] ?? '') === 'term_desktop_x' && isset($rec['status']));
+    ok('terminal list tolerates desktop-schema records', count($tm->list()) === 1);
+    putenv($oldHome !== false ? "HOME=$oldHome" : 'HOME');
+    @exec('rm -rf ' . escapeshellarg($thome));
+} else { ok('TerminalManager extractable', false); }
+
 echo "\n== Distribution (binaries) ==\n";
 $repoRoot = dirname(__DIR__);
 ok('install.sh present + executable', is_file($repoRoot . '/install.sh') && is_executable($repoRoot . '/install.sh'));

@@ -5035,7 +5035,8 @@ class TerminalManager
                 if ($name === '.' || $name === '..') continue;
                 $dir = $this->baseDir . '/' . $name;
                 if (is_dir($dir)) {
-                    $terminals[] = $this->loadTerminal($name);
+                    $t = $this->loadTerminal($name);
+                    if ($t !== null) $terminals[] = $t;
                 }
             }
         }
@@ -5117,7 +5118,17 @@ class TerminalManager
     public function loadTerminal(string $name): ?array
     {
         $file = $this->baseDir . '/' . $name . '/session.json';
-        return file_exists($file) ? json_decode(file_get_contents($file), true) : null;
+        if (!file_exists($file)) return null;
+        $t = json_decode((string) file_get_contents($file), true);
+        if (!is_array($t)) return null;
+        // Normalize across schemas: the desktop app writes its own session.json in
+        // this same dir, keyed by 'id' with no 'name'/'status'. Backfill from the
+        // directory name so `terminal list` renders any record without warnings.
+        $t['name'] = $t['name'] ?? ($t['id'] ?? $name);
+        $t['status'] = $t['status'] ?? 'running';
+        $t['model'] = $t['model'] ?? 'unknown';
+        $t['cwd'] = $t['cwd'] ?? '';
+        return $t;
     }
 
     public function saveTerminal(string $name, array $terminal): void
