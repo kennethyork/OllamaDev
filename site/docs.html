@@ -323,12 +323,14 @@ systemctl status ollama                          <span class="cm"># runs on loca
 ollama pull qwen2.5-coder:7b                      <span class="cm"># or a smaller model — see the note</span><button class="copy-btn">Copy</button></pre>
     <div class="callout warn">Most VPSes have <strong>no GPU</strong>, so inference is CPU-bound (slower) and model size is capped by RAM. Prefer small models (<code>llama3.2:3b</code>, <code>qwen2.5-coder:3b/7b</code>). Run <code>ollamadev context</code> on the VPS for a num_ctx that fits its memory. Expect lower quality than a local GPU box.</div>
 
-    <h3>2. Get OllamaDev + run web mode</h3>
-    <p>Install the CLI and the desktop archive (for <code>web/</code>), then start the browser app — it needs no native window and no Boson:</p>
-<pre class="code"><span class="cm"># CLI</span>
-curl -fsSL https://raw.githubusercontent.com/kennethyork/OllamaDev/main/install.sh | sh
-<span class="cm"># web app (from the ADE folder/archive)</span>
-./OllamaDev-Web            <span class="cm"># or: php -S localhost:8080 web/server.php  (composer serve)</span><button class="copy-btn">Copy</button></pre>
+    <h3>2. Get the web app + run it</h3>
+    <p>On a headless VPS, download and extract the ADE archive (it bundles the agent CLI and needs no Boson), then start the browser app. Pick <code>linux-x64</code> or <code>linux-arm64</code> to match your VPS:</p>
+<pre class="code"><span class="cm"># download + extract the ADE (one line, no GUI needed)</span>
+curl -fsSL https://github.com/kennethyork/OllamaDev/releases/latest/download/OllamaDev-ADE-linux-x64.tar.gz | tar -xz
+cd OllamaDev-ADE
+./OllamaDev-Web            <span class="cm"># → http://localhost:8080  (needs PHP 8.0+)</span><button class="copy-btn">Copy</button></pre>
+    <p>That's all web mode needs — the archive ships its own <code>bin/ollamadev</code>. If you <em>also</em> want the <code>ollamadev</code> command in your shell (for crew/watch over SSH), add the standalone CLI too:</p>
+<pre class="code">curl -fsSL https://raw.githubusercontent.com/kennethyork/OllamaDev/main/install.sh | sh<button class="copy-btn">Copy</button></pre>
 
     <h3>3. Reach it securely from anywhere</h3>
     <p>The web app exposes shell, PTY, and file-write over HTTP — <strong>never put it on the open internet raw.</strong> Two safe options:</p>
