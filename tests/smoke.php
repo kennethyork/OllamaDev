@@ -597,6 +597,9 @@ ok('install.sh present + executable', is_file($repoRoot . '/install.sh') && is_e
 ok('build-binary.sh present + executable', is_file($repoRoot . '/scripts/build-binary.sh') && is_executable($repoRoot . '/scripts/build-binary.sh'));
 ok('release workflow present', is_file($repoRoot . '/.github/workflows/release.yml'));
 ok('build-desktop.sh present + executable', is_file($repoRoot . '/scripts/build-desktop.sh') && is_executable($repoRoot . '/scripts/build-desktop.sh'));
+$vps = (string)@file_get_contents($repoRoot . '/scripts/vps-setup.sh');
+ok('vps-setup.sh present + executable', is_file($repoRoot . '/scripts/vps-setup.sh') && is_executable($repoRoot . '/scripts/vps-setup.sh'));
+ok('vps-setup installs Ollama + ADE, stays localhost', strpos($vps, 'ollama.com/install.sh') !== false && strpos($vps, 'OllamaDev-ADE-linux-') !== false && strpos($vps, '0.0.0.0') === false);
 ok('desktop archive bundles the CLI', strpos((string)@file_get_contents($repoRoot . '/scripts/build-desktop.sh'), 'OLLAMADEV_BINARY') !== false && strpos((string)@file_get_contents($repoRoot . '/scripts/build-desktop.sh'), '/bin/ollamadev') !== false);
 $dlPage = (string)@file_get_contents($repoRoot . '/site/downloads.html');
 ok('downloads page points desktop at archives', strpos($dlPage, 'OllamaDev-ADE-linux-x64.tar.gz') !== false && strpos($dlPage, 'OllamaDev-ADE-windows-x64.zip') !== false);

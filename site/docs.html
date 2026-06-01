@@ -317,6 +317,13 @@ ollamadev --host http://localhost:1234/v1
     <h2 id="selfhost" class="anchor">Self-hosting on a VPS</h2>
     <p>Run OllamaDev on a server you control and use the <strong>browser/web mode</strong> from anywhere — handy when you're away from your desktop. Everything still runs on <em>your</em> box (a VPS is your server, not a cloud AI provider), so it stays self-hosted.</p>
 
+    <h3>One-shot setup script</h3>
+    <p>Installs Ollama + a model, fetches the ADE, and starts web mode on <code>localhost</code> (nothing exposed). Then reach it over an SSH tunnel:</p>
+<pre class="code"><span class="cm"># PHP 8.0+ must already be installed (e.g. sudo apt install -y php-cli)</span>
+curl -fsSL https://raw.githubusercontent.com/kennethyork/OllamaDev/main/scripts/vps-setup.sh | bash
+<span class="cm"># override: MODEL=llama3.2:3b PORT=8080 CLI=0 … | bash</span><button class="copy-btn">Copy</button></pre>
+    <div class="callout">It picks a small-model default, sets up a systemd service when it can (always-on), and prints the exact <code>ssh -L</code> tunnel command at the end. Prefer to do it by hand? The manual steps follow.</div>
+
     <h3>1. Install Ollama + a model</h3>
 <pre class="code">curl -fsSL https://ollama.com/install.sh | sh   <span class="cm"># installs + a systemd service</span>
 systemctl status ollama                          <span class="cm"># runs on localhost:11434</span>
