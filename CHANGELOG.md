@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.1.8 (2026-06-01)
+
+### Added
+- **Touch-friendly terminals** — on small screens each terminal gets a line-input (type a command, Enter/Send writes it to the PTY) plus a key bar for control keys (Tab, Esc, ↑, ↓, Ctrl-C, Ctrl-D), so the web terminal is usable on a phone/tablet. Hidden on desktop.
+
 ## v4.1.7 (2026-06-01)
 
 ### Added
