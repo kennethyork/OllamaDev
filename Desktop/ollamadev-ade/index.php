@@ -99,6 +99,22 @@ $app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $
         return $cli;
     });
 
+    // Speech-to-text (local, engine-agnostic) — delegates to the CLI's SttClient.
+    $b->bind('sttEnabled', function () use ($cli): bool {
+        return trim((string) @shell_exec(escapeshellarg($cli) . ' transcribe --enabled 2>/dev/null')) === '1';
+    });
+    // Receives base64 audio from the mic, writes it, and transcribes via the
+    // configured local engine. Returns the text (empty on failure).
+    $b->bind('sttTranscribe', function (string $b64, string $ext = 'webm') use ($cli): string {
+        $data = base64_decode($b64, true);
+        if ($data === false || $data === '') return '';
+        $tmp = sys_get_temp_dir() . '/odv_stt_' . getmypid() . '_' . substr(md5($b64), 0, 6) . '.' . preg_replace('/[^a-z0-9]/i', '', $ext ?: 'webm');
+        @file_put_contents($tmp, $data);
+        $out = (string) @shell_exec(escapeshellarg($cli) . ' transcribe ' . escapeshellarg($tmp) . ' 2>/dev/null');
+        @unlink($tmp);
+        return trim($out);
+    });
+
     // Live Crew board (Director's plan + per-subtask state) for the kanban view.
     $b->bind('crewBoard', function (): array {
         $home = getenv('HOME') ?: sys_get_temp_dir();

@@ -12,6 +12,53 @@ function banner(msg, kind) {
 }
 window.onerror = function (m, s, l) { banner('JS error: ' + m + ' @' + l, 'err'); return false; };
 
+// Voice dictation — records the mic locally and transcribes via the configured
+// local STT engine (window.sttTranscribe → CLI → SttClient). Inserts the text
+// into a target field. Nothing leaves the machine. Toggle: click to start, click
+// to stop. The button is shown only when an STT engine is configured.
+var Voice = {
+    rec: null, btn: null, target: null,
+    // Reveal the mic button if a local STT engine is configured.
+    init: function (btnId, targetId) {
+        var btn = document.getElementById(btnId), target = document.getElementById(targetId);
+        if (!btn || !target || !window.sttEnabled) return;
+        Promise.resolve(window.sttEnabled()).then(function (on) {
+            if (!on) return;
+            btn.hidden = false;
+            btn.onclick = function () { Voice.toggle(btn, target); };
+        }).catch(function () {});
+    },
+    toggle: function (btn, target) {
+        if (this.rec) { try { this.rec.stop(); } catch (e) {} return; } // stop → triggers onstop
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') {
+            banner('this build has no microphone access', 'err'); return;
+        }
+        var self = this;
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+            var chunks = [], rec = new MediaRecorder(stream);
+            rec.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+            rec.onstop = function () {
+                stream.getTracks().forEach(function (t) { t.stop(); });
+                self.rec = null; btn.classList.remove('rec'); btn.textContent = '🎤';
+                var fr = new FileReader();
+                fr.onload = function () {
+                    var b64 = String(fr.result).split(',')[1] || '';
+                    if (!b64) { banner('no audio captured', 'err'); return; }
+                    banner('transcribing…');
+                    Promise.resolve(window.sttTranscribe(b64, 'webm')).then(function (text) {
+                        text = (text || '').trim();
+                        if (text) { target.value += (target.value && !/\s$/.test(target.value) ? ' ' : '') + text; target.focus(); banner('transcribed', 'ok'); }
+                        else banner('no transcription — check your STT engine', 'err');
+                    }).catch(function () { banner('transcription failed', 'err'); });
+                };
+                fr.readAsDataURL(new Blob(chunks, { type: 'audio/webm' }));
+            };
+            self.rec = rec; rec.start();
+            btn.classList.add('rec'); btn.textContent = '⏹'; banner('recording… click ⏹ to stop');
+        }).catch(function () { banner('microphone permission denied', 'err'); });
+    }
+};
+
 // Tidy a long absolute path for a narrow label: collapse $HOME to ~ and keep the
 // meaningful tail (last segments) instead of the start, e.g.
 //   /home/me/Documents/OllamaDev/Desktop/ollamadev-ade  ->  ~/…/Desktop/ollamadev-ade
@@ -572,6 +619,8 @@ var App = {
             if (e.key === 'Enter') self.submitFolder();
             else if (e.key === 'Escape') self.closeFolder();
         });
+        // Voice dictation for the Crew task box (shown only if a local STT engine is configured).
+        Voice.init('crewMic', 'crewTask');
         // Crew — single screen: type the task, Run. (Advanced section is optional.)
         var fb = $('#crewBtn'); if (fb) fb.onclick = function () { self.openCrew(); };
         var fc = $('#crewCancel'); if (fc) fc.onclick = function () { self.closeCrew(); };

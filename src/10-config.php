@@ -13,6 +13,7 @@ class Config {
             'agents' => ['coder' => ['temperature' => 0.7, 'maxTokens' => 4096], 'maxIterations' => 12, 'maxToolOutput' => 12000, 'subagentPermission' => 'readonly'],
             'session' => ['autoResume' => true], // bare `ollamadev` resumes this repo's last session (use `new`/--new for a fresh one)
             'memory' => ['autoRemember' => true], // distill durable facts into graph memory after real work (--no-memory / false to disable)
+            'stt' => ['host' => getenv('STT_HOST') ?: '', 'command' => getenv('STT_COMMAND') ?: '', 'model' => getenv('STT_MODEL') ?: 'whisper-1'], // local speech-to-text (bring your own engine)
             'data' => ['directory' => '.ollamadev']
         ];
         $home = getenv('HOME') ?: '/tmp';

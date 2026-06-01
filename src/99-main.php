@@ -478,6 +478,19 @@ if ($argc >= 2 && $argv[1] === 'context') {
     exit(0);
 }
 
+// Transcribe — local speech-to-text via the configured engine (used by the
+// desktop mic button, and usable directly: `ollamadev transcribe clip.wav`).
+if ($argc >= 2 && $argv[1] === 'transcribe') {
+    $arg = $argv[2] ?? '';
+    if ($arg === '--enabled') { echo SttClient::enabled() ? "1\n" : "0\n"; exit(0); }
+    if ($arg === '') { echo "Usage: ollamadev transcribe <audio-file>\nConfigure a local engine first: stt.host (HTTP server) or stt.command in config.\n"; exit(1); }
+    if (!SttClient::enabled()) { echo "No STT engine configured. Set stt.host or stt.command in ~/.ollamadev/config.json (local only).\n"; exit(1); }
+    $text = SttClient::transcribe($arg);
+    if ($text === '') { echo "Transcription failed or empty.\n"; exit(1); }
+    echo $text . "\n";
+    exit(0);
+}
+
 // Completion Command
 if ($argc >= 2 && $argv[1] === 'completion') {
     $shell = $argv[2] ?? 'bash';

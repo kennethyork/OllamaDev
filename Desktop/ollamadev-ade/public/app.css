@@ -319,6 +319,11 @@ body {
 /* live crew cards (Director's plan) — read-only, accent-tinted */
 .card.crew { cursor: default; border-color: var(--accent); background: linear-gradient(var(--accent-soft), transparent), var(--elev); }
 .card.crew.held { border-color: var(--warn); }
+.task-input-wrap { position: relative; }
+.mic-btn { position: absolute; right: 8px; bottom: 8px; border: 1px solid var(--border-lt, #2c3543); background: var(--bg3, #1c2128); color: var(--fg); border-radius: 8px; padding: 4px 9px; cursor: pointer; font-size: 15px; line-height: 1; }
+.mic-btn:hover { border-color: var(--accent); }
+.mic-btn.rec { color: var(--err, #f85149); border-color: var(--err, #f85149); animation: micpulse 1s infinite; }
+@keyframes micpulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
 .card.idea { cursor: default; border-style: dashed; border-color: var(--warn); }
 .card.idea .actions { margin-top: 8px; }
 .card.crew .cmeta { margin-top: 6px; font-size: 11px; color: var(--dim); }

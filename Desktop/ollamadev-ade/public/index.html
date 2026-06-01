@@ -97,7 +97,10 @@
             <div class="modal-sub dim">Set up the team, then either give the Director a task now — or leave it blank to launch the crew and prompt the Director live in the terminal.</div>
 
             <div id="crewTemplates" class="wiz-templates"></div>
-            <textarea id="crewTask" placeholder="Optional — tell the Director what to build, or leave blank to prompt it live (e.g. add input validation + tests to the signup form)"></textarea>
+            <div class="task-input-wrap">
+              <textarea id="crewTask" placeholder="Optional — tell the Director what to build, or leave blank to prompt it live (e.g. add input validation + tests to the signup form)"></textarea>
+              <button id="crewMic" class="mic-btn" type="button" title="Dictate (local speech-to-text)" hidden>🎤</button>
+            </div>
             <div id="crewProjLine" class="modal-hint dim"></div>
 
             <details class="crew-adv">

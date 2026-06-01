@@ -515,6 +515,24 @@ if (preg_match('/class TerminalManager.*?\n\}/s', $src, $tmm)) {
     @exec('rm -rf ' . escapeshellarg($thome));
 } else { ok('TerminalManager extractable', false); }
 
+echo "\n== Speech-to-text (local, engine-agnostic) ==\n";
+if (preg_match('/class SttClient \{.*?\n\}/s', $src, $stm)) {
+    if (!class_exists('SttClient')) eval($stm[0]);
+    Config::set('stt.host', ''); Config::set('stt.command', '');
+    ok('STT disabled when unconfigured', SttClient::enabled() === false);
+    Config::set('stt.command', 'cat'); // fake engine: echoes the "audio" file's text back
+    ok('STT enabled with a command engine', SttClient::enabled() === true);
+    $sf = sys_get_temp_dir() . '/odv_stt_' . getmypid() . '.txt'; file_put_contents($sf, 'spoken words here');
+    ok('STT command-mode transcribes via the local engine', SttClient::transcribe($sf) === 'spoken words here');
+    @unlink($sf);
+    ok('STT returns empty for a missing file', SttClient::transcribe('/no/such/file.wav') === '');
+    Config::set('stt.command', '');
+} else { ok('SttClient extractable', false); }
+ok('transcribe command + --enabled wired', strpos($src, "=== 'transcribe'") !== false && strpos($src, "=== '--enabled'") !== false);
+$ade = (string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/app.js');
+ok('desktop has a local voice dictation module', strpos($ade, 'var Voice') !== false && strpos($ade, 'sttTranscribe') !== false && strpos($ade, 'MediaRecorder') !== false);
+ok('desktop binds sttEnabled + sttTranscribe to the CLI', strpos((string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/index.php'), 'sttTranscribe') !== false);
+
 echo "\n== Auto-remember (self-populating memory) ==\n";
 ok('Memory::autoRemember exists + dedupes', strpos($src, 'function autoRemember(') !== false && strpos($src, 'title dedupe') !== false);
 ok('crew auto-remembers after a run (run + resume)', strpos($src, 'function rememberFacts(') !== false && substr_count($src, 'self::rememberFacts(') >= 2);
