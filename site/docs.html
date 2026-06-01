@@ -306,6 +306,18 @@ OLLAMADEV_SERVE_HOST=0.0.0.0 ./OllamaDev-Web
 <span class="cm"># open http://your-vps:8080/?token=&lt;the token&gt;</span><button class="copy-btn">Copy</button></pre>
     <div class="callout">Keep Ollama's port <code>11434</code> private (localhost). Only the web app port is exposed, and only behind a tunnel or token + firewall. For sensitive code, prefer your local desktop — a VPS is yours, but it's off your machine.</div>
 
+    <h3>HTTPS &amp; the microphone</h3>
+    <p>Ollama serves plain HTTP and has no built-in TLS — but it doesn't need it here: OllamaDev talks to Ollama over <code>localhost</code> on the VPS, which never leaves the box. The hop that crosses the internet is <strong>your browser → the web app</strong>, and that's what to encrypt:</p>
+    <ul>
+      <li><strong>SSH tunnel (simplest)</strong> — encrypts the hop and makes the app <code>localhost</code> on your device; no certificates.</li>
+      <li><strong>HTTPS via a reverse proxy</strong> — front the web app with <a href="https://caddyserver.com">Caddy</a> (automatic Let's Encrypt) or nginx, and pair it with <code>OLLAMADEV_SERVE_TOKEN</code>:</li>
+    </ul>
+<pre class="code"><span class="cm"># Caddyfile — terminates HTTPS, proxies to the local web app</span>
+ade.example.com {
+    reverse_proxy localhost:8080
+}<button class="copy-btn">Copy</button></pre>
+    <div class="callout warn"><strong>The mic needs a secure context.</strong> Browsers only allow the microphone (the voice-input feature) over <strong>HTTPS or <code>localhost</code></strong>. So voice works over an SSH tunnel (it's localhost) or behind HTTPS — but on plain <code>http://your-vps:8080</code> the browser silently blocks it. For remote voice, use the tunnel or real HTTPS.</div>
+
     <h2 id="troubleshooting" class="anchor">Troubleshooting</h2>
     <p><strong>Cannot connect to Ollama</strong> — start it with <code>ollama serve</code>, or set <code>OLLAMA_HOST</code>. (On launch, OllamaDev prints the exact fix-up steps for whichever backend is configured.)</p>
     <p><strong>Model not found / no models installed</strong> — <code>ollama pull qwen2.5-coder</code>, or just <code>/pull qwen2.5-coder</code> in-session.</p>
