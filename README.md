@@ -141,6 +141,17 @@ Or grab a prebuilt **desktop archive** for your OS from the [Downloads page](htt
 
 > Note: Boson (`runtime ^0.19`) is a runtime, not a compiler — there's no single-file `boson compile`. The desktop ships as a portable app archive (app + Boson libs + bundled CLI + launcher), which is why it needs PHP 8.4+ to run, unlike the standalone CLI binary.
 
+### Browser / web mode (and self-hosting)
+
+The ADE also runs in a **browser** — no native window, no Boson — sharing the same frontend and local engine as the desktop:
+
+```bash
+cd Desktop/ollamadev-ade
+composer serve        # php -S localhost:8080 web/server.php → open http://localhost:8080
+```
+
+Binds to localhost by default. To run it on a server you control (e.g. a VPS) and use it when you're away, see **Self-hosting on a VPS** in the docs — install Ollama, run web mode, reach it over an SSH tunnel (or bind public with `OLLAMADEV_SERVE_TOKEN` + a firewall). The web app exposes shell/PTY, so never expose it raw to the internet.
+
 ### VS Code extension
 
 ```bash

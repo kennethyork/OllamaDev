@@ -42,6 +42,7 @@
     <a href="#config">Configuration</a>
     <a href="#env">Environment vars</a>
     <a href="#storage">Data storage</a>
+    <a href="#selfhost">Self-hosting (VPS)</a>
     <a href="#troubleshooting">Troubleshooting</a>
   </aside>
 
@@ -276,6 +277,34 @@ ollamadev --host http://localhost:1234/v1
       <li>Custom commands: <code>~/.ollamadev/commands/</code></li>
     </ul>
     <p>Put a prompt template in <code>~/.ollamadev/commands/review.md</code> (supports <code>$ARGS</code> / <code>$1</code>) and invoke it as <code>/review ...</code>. Configure <code>hooks.beforePrompt</code> / <code>hooks.afterEdit</code> shell commands to run at those points.</p>
+
+    <h2 id="selfhost" class="anchor">Self-hosting on a VPS</h2>
+    <p>Run OllamaDev on a server you control and use the <strong>browser/web mode</strong> from anywhere — handy when you're away from your desktop. Everything still runs on <em>your</em> box (a VPS is your server, not a cloud AI provider), so it stays self-hosted.</p>
+
+    <h3>1. Install Ollama + a model</h3>
+<pre class="code">curl -fsSL https://ollama.com/install.sh | sh   <span class="cm"># installs + a systemd service</span>
+systemctl status ollama                          <span class="cm"># runs on localhost:11434</span>
+ollama pull qwen2.5-coder:7b                      <span class="cm"># or a smaller model — see the note</span><button class="copy-btn">Copy</button></pre>
+    <div class="callout warn">Most VPSes have <strong>no GPU</strong>, so inference is CPU-bound (slower) and model size is capped by RAM. Prefer small models (<code>llama3.2:3b</code>, <code>qwen2.5-coder:3b/7b</code>). Run <code>ollamadev context</code> on the VPS for a num_ctx that fits its memory. Expect lower quality than a local GPU box.</div>
+
+    <h3>2. Get OllamaDev + run web mode</h3>
+    <p>Install the CLI and the desktop archive (for <code>web/</code>), then start the browser app — it needs no native window and no Boson:</p>
+<pre class="code"><span class="cm"># CLI</span>
+curl -fsSL https://raw.githubusercontent.com/kennethyork/OllamaDev/main/install.sh | sh
+<span class="cm"># web app (from the ADE folder/archive)</span>
+./OllamaDev-Web            <span class="cm"># or: php -S localhost:8080 web/server.php  (composer serve)</span><button class="copy-btn">Copy</button></pre>
+
+    <h3>3. Reach it securely from anywhere</h3>
+    <p>The web app exposes shell, PTY, and file-write over HTTP — <strong>never put it on the open internet raw.</strong> Two safe options:</p>
+    <p><strong>Best — SSH tunnel</strong> (keep it localhost on the VPS, encrypt the hop):</p>
+<pre class="code"><span class="cm"># on your laptop:</span>
+ssh -L 8080:localhost:8080 you@your-vps
+<span class="cm"># then open http://localhost:8080 — traffic is tunnelled, nothing public</span><button class="copy-btn">Copy</button></pre>
+    <p><strong>Or bind public with a token</strong> (and firewall the port to your IP):</p>
+<pre class="code">export OLLAMADEV_SERVE_TOKEN="$(openssl rand -hex 16)"
+OLLAMADEV_SERVE_HOST=0.0.0.0 ./OllamaDev-Web
+<span class="cm"># open http://your-vps:8080/?token=&lt;the token&gt;</span><button class="copy-btn">Copy</button></pre>
+    <div class="callout">Keep Ollama's port <code>11434</code> private (localhost). Only the web app port is exposed, and only behind a tunnel or token + firewall. For sensitive code, prefer your local desktop — a VPS is yours, but it's off your machine.</div>
 
     <h2 id="troubleshooting" class="anchor">Troubleshooting</h2>
     <p><strong>Cannot connect to Ollama</strong> — start it with <code>ollama serve</code>, or set <code>OLLAMA_HOST</code>. (On launch, OllamaDev prints the exact fix-up steps for whichever backend is configured.)</p>
