@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.1.6 (2026-05-31)
+
+### Added
+- **Local voice input** — engine-agnostic speech-to-text. Configure a local engine (`stt.host` for an OpenAI-compatible server like whisper.cpp / faster-whisper / vosk-server, or `stt.command` for any local CLI) and dictate via the desktop Crew mic button or `ollamadev transcribe <file>`. 100% local, off by default.
+
 ## v4.1.5 (2026-05-31)
 
 ### Added
