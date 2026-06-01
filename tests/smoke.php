@@ -551,6 +551,20 @@ ok('context command + --num-ctx wired', strpos($src, "=== 'context'") !== false 
 ok('compaction preserves referenced tool output', strpos($src, 'still in use') !== false && strpos($src, '$preserved[$ref]') !== false);
 ok('compaction keeps recent window after preserving', strpos($src, 'Preserved tool output the recent steps still reference') !== false);
 
+echo "\n== Browser/server mode (shared bindings) ==\n";
+$adeDir = dirname(__DIR__) . '/Desktop/ollamadev-ade';
+ok('shared Bindings class exists', is_file($adeDir . '/src/Bindings.php'));
+ok('web server + browser shim live in web/', is_file($adeDir . '/web/server.php') && is_file($adeDir . '/web/bridge.js'));
+$bind = (string)@file_get_contents($adeDir . '/src/Bindings.php');
+ok('Bindings allow-lists calls + dispatches', strpos($bind, 'const PUBLIC') !== false && strpos($bind, 'function call(') !== false);
+ok('desktop delegates bindings to the shared class', strpos((string)@file_get_contents($adeDir . '/index.php'), 'new Bindings(') !== false);
+$brg = (string)@file_get_contents($adeDir . '/web/bridge.js');
+ok('browser shim maps window.<binding> to /api', strpos($brg, "'/api/'") !== false && strpos($brg, 'listModels') !== false && strpos($brg, 'sttTranscribe') !== false);
+$srv = (string)@file_get_contents($adeDir . '/web/server.php');
+ok('server is localhost-shaped with optional token', strpos($srv, 'OLLAMADEV_SERVE_TOKEN') !== false && strpos($srv, "str_starts_with(\$uri, '/api/')") !== false);
+ok('web mode stays vanilla (no deps in web/)', !is_file($adeDir . '/web/package.json') && strpos($brg, 'import ') === false && strpos($brg, 'require(') === false);
+ok('composer serve script wired', strpos((string)@file_get_contents($adeDir . '/composer.json'), '"serve"') !== false);
+
 // Vanilla guard — enforces the no-frameworks/no-deps rule on OLLAMADEV'S OWN code
 // only (CLI src/, the website site/, the desktop front-end public/). It does NOT
 // constrain other projects the agent works on — those can use any deps they need.

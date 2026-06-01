@@ -13,6 +13,7 @@
     },
     "scripts": {
         "start": "php -S localhost:8080 -t public",
+        "serve": "php -S localhost:8080 web/server.php",
         "build": "bash ../../scripts/build-desktop.sh"
     }
 }

@@ -28,7 +28,7 @@ echo "▸ staging payload…"
 rm -rf "$STAGE"; mkdir -p "$STAGE/OllamaDev-ADE/bin"
 APP="$STAGE/OllamaDev-ADE"
 cp -R "$ADE/index.php" "$ADE/boson.config.php" "$ADE/composer.json" "$ADE/composer.lock" \
-      "$ADE/src" "$ADE/public" "$ADE/vendor" "$APP/"
+      "$ADE/src" "$ADE/public" "$ADE/web" "$ADE/vendor" "$APP/"
 cp "$ROOT/ollamadev" "$APP/bin/ollamadev"; chmod +x "$APP/bin/ollamadev"   # bundled agent CLI (PHP script)
 
 # Launchers: point the app at the bundled CLI, then run the Boson window.
@@ -73,13 +73,42 @@ REM Launch OllamaDev ADE. Requires PHP 8.4+ on PATH. Agent CLI is bundled.
 set "OLLAMADEV_BINARY=%~dp0bin\ollamadev"
 php "%~dp0index.php" %*
 BAT
+
+# Web mode: same ADE in your browser, no native window (and no Boson — so any
+# PHP 8.x works). Localhost by default; for remote use, set OLLAMADEV_SERVE_HOST
+# (e.g. 0.0.0.0) AND OLLAMADEV_SERVE_TOKEN, ideally behind an SSH/Tailscale tunnel.
+cat > "$APP/OllamaDev-Web" <<'SH'
+#!/usr/bin/env sh
+here="$(cd "$(dirname "$0")" && pwd)"
+command -v php >/dev/null 2>&1 || { echo "PHP is required (8.0+)."; exit 1; }
+export OLLAMADEV_BINARY="$here/bin/ollamadev"
+host="${OLLAMADEV_SERVE_HOST:-localhost}"; port="${OLLAMADEV_SERVE_PORT:-8080}"
+echo "OllamaDev ADE (web) → http://$host:$port   (Ctrl-C to stop)"
+[ -n "$OLLAMADEV_SERVE_TOKEN" ] && echo "  auth token required: append ?token=\$OLLAMADEV_SERVE_TOKEN"
+[ "$host" != "localhost" ] && [ "$host" != "127.0.0.1" ] && echo "  ⚠ binding non-localhost — set OLLAMADEV_SERVE_TOKEN and prefer a tunnel/VPN."
+exec php -S "$host:$port" "$here/web/server.php"
+SH
+chmod +x "$APP/OllamaDev-Web"
+cat > "$APP/OllamaDev-Web.bat" <<'BAT'
+@echo off
+REM OllamaDev ADE in the browser. Requires PHP on PATH. Agent CLI is bundled.
+set "OLLAMADEV_BINARY=%~dp0bin\ollamadev"
+if "%OLLAMADEV_SERVE_HOST%"=="" set "OLLAMADEV_SERVE_HOST=localhost"
+if "%OLLAMADEV_SERVE_PORT%"=="" set "OLLAMADEV_SERVE_PORT=8080"
+echo OllamaDev ADE (web) -^> http://%OLLAMADEV_SERVE_HOST%:%OLLAMADEV_SERVE_PORT%
+php -S %OLLAMADEV_SERVE_HOST%:%OLLAMADEV_SERVE_PORT% "%~dp0web\server.php"
+BAT
 cat > "$APP/README.txt" <<'TXT'
 OllamaDev ADE — desktop app
 
 Requires: PHP 8.4+  and  Ollama running locally (https://ollama.com).
 Run it:
-  macOS / Linux :  ./OllamaDev-ADE
-  Windows       :  OllamaDev-ADE.bat
+  Native window      :  ./OllamaDev-ADE        (Windows: OllamaDev-ADE.bat)  — needs PHP 8.4+
+  In your browser    :  ./OllamaDev-Web         (Windows: OllamaDev-Web.bat)  — then open http://localhost:8080
+
+Web mode needs no native window (and no Boson). Use it when you're away from the
+desktop. It binds to localhost by default; for remote access set OLLAMADEV_SERVE_HOST
+and OLLAMADEV_SERVE_TOKEN, and prefer an SSH/Tailscale tunnel over exposing it directly.
 
 The agent CLI is bundled in bin/ — you do not need to install it separately.
 On first run from a terminal it also offers to add the `ollamadev` command to

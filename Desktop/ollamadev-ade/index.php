@@ -26,6 +26,7 @@ use Boson\WebView\Api\LifecycleEvents\LifecycleEventsExtension;
 use OllamaDev\Config;
 use OllamaDev\PtyManager;
 use OllamaDev\FileBrowser;
+use OllamaDev\Bindings;
 
 Config::load();
 
@@ -67,116 +68,27 @@ $app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $
 
     $b = $webview->get('bindings');
 
-    // --- Models / status (delegated to the ollamadev CLI) ---
-    $b->bind('listModels', function () use ($cli): array {
-        $out = shell_exec('php ' . escapeshellarg($cli) . ' models --json 2>/dev/null');
-        $data = json_decode((string) $out, true);
-        return is_array($data) ? $data : ['connected' => false, 'models' => []];
-    });
-
-    // --- Terminals (the frontend supplies the id) ---
-    $b->bind('termCreate', function (string $id, string $model) use ($pty): bool {
-        $pty->create($id, $model);
-        $pty->start($id);
-        return true;
-    });
-    $b->bind('termRead', function (string $id, int $offset = 0) use ($pty): array {
-        return $pty->read($id, $offset);
-    });
-    $b->bind('termWrite', function (string $id, string $b64) use ($pty): bool {
-        return $pty->write($id, $b64);
-    });
-    $b->bind('termKill', function (string $id) use ($pty): bool {
-        $pty->delete($id);
-        return true;
-    });
-    $b->bind('agentRun', function (string $id, string $prompt) use ($pty): bool {
-        return $pty->agentRun($id, $prompt);
-    });
-
-    // Resolved ollamadev CLI path, so the frontend can auto-launch it in a pty.
-    $b->bind('cliPath', function () use ($cli): string {
-        return $cli;
-    });
-
-    // Speech-to-text (local, engine-agnostic) — delegates to the CLI's SttClient.
-    $b->bind('sttEnabled', function () use ($cli): bool {
-        return trim((string) @shell_exec(escapeshellarg($cli) . ' transcribe --enabled 2>/dev/null')) === '1';
-    });
-    // Receives base64 audio from the mic, writes it, and transcribes via the
-    // configured local engine. Returns the text (empty on failure).
-    $b->bind('sttTranscribe', function (string $b64, string $ext = 'webm') use ($cli): string {
-        $data = base64_decode($b64, true);
-        if ($data === false || $data === '') return '';
-        $tmp = sys_get_temp_dir() . '/odv_stt_' . getmypid() . '_' . substr(md5($b64), 0, 6) . '.' . preg_replace('/[^a-z0-9]/i', '', $ext ?: 'webm');
-        @file_put_contents($tmp, $data);
-        $out = (string) @shell_exec(escapeshellarg($cli) . ' transcribe ' . escapeshellarg($tmp) . ' 2>/dev/null');
-        @unlink($tmp);
-        return trim($out);
-    });
-
-    // Live Crew board (Director's plan + per-subtask state) for the kanban view.
-    $b->bind('crewBoard', function (): array {
-        $home = getenv('HOME') ?: sys_get_temp_dir();
-        $f = $home . '/.ollamadev/crew/current.json';
-        if (!is_file($f)) return [];
-        $d = json_decode((string) @file_get_contents($f), true);
-        return is_array($d) ? $d : [];
-    });
-
-    // Home directory, so the UI can show ~ instead of the full /home/<user> prefix.
-    $b->bind('homeDir', function (): string {
-        return getenv('HOME') ?: '';
-    });
-
-    // Live per-coder log tail (one pane per coder while a crew runs).
-    $b->bind('crewCoderLog', function (string $runId, int $n, int $offset = 0) {
-        $home = getenv('HOME') ?: sys_get_temp_dir();
-        // runId is validated to the crew_YYYYmmdd_HHMMSS shape — no path traversal.
-        if (!preg_match('/^crew_[0-9_]+$/', $runId) || $n < 1 || $n > 64) return ['data' => '', 'size' => 0];
-        $f = $home . '/.ollamadev/crew/' . $runId . '/coder-' . $n . '.log';
-        if (!is_file($f)) return ['data' => '', 'size' => 0];
-        $size = (int) filesize($f);
-        if ($offset >= $size) return ['data' => '', 'size' => $size];
-        $fh = @fopen($f, 'rb');
-        if (!$fh) return ['data' => '', 'size' => $size];
-        if ($offset > 0) fseek($fh, $offset);
-        $data = (string) stream_get_contents($fh);
-        fclose($fh);
-        return ['data' => $data, 'size' => $size];
-    });
-
-    // Project knowledge graph (nodes + [[link]] edges) for the Graph view.
-    $b->bind('memoryGraph', function () use ($cli, $files): array {
-        $root = $files->getRoot();
-        $cmd = 'cd ' . escapeshellarg($root) . ' && ' . escapeshellarg($cli) . ' memory graph --json 2>/dev/null';
-        $out = (string) @shell_exec($cmd);
-        $d = json_decode(trim($out), true);
-        return is_array($d) && isset($d['nodes']) ? $d : ['nodes' => [], 'edges' => []];
-    });
-
-    // --- Files ---
-    $b->bind('getRoot', function () use ($files): string {
-        return $files->getRoot();
-    });
-    // Point the workspace at a project folder (expands ~). Returns the real path.
-    $b->bind('setRoot', function (string $path) use ($files): array {
-        $path = trim($path);
-        if ($path !== '' && $path[0] === '~') $path = (getenv('HOME') ?: '') . substr($path, 1);
-        $real = realpath($path);
-        if ($real === false || !is_dir($real)) return ['error' => "Not a directory: $path"];
-        $files->setRoot($real);
-        return ['root' => $real];
-    });
-    $b->bind('listFiles', function (?string $path = null) use ($files): array {
-        return $files->listDir($path);
-    });
-    $b->bind('readFile', function (string $path) use ($files): array {
-        return $files->readFile($path);
-    });
-    $b->bind('writeFile', function (string $path, string $content) use ($files): array {
-        return $files->writeFile($path, $content);
-    });
+    // One shared implementation backs both the desktop (these bindings) and the
+    // browser server mode (server.php /api/<name>) — see src/Bindings.php.
+    $bx = new Bindings($pty, $files, $cli);
+    $b->bind('listModels',    fn(): array => $bx->listModels());
+    $b->bind('termCreate',    fn(string $id, string $model): bool => $bx->termCreate($id, $model));
+    $b->bind('termRead',      fn(string $id, int $offset = 0): array => $bx->termRead($id, $offset));
+    $b->bind('termWrite',     fn(string $id, string $b64): bool => $bx->termWrite($id, $b64));
+    $b->bind('termKill',      fn(string $id): bool => $bx->termKill($id));
+    $b->bind('agentRun',      fn(string $id, string $prompt): bool => $bx->agentRun($id, $prompt));
+    $b->bind('cliPath',       fn(): string => $bx->cliPath());
+    $b->bind('sttEnabled',    fn(): bool => $bx->sttEnabled());
+    $b->bind('sttTranscribe', fn(string $b64, string $ext = 'webm'): string => $bx->sttTranscribe($b64, $ext));
+    $b->bind('crewBoard',     fn(): array => $bx->crewBoard());
+    $b->bind('homeDir',       fn(): string => $bx->homeDir());
+    $b->bind('crewCoderLog',  fn(string $runId, int $n, int $offset = 0): array => $bx->crewCoderLog($runId, $n, $offset));
+    $b->bind('memoryGraph',   fn(): array => $bx->memoryGraph());
+    $b->bind('getRoot',       fn(): string => $bx->getRoot());
+    $b->bind('setRoot',       fn(string $path): array => $bx->setRoot($path));
+    $b->bind('listFiles',     fn(?string $path = null): array => $bx->listFiles($path));
+    $b->bind('readFile',      fn(string $path): array => $bx->readFile($path));
+    $b->bind('writeFile',     fn(string $path, string $content): array => $bx->writeFile($path, $content));
 });
 
 $app->run();
