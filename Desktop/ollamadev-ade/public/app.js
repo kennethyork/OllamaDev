@@ -619,6 +619,7 @@ var App = {
             if (e.key === 'Enter') self.submitFolder();
             else if (e.key === 'Escape') self.closeFolder();
         });
+        this.initResponsive();
         // Voice dictation for the Crew task box (shown only if a local STT engine is configured).
         Voice.init('crewMic', 'crewTask');
         // Crew — single screen: type the task, Run. (Advanced section is optional.)
@@ -1027,6 +1028,20 @@ var App = {
                 else idle = 0;
             }).catch(function () {});
         }, 1500);
+    },
+    // Mobile (web mode): the sidebar is an off-canvas drawer. The rail opens it;
+    // tapping the workspace, hitting Esc, or picking a file closes it. No-ops on
+    // desktop where the sidebar is always docked.
+    initResponsive: function () {
+        var small = function () { return window.matchMedia('(max-width: 820px)').matches; };
+        var open = function () { if (small()) document.body.classList.add('nav-open'); };
+        var close = function () { document.body.classList.remove('nav-open'); };
+        var rail = $('#rail'); if (rail) rail.addEventListener('click', open);
+        var ws = $('#workspace'); if (ws) ws.addEventListener('click', close);
+        document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+        var sb = $('#sidebar'); if (sb) sb.addEventListener('click', function (e) {
+            if (e.target.closest('.tree-item')) setTimeout(close, 60); // file picked → reveal the editor
+        });
     },
     toggleZoom: function (id) {
         this.zoomed = this.zoomed === id ? null : id;

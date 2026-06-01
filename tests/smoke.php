@@ -564,6 +564,9 @@ $srv = (string)@file_get_contents($adeDir . '/web/server.php');
 ok('server is localhost-shaped with optional token', strpos($srv, 'OLLAMADEV_SERVE_TOKEN') !== false && strpos($srv, "str_starts_with(\$uri, '/api/')") !== false);
 ok('web mode stays vanilla (no deps in web/)', !is_file($adeDir . '/web/package.json') && strpos($brg, 'import ') === false && strpos($brg, 'require(') === false);
 ok('composer serve script wired', strpos((string)@file_get_contents($adeDir . '/composer.json'), '"serve"') !== false);
+$adeCss = (string)@file_get_contents($adeDir . '/public/app.css');
+ok('ADE app is responsive (mobile media query)', strpos($adeCss, '@media (max-width: 820px)') !== false && strpos($adeCss, 'nav-open') !== false);
+ok('mobile sidebar drawer wired in JS', strpos($ade, 'initResponsive') !== false && strpos($ade, "matchMedia('(max-width: 820px)')") !== false);
 
 // Vanilla guard — enforces the no-frameworks/no-deps rule on OLLAMADEV'S OWN code
 // only (CLI src/, the website site/, the desktop front-end public/). It does NOT
