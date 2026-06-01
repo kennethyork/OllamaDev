@@ -98,6 +98,16 @@ ollamadev                 <span class="cm"># interactive · or: ollamadev crew "
 <span class="cm"># from source:  cd Desktop/ollamadev-ade && composer serve</span><button class="copy-btn">Copy</button></pre>
     <p><strong>Needs PHP 8.0+</strong> and a browser — web mode doesn't load Boson, so the 8.4 desktop requirement doesn't apply (running it from the prebuilt archive needs no Composer at all). Localhost-only by default; for remote access see <a href="#selfhost">Self-hosting on a VPS</a>.</p>
 
+    <p><strong>Using it</strong> — open <code>http://localhost:8080</code> and you get the <em>same</em> ADE as the desktop (it's the identical UI; only the bridge differs), so everything in these docs applies. A quick tour:</p>
+    <ol>
+      <li><strong>Open a project</strong> — click <em>📂 Open</em> and point it at a folder; the file tree, terminals, and Crew all work in that directory.</li>
+      <li><strong>Terminals</strong> — <em>+ Terminal</em> launches the live CLI; ⤢ focuses one full-screen, ⤡ restores it. On a phone, use the touch bar (type a line + Enter, or the Tab/Esc/↑↓/Ctrl-C keys).</li>
+      <li><strong>Crew</strong> — the <em>👥 Crew</em> button runs a multi-agent task; watch it on the <strong>Board</strong> tab (To-do → Doing → Done) with a live pane per coder, and 💡 idea cards when it finishes.</li>
+      <li><strong>Memory &amp; files</strong> — the <strong>Graph</strong> tab shows your knowledge graph; the sidebar edits files (saved straight to disk).</li>
+      <li><strong>Voice</strong> — the 🎤 mic on the Crew box dictates (needs a configured STT engine, and HTTPS/localhost — see Self-hosting).</li>
+    </ol>
+    <p>Because it shares <code>~/.ollamadev</code> with the CLI and desktop, your sessions, memory, and crew packs are the same across all three.</p>
+
     <h2 id="installation" class="anchor">Installation</h2>
     <h3>Download a binary (easiest)</h3>
     <p>Standalone, PHP-free native binaries — nothing else to install. One-liner for Linux/macOS:</p>
