@@ -25,6 +25,7 @@
   <aside class="docs-side">
     <h4>Start here</h4>
     <a href="#getting-started">Getting started</a>
+    <a href="#three-ways">CLI · Desktop · Web</a>
     <a href="#installation">Installation</a>
     <a href="#why-php">Why PHP &amp; make</a>
     <a href="#quick-start">Quick start</a>
@@ -61,6 +62,41 @@
     <div class="callout">
       <strong>Recommended models</strong> for reliable tool use: <code>qwen2.5-coder</code>, <code>qwen3-coder</code>, <code>mistral</code>, <code>codestral</code>, <code>llama3.1</code>, <code>gpt-oss</code>.
     </div>
+
+    <h2 id="three-ways" class="anchor">CLI · Desktop · Web — what each needs</h2>
+    <p>OllamaDev runs three ways, all over the <strong>same local engine</strong> (Ollama/LM Studio), the same agent, tools, crew, and the same shared <code>~/.ollamadev</code> data (sessions, memory, crew packs, skills). Pick one or use all three — work flows between them.</p>
+
+    <p><strong>Shared prerequisite (all three):</strong> a local model server running with at least one model:</p>
+<pre class="code">ollama serve              <span class="cm"># or LM Studio's local server</span>
+ollama pull qwen2.5-coder<button class="copy-btn">Copy</button></pre>
+
+    <table>
+      <thead><tr><th>&nbsp;</th><th>CLI</th><th>Desktop (ADE)</th><th>Web</th></tr></thead>
+      <tbody>
+        <tr><td><strong>What</strong></td><td>terminal agent</td><td>native window</td><td>the ADE in a browser</td></tr>
+        <tr><td><strong>Runtime needed</strong></td><td><strong>nothing</strong> (standalone binary bundles PHP) — or PHP 8.0+ from source</td><td><strong>PHP 8.4+</strong> (Boson runtime)</td><td><strong>PHP 8.0+</strong> + a browser (no Boson)</td></tr>
+        <tr><td><strong>Get it</strong></td><td><code>install.sh</code> or a CLI binary</td><td><code>OllamaDev-ADE-&lt;os&gt;</code> archive</td><td>same archive (bundles <code>web/</code>) or from source</td></tr>
+        <tr><td><strong>Run</strong></td><td><code>ollamadev</code></td><td><code>./OllamaDev-ADE</code></td><td><code>./OllamaDev-Web</code> → <code>localhost:8080</code></td></tr>
+        <tr><td><strong>Best for</strong></td><td>everyday work, scripts, SSH</td><td>a local GUI</td><td>remote / phone / when you're out</td></tr>
+      </tbody>
+    </table>
+
+    <h3>CLI</h3>
+    <p>Zero-dependency standalone binary (PHP is bundled in). Install and run:</p>
+<pre class="code">curl -fsSL https://raw.githubusercontent.com/kennethyork/OllamaDev/main/install.sh | sh
+ollamadev                 <span class="cm"># interactive · or: ollamadev crew "…", ollamadev watch "…"</span><button class="copy-btn">Copy</button></pre>
+    <p>From source instead: PHP 8.0+, then <code>make install</code> (see Installation). Needs only <code>php</code> + <code>curl</code>.</p>
+
+    <h3>Desktop (ADE)</h3>
+    <p>Native windowed GUI (file tree, terminals, crew board, memory graph). Download the archive for your OS, unzip, and run — it bundles the CLI and the Boson libraries:</p>
+<pre class="code">./OllamaDev-ADE           <span class="cm"># Windows: OllamaDev-ADE.bat</span><button class="copy-btn">Copy</button></pre>
+    <p><strong>Needs PHP 8.4+</strong> (the Boson WebView runtime). From source: <code>composer install</code> then <code>php index.php</code>.</p>
+
+    <h3>Web</h3>
+    <p>The same ADE in a browser — no native window, no Boson. The archive bundles a launcher:</p>
+<pre class="code">./OllamaDev-Web           <span class="cm"># Windows: OllamaDev-Web.bat → open http://localhost:8080</span>
+<span class="cm"># from source:  cd Desktop/ollamadev-ade && composer serve</span><button class="copy-btn">Copy</button></pre>
+    <p><strong>Needs PHP 8.0+</strong> and a browser — web mode doesn't load Boson, so the 8.4 desktop requirement doesn't apply (running it from the prebuilt archive needs no Composer at all). Localhost-only by default; for remote access see <a href="#selfhost">Self-hosting on a VPS</a>.</p>
 
     <h2 id="installation" class="anchor">Installation</h2>
     <h3>Download a binary (easiest)</h3>
