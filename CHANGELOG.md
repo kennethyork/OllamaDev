@@ -1,5 +1,12 @@
 # Changelog
 
+## v4.1.7 (2026-06-01)
+
+### Added
+- **Browser / web mode** — run the ADE in a browser (`composer serve` → `http://localhost:8080`), no native window or Boson needed. Same UI, same local models/tools/crew, shared `~/.ollamadev` data; a shared `src/Bindings.php` backs both the desktop and web. Localhost-only by default (`OLLAMADEV_SERVE_TOKEN` for remote). The desktop archive bundles an `OllamaDev-Web` launcher.
+- **Responsive layout** — the ADE now works on phone/tablet (top bar wraps, sidebar becomes a drawer, panes stack) for using web mode when you're out.
+- **Docs: self-hosting on a VPS** — install Ollama + run web mode + reach it over an SSH tunnel.
+
 ## v4.1.6 (2026-05-31)
 
 ### Added
