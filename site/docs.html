@@ -356,6 +356,42 @@ ade.example.com {
 }<button class="copy-btn">Copy</button></pre>
     <div class="callout warn"><strong>The mic needs a secure context.</strong> Browsers only allow the microphone (the voice-input feature) over <strong>HTTPS or <code>localhost</code></strong>. So voice works over an SSH tunnel (it's localhost) or behind HTTPS — but on plain <code>http://your-vps:8080</code> the browser silently blocks it. For remote voice, use the tunnel or real HTTPS.</div>
 
+    <h3>Using it from your phone</h3>
+    <p>The ADE is responsive, so once the VPS is reachable you can drive it from a phone browser — file tree, crew board, memory graph, terminals (with the touch key bar), even voice. No control panel needed.</p>
+
+    <p><strong>First, keep the server running</strong> so it survives your SSH session ending — a tiny systemd service:</p>
+<pre class="code"><span class="cm"># /etc/systemd/system/ollamadev-web.service</span>
+[Unit]
+Description=OllamaDev ADE (web)
+After=network.target
+[Service]
+WorkingDirectory=/home/you/OllamaDev-ADE
+ExecStart=/home/you/OllamaDev-ADE/OllamaDev-Web
+Restart=on-failure
+User=you
+[Install]
+WantedBy=multi-user.target<button class="copy-btn">Copy</button></pre>
+<pre class="code">sudo systemctl enable --now ollamadev-web   <span class="cm"># now always serving localhost:8080 on the VPS</span><button class="copy-btn">Copy</button></pre>
+
+    <p><strong>Option A — SSH tunnel from the phone</strong> (simple; voice works because it's <code>localhost</code>):</p>
+    <ul>
+      <li>Install a phone SSH app that supports port forwarding — <strong>Termius</strong> (iOS/Android), <strong>Blink</strong> (iOS), or <strong>JuiceSSH</strong> (Android).</li>
+      <li>Add a <em>local port forward</em>: phone <code>localhost:8080</code> → VPS <code>localhost:8080</code>, then connect.</li>
+      <li>Open <code>http://localhost:8080</code> in the phone's browser. That's it.</li>
+    </ul>
+
+    <p><strong>Option B — Tailscale</strong> (easiest on a phone, and gives HTTPS so the mic works without an SSH app):</p>
+<pre class="code"><span class="cm"># on the VPS</span>
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+sudo tailscale serve --bg 8080     <span class="cm"># serves localhost:8080 as HTTPS on your tailnet</span><button class="copy-btn">Copy</button></pre>
+    <ul>
+      <li>Install the <strong>Tailscale</strong> app on your phone and sign in with the same account.</li>
+      <li>Open the <code>https://&lt;host&gt;.&lt;tailnet&gt;.ts.net</code> URL that <code>serve</code> prints — done. No SSH, no certificates, and voice works (it's HTTPS).</li>
+    </ul>
+
+    <div class="callout">Both ways keep Ollama (<code>11434</code>) and the app (<code>8080</code>) bound to <code>localhost</code> on the VPS — nothing is exposed to the public internet. Your phone reaches them only through the encrypted SSH tunnel or your private tailnet.</div>
+
     <h2 id="troubleshooting" class="anchor">Troubleshooting</h2>
     <p><strong>Cannot connect to Ollama</strong> — start it with <code>ollama serve</code>, or set <code>OLLAMA_HOST</code>. (On launch, OllamaDev prints the exact fix-up steps for whichever backend is configured.)</p>
     <p><strong>Model not found / no models installed</strong> — <code>ollama pull qwen2.5-coder</code>, or just <code>/pull qwen2.5-coder</code> in-session.</p>
