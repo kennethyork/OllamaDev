@@ -136,8 +136,29 @@ Terminal.prototype.mount = function (host) {
         '<span class="badge ' + this.status + '"><span class="b-dot"></span><span class="b-label">' + this.status + '</span></span>' +
         '<button class="zoom" title="Focus (make this terminal bigger)">⤢</button>' +
         '<button class="x" title="Close">&times;</button></div>' +
-        '<div class="term-screen" tabindex="0" title="Click and type — this is the live ollamadev CLI"></div>';
+        '<div class="term-screen" tabindex="0" title="Click and type — this is the live ollamadev CLI"></div>' +
+        // Touch input — shown only on small screens (web mode on a phone/tablet).
+        // The raw PTY is awful with a soft keyboard, so type a line here + Enter,
+        // and use the key bar for control keys a line input can't send.
+        '<div class="term-touch">' +
+          '<div class="term-keys">' +
+            '<button data-k="tab">Tab</button><button data-k="esc">Esc</button>' +
+            '<button data-k="up">↑</button><button data-k="down">↓</button>' +
+            '<button data-k="cc">Ctrl-C</button><button data-k="cd">Ctrl-D</button>' +
+          '</div>' +
+          '<div class="term-line"><input class="term-input" enterkeyhint="send" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="type a command — Enter to send"><button class="term-send">Send</button></div>' +
+        '</div>';
     this.screen = host.querySelector('.term-screen');
+    // Wire the touch input: send the typed line (+newline) and the control keys.
+    var sendRaw = function (s) { try { window.termWrite(self.id, strToB64(s)); } catch (e) {} };
+    var tin = host.querySelector('.term-input');
+    var sendLine = function () { sendRaw(tin.value + '\n'); tin.value = ''; tin.focus(); };
+    tin.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); sendLine(); } });
+    host.querySelector('.term-send').onclick = sendLine;
+    var KEYS = { tab: '\t', esc: '\x1b', up: '\x1b[A', down: '\x1b[B', cc: '\x03', cd: '\x04' };
+    host.querySelectorAll('.term-keys button').forEach(function (b) {
+        b.onclick = function () { sendRaw(KEYS[b.dataset.k] || ''); tin.focus(); };
+    });
     this.badgeEl = host.querySelector('.badge');
     var head = host.querySelector('.term-head');
     head.title = 'Double-click to focus / restore';
