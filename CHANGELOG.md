@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.8.35 (2026-06-06)
+
+### Changed
+- **Desktop form controls consolidated into shared `.field` / `.select` component classes.** Inputs and dropdowns were styled individually by id, so a new control that missed its rule rendered at the wrong width (the clipped-box bug). Standalone modal/panel fields now share uniform component classes — consistent padding, borders, and focus rings, and correct by default so the bug can't recur. No behavior change; flex-row inputs (terminal, agent chat, browser bar) and layout-embedded selects (topbar, crew roster) keep their own styles.
+
 ## v4.8.34 (2026-06-06)
 
 ### Fixed
