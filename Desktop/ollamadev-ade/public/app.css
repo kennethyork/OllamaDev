@@ -225,6 +225,10 @@ textarea.field { min-height: 84px; resize: vertical; line-height: 1.5; }
 .term-head .zoom:hover { color: var(--accent); background: rgba(88,166,255,.12); }
 .term-head .x { margin-left: 2px; cursor: pointer; color: var(--faint); border: none; background: none; font-size: 16px; line-height: 1; border-radius: 4px; padding: 0 4px; }
 .term-head .x:hover { color: var(--err); background: rgba(248,81,73,.12); }
+/* Per-terminal working-folder chip (click to edit inline). */
+.term-head .term-cd { cursor: pointer; color: var(--dim); border: 1px solid var(--border); background: var(--bg3); font-size: 11px; line-height: 1.7; border-radius: 999px; padding: 0 9px; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.term-head .term-cd:hover { color: var(--accent); border-color: var(--accent); }
+.term-head .term-cd-edit { flex: 0 1 220px; width: 220px; padding: 3px 8px; font-size: 11px; }
 /* agent status badge */
 .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 2px 8px; border-radius: 20px; border: 1px solid var(--border); color: var(--dim); }
 .badge .b-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }

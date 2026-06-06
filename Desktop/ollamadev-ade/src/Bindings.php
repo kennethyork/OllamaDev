@@ -45,9 +45,17 @@ final class Bindings
         return is_array($data) ? $data : ['connected' => false, 'models' => []];
     }
 
-    public function termCreate(string $id, string $model): bool
+    public function termCreate(string $id, string $model, string $cwd = ''): bool
     {
-        $this->pty->create($id, $model);
+        // Per-terminal working folder: each terminal can run in its own directory
+        // (defaults to the pty's cwd when blank). Expand a leading ~ and only accept
+        // a real directory.
+        if ($cwd !== '' && ($cwd === '~' || strncmp($cwd, '~/', 2) === 0)) {
+            $h = getenv('HOME') ?: '';
+            if ($h !== '') $cwd = $h . substr($cwd, 1);
+        }
+        $dir = ($cwd !== '' && is_dir($cwd)) ? $cwd : null;
+        $this->pty->create($id, $model, $dir);
         $this->pty->start($id);
         return true;
     }

@@ -123,8 +123,8 @@ function D(name, focus, max) {
 }
 
 // ---------- terminal pane (dependency-free, ANSI colors) ----------
-function Terminal(id, model) {
-    this.id = id; this.model = model; this.offset = 0; this.polling = false;
+function Terminal(id, model, cwd) {
+    this.id = id; this.model = model; this.cwd = cwd || ''; this.offset = 0; this.polling = false;
     this.screen = null; this.line = null; this.fg = null; this.bold = false;
     this.status = 'idle'; this.lastData = 0; this.badgeEl = null; this.cr = false;
 }
@@ -134,6 +134,7 @@ Terminal.prototype.mount = function (host) {
     host.innerHTML =
         '<div class="term-head"><span class="nm">' + esc(this.model) + '</span><span class="id">' + this.id.slice(-6) + '</span>' +
         '<span class="badge ' + this.status + '"><span class="b-dot"></span><span class="b-label">' + this.status + '</span></span>' +
+        '<button class="term-cd" title="Working folder — click to change">📁 ' + esc(this.cwd ? (this.cwd.split('/').filter(Boolean).pop() || '/') : 'project') + '</button>' +
         '<button class="zoom" title="Focus (make this terminal bigger)">⤢</button>' +
         '<button class="x" title="Close">&times;</button></div>' +
         '<div class="term-screen" tabindex="0" title="Click and type — this is the live ollamadev CLI"></div>' +
@@ -171,6 +172,24 @@ Terminal.prototype.mount = function (host) {
     zb.title = focused ? 'Restore (back to the other terminals)' : 'Focus (make this terminal bigger)';
     zb.onclick = function (e) { e.stopPropagation(); app.toggleZoom(self.id); };
     host.querySelector('.x').onclick = function () { app.closeTerminal(self.id); };
+    // Folder chip: click to edit this terminal's working folder inline. Enter respawns
+    // it in the new directory; Esc/blur cancels. Each terminal can run in its own folder.
+    var cd = host.querySelector('.term-cd');
+    if (cd) cd.onclick = function (e) {
+        e.stopPropagation();
+        var cur = self.cwd || (app.cwd && app.cwd !== '.' ? app.cwd : '');
+        var inp = document.createElement('input');
+        inp.className = 'field mono term-cd-edit'; inp.value = cur; inp.placeholder = 'folder path (~ ok)';
+        cd.replaceWith(inp); inp.focus(); inp.select();
+        var done = false;
+        var finish = function (commit) {
+            if (done) return; done = true;
+            var v = inp.value.trim();
+            if (commit && v && v !== cur) app.changeTermFolder(self.id, v); else app.render();
+        };
+        inp.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); finish(true); } else if (ev.key === 'Escape') finish(false); });
+        inp.addEventListener('blur', function () { finish(false); });
+    };
     // The screen IS the terminal: forward every keystroke straight to the pty.
     this.screen.addEventListener('keydown', function (e) {
         var data = keyToBytes(e);
@@ -1282,8 +1301,17 @@ var App = {
             self.openFolderModal(true);
         });
     },
-    cdPrefix: function () {
-        return (this.cwd && this.cwd !== '.') ? "cd '" + this.cwd.replace(/'/g, "'\\''") + "' && " : '';
+    cdPrefix: function (cwd) {
+        cwd = cwd || this.cwd;
+        return (cwd && cwd !== '.') ? "cd '" + cwd.replace(/'/g, "'\\''") + "' && " : '';
+    },
+    // Expand a leading ~ to an absolute path so a typed folder works as both the pty
+    // cwd (is_dir check) and the shell `cd` prefix (which doesn't expand quoted ~).
+    expandHome: function (p) {
+        p = (p || '').trim();
+        if (p === '~') return window.HOME_DIR || p;
+        if (p.indexOf('~/') === 0 && window.HOME_DIR) return window.HOME_DIR + p.slice(1);
+        return p;
     },
     // blank=true opens it as "add another project" — empty path, so you don't
     // accidentally re-open the current folder (which would just no-op).
@@ -1669,17 +1697,34 @@ var App = {
         var model = base;
         // Use the REAL model (not the literal 'crew') so a saved/resumed crew terminal
         // relaunches with -m <model>, not the invalid "-m crew".
-        var id = rid(); var t = new Terminal(id, model); t.kind = 'crew';
+        var dir = (this.cwd && this.cwd !== '.') ? this.cwd : '';
+        var id = rid(); var t = new Terminal(id, model, dir); t.kind = 'crew';
         var self = this;
-        Promise.resolve(window.termCreate(id, model)).then(function () {
+        Promise.resolve(window.termCreate(id, model, dir)).then(function () {
             self.terminals.push(t); self.render();
             setTimeout(function () { try { window.termWrite(id, strToB64(cmd + '\n')); } catch (e) {} }, 400);
             // Interactive: stay on the terminal so you can prompt the Director.
             // With a task: jump to the board so the plan appears as it's made.
             self.setView(interactive ? 'code' : 'board');
             self.startCrewPoll();
+            self.openDirectorTerminal();   // the Director gets its own terminal to steer from
             banner(interactive ? 'crew ready — prompt the Director in the terminal' : 'crew running…', 'ok');
         }).catch(function (e) { banner('crew launch failed: ' + e, 'err'); });
+    },
+    // Open a dedicated terminal running the Director steering console (`crew director`),
+    // so you redirect coders from its own tab instead of the coder output stream.
+    openDirectorTerminal: function () {
+        var self = this;
+        if (this.terminals.some(function (t) { return t.kind === 'director'; })) return;   // already open
+        if (this.terminals.length >= this.MAX_TERMINALS) { banner('close a terminal to open the Director', 'err'); return; }
+        var cli = this.cli || 'ollamadev';
+        var cmd = this.cdPrefix() + cli + ' crew director';
+        var dir = (this.cwd && this.cwd !== '.') ? this.cwd : '';
+        var id = rid(); var t = new Terminal(id, 'Director', dir); t.kind = 'director';
+        Promise.resolve(window.termCreate(id, 'Director', dir)).then(function () {
+            self.terminals.push(t); self.render();
+            setTimeout(function () { try { window.termWrite(id, strToB64(cmd + '\n')); } catch (e) {} }, 550);
+        }).catch(function () {});
     },
     // Poll the live crew board so the kanban reflects the Director's plan + progress.
     startCrewPoll: function () {
@@ -1782,26 +1827,42 @@ var App = {
     MAX_TERMINALS: 16,
     // Auto-launch the interactive ollamadev CLI (with the selected model) inside
     // a freshly-started pty. You can still switch models in the CLI with /model.
-    launchCli: function (id, model) {
+    launchCli: function (id, model, cwd) {
         // SIMPLE_INPUT: the CLI uses plain line input so the embedded terminal
         // (which the host pty echoes into) renders cleanly without raw-mode escapes.
-        var cmd = this.cdPrefix() + 'OLLAMADEV_SIMPLE_INPUT=1 ' + (this.cli || 'ollamadev') + (model ? ' -m ' + model : '') + '\n';
+        var cmd = this.cdPrefix(cwd) + 'OLLAMADEV_SIMPLE_INPUT=1 ' + (this.cli || 'ollamadev') + (model ? ' -m ' + model : '') + '\n';
         // Small delay so the pty shell is ready to receive the command.
         setTimeout(function () { try { window.termWrite(id, strToB64(cmd)); } catch (e) {} }, 350);
     },
+    // Respawn a terminal in a new working folder (the per-terminal folder chip).
+    changeTermFolder: function (id, folder) {
+        var t = this.terminals.find(function (x) { return x.id === id; });
+        if (!t) return;
+        folder = this.expandHome(folder); if (!folder) return;
+        var self = this;
+        Promise.resolve(window.termKill ? window.termKill(id) : null).then(function () {
+            t.cwd = folder; t.offset = 0; t.screen = null;
+            return window.termCreate(id, t.model, folder);
+        }).then(function () {
+            self.render();
+            self.launchCli(id, t.model, folder);
+            banner('terminal folder → ' + folder, 'ok');
+        }).catch(function () { banner('could not change folder', 'err'); });
+    },
     newTerminal: function () { return this.spawnTerminal(); },
     // Spawn a brand-new pty + launch the CLI in it.
-    spawnTerminal: function (model) {
+    spawnTerminal: function (model, folder) {
         if (this.terminals.length >= this.MAX_TERMINALS) { banner('maximum of ' + this.MAX_TERMINALS + ' terminals', 'err'); return; }
         model = model || $('#modelSelect').value || 'llama3.2:latest';
+        var dir = this.expandHome(folder) || (this.cwd && this.cwd !== '.' ? this.cwd : '');
         var id = rid();
-        var t = new Terminal(id, model);
+        var t = new Terminal(id, model, dir);
         var self = this;
-        Promise.resolve(window.termCreate(id, model)).then(function () {
+        Promise.resolve(window.termCreate(id, model, dir)).then(function () {
             self.live[id] = true;
             self.terminals.push(t);
             self.render();
-            self.launchCli(id, model);
+            self.launchCli(id, model, dir);
         }).catch(function (e) { banner('termCreate failed: ' + e, 'err'); });
     },
     // Re-attach the UI to a pty that's still alive from earlier this session
