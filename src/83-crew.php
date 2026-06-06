@@ -545,7 +545,7 @@ class Crew {
     // to its steer.jsonl. Returns ['ok'=>bool, 'error'?]. Used by `crew steer` + desktop.
     public static function steer(int $target, string $msg): array {
         $msg = trim($msg);
-        if ($target < 1) return ['ok' => false, 'error' => 'coder number must be 1 or higher'];
+        if ($target < 0) return ['ok' => false, 'error' => 'coder number must be 0 (all) or higher'];
         if ($msg === '') return ['ok' => false, 'error' => 'nothing to say'];
         $home = getenv('HOME') ?: sys_get_temp_dir();
         $board = json_decode((string)@file_get_contents($home . '/.ollamadev/crew/current.json'), true);
@@ -564,12 +564,14 @@ class Crew {
         $seen = self::$steerSeen[$n] ?? 0.0;
         foreach (file($steerFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $ln) {
             $e = json_decode($ln, true);
-            if (!is_array($e) || (int)($e['target'] ?? 0) !== $n) continue;
+            if (!is_array($e)) continue;
+            $t = (int)($e['target'] ?? -1);
+            if ($t !== $n && $t !== 0) continue;   // 0 = broadcast to the whole crew
             $ts = (float)($e['ts'] ?? 0);
             if ($ts <= $seen) continue;
             $messages[] = ['role' => 'user', 'content' => "🧭 Director steering (apply this now): " . (string)($e['msg'] ?? '')];
             self::$steerSeen[$n] = $ts;
-            echo "\033[36m  ⇄ coder {$n} got steering\033[0m\n";
+            echo "\033[36m  ⇄ coder {$n} got steering" . ($t === 0 ? " (crew-wide)" : "") . "\033[0m\n";
         }
     }
 

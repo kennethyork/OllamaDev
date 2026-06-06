@@ -470,8 +470,10 @@ ok('crew steer queues a targeted message to steer.jsonl', $c2 === 0 && strpos($s
 shell_exec('rm -rf ' . escapeshellarg($shome));
 $bind = (string) @file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/src/Bindings.php');
 ok('desktop exposes crewSteer for the Director box', strpos($bind, 'function crewSteer') !== false && strpos($bind, "'crewSteer'") !== false);
-// The Director in its own terminal: `crew director` REPL + desktop auto-opens the tab.
-ok('crew director is an interactive steering console', strpos($src, "\$arg1 === 'director'") !== false && strpos($src, 'Director console') !== false);
+// The Director in its own terminal: live auto-refreshing console + whole-crew broadcast.
+ok('crew director is a live steering console (auto-refresh + "all" broadcast)', strpos($src, "\$arg1 === 'director'") !== false &&
+    strpos($src, 'Director console') !== false && strpos($src, '$ts !== $lastTs') !== false &&
+    strpos($src, "'all', '*', 'everyone'") !== false && strpos($src, '0 = broadcast to the whole crew') !== false);
 $ajs = (string) @file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/app.js');
 ok('desktop opens a dedicated Director terminal on crew launch', strpos($ajs, 'openDirectorTerminal') !== false && strpos($ajs, 'crew director') !== false);
 // Per-terminal working folder: each desktop terminal can run in its own directory.

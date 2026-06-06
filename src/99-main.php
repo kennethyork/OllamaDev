@@ -1761,22 +1761,26 @@ if ($cmd === 'chat') {
         if (!empty($cr['ok'])) { echo "\033[32m✓\033[0m crew board cleared\n"; exit(0); }
         echo "\033[31m" . ($cr['error'] ?? 'could not clear the board') . "\033[0m\n"; exit(1);
     }
-    // Separate Director: redirect a running coder from another pane/terminal.
+    // Separate Director: redirect a running coder (or "all") from another pane/terminal.
     if ($arg1 === 'steer') {
-        $tgt = (int)($positional[2] ?? 0);
+        $tok = strtolower((string)($positional[2] ?? ''));
+        $tgt = in_array($tok, ['all', '*', 'everyone'], true) ? 0 : (int)($positional[2] ?? -1);
         $msg = trim(implode(' ', array_slice($positional, 3)));
         $sr = Crew::steer($tgt, $msg);
-        if (!empty($sr['ok'])) { echo "\033[32m✓\033[0m steered coder {$tgt}\n"; exit(0); }
-        echo "\033[31m" . ($sr['error'] ?? 'could not steer') . "\033[0m\n  Usage: ollamadev crew steer <coder#> \"<instruction>\"\n"; exit(1);
+        $who = $tgt === 0 ? 'the crew' : "coder {$tgt}";
+        if (!empty($sr['ok'])) { echo "\033[32m✓\033[0m steered {$who}\n"; exit(0); }
+        echo "\033[31m" . ($sr['error'] ?? 'could not steer') . "\033[0m\n  Usage: ollamadev crew steer <coder#|all> \"<instruction>\"\n"; exit(1);
     }
-    // The Director in its OWN terminal: an interactive steering console. Run it in a
-    // separate tab/pane while the crew works elsewhere; each line redirects a coder.
+    // The Director in its OWN terminal: a live steering console. Run it in a separate
+    // tab/pane while the crew works elsewhere. It auto-refreshes the board as coders
+    // change state, and steers one coder ("<#>: ..") or the whole crew ("all: ..").
     if ($arg1 === 'director') {
         if (!posix_isatty(STDIN)) { echo "Run `ollamadev crew director` in a terminal.\n"; exit(1); }
         $c = "\033[36m"; $d = "\033[2m"; $b = "\033[1m"; $g = "\033[32m"; $y = "\033[33m"; $r = "\033[0m";
         $home = getenv('HOME') ?: sys_get_temp_dir();
-        $showBoard = function () use ($home, $d, $y, $g, $c, $r) {
-            $bd = json_decode((string) @file_get_contents($home . '/.ollamadev/crew/current.json'), true);
+        $boardPath = $home . '/.ollamadev/crew/current.json';
+        $renderBoard = function () use ($boardPath, $d, $y, $g, $c, $r) {
+            $bd = json_decode((string) @file_get_contents($boardPath), true);
             if (!is_array($bd) || empty($bd['subtasks'])) { echo "  {$d}(no active crew — start one in another tab, then steer it here){$r}\n"; return; }
             echo "  {$d}" . (!empty($bd['active']) ? 'running' : 'idle') . " · " . ($bd['task'] ?? '') . "{$r}\n";
             foreach ($bd['subtasks'] as $s) {
@@ -1784,23 +1788,37 @@ if ($cmd === 'chat') {
                 echo "  {$col}#{$s['n']}{$r} {$d}[" . ($s['role'] ?? 'coder') . "]{$r} " . ($s['title'] ?? '') . " {$col}— {$st}{$r}\n";
             }
         };
-        echo "\n{$b}🧭 Director console{$r} {$d}— steer the running crew. Type \"<coder#>: instruction\" (e.g. \"2: focus on tests\"). 'board' = status · 'exit' = leave.{$r}\n";
-        $showBoard();
+        $prompt = "\n{$c}🧭 ▸{$r} ";
+        echo "\n{$b}🧭 Director console{$r} {$d}— live view of your crew. Steer one coder \"<#>: instruction\", or the whole crew \"all: instruction\". 'board' · 'exit'.{$r}\n";
+        $renderBoard();
+        echo $prompt;
+        @stream_set_blocking(STDIN, false);
+        $lastTs = -1;
         while (true) {
-            echo "\n{$c}🧭 ▸{$r} ";
-            $line = fgets(STDIN);
-            if ($line === false) break;
-            $line = trim($line);
-            if ($line === '') continue;
-            if (in_array(strtolower($line), ['exit', 'quit', 'q', ':q'], true)) break;
-            if (strtolower($line) === 'board') { $showBoard(); continue; }
-            if (preg_match('/^(\d+)\s*[:>\-]\s*(.+)$/', $line, $m)) {
-                $sr = Crew::steer((int)$m[1], trim($m[2]));
-                echo !empty($sr['ok']) ? "  {$g}✓{$r} coder {$m[1]} steered\n" : "  {$y}" . ($sr['error'] ?? 'could not steer') . "{$r}\n";
-            } else {
-                echo "  {$d}use \"<coder#>: instruction\" (e.g. \"2: focus on tests\"), 'board', or 'exit'{$r}\n";
+            // Auto-refresh: reprint the board whenever the crew's state changes.
+            $bd = json_decode((string) @file_get_contents($boardPath), true);
+            $ts = is_array($bd) ? (int)($bd['ts'] ?? 0) : 0;
+            if ($ts !== $lastTs) {
+                if ($lastTs !== -1) { echo "\n"; $renderBoard(); echo $prompt; }
+                $lastTs = $ts;
             }
+            $line = fgets(STDIN);
+            if ($line === false) { usleep(200000); continue; }   // nothing typed yet
+            $line = trim($line);
+            if ($line === '') { echo $prompt; continue; }
+            if (in_array(strtolower($line), ['exit', 'quit', 'q', ':q'], true)) break;
+            if (strtolower($line) === 'board') { $renderBoard(); echo $prompt; continue; }
+            if (preg_match('/^(\d+|all|\*|everyone)\s*[:>\-]\s*(.+)$/i', $line, $m)) {
+                $tgt = ctype_digit($m[1]) ? (int)$m[1] : 0;   // 0 = the whole crew
+                $sr = Crew::steer($tgt, trim($m[2]));
+                $who = $tgt === 0 ? 'the crew' : "coder {$tgt}";
+                echo !empty($sr['ok']) ? "  {$g}✓{$r} {$who} steered\n" : "  {$y}" . ($sr['error'] ?? 'could not steer') . "{$r}\n";
+            } else {
+                echo "  {$d}use \"<#>: instruction\", \"all: instruction\", 'board', or 'exit'{$r}\n";
+            }
+            echo $prompt;
         }
+        @stream_set_blocking(STDIN, true);
         echo "\n{$d}Director console closed.{$r}\n";
         exit(0);
     }

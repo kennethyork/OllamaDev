@@ -96,7 +96,7 @@ final class Bindings
     public function crewSteer(int $coder, string $msg): array
     {
         $msg = trim($msg);
-        if ($coder < 1) return ['error' => 'coder number must be 1 or higher'];
+        if ($coder < 0) return ['error' => 'coder number must be 0 (all) or higher'];
         if ($msg === '') return ['error' => 'nothing to say'];
         $home = getenv('HOME') ?: sys_get_temp_dir();
         $board = json_decode((string) @file_get_contents($home . '/.ollamadev/crew/current.json'), true);

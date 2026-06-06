@@ -451,13 +451,13 @@ var Tasks = {
         send._wired = true;
         var fire = function () {
             var v = (msg.value || '').trim(); if (!v) return;
-            var m = v.match(/^(\d+)\s*[:>\-]\s*(.+)$/);
-            var coder = m ? parseInt(m[1], 10) : 1;
+            var m = v.match(/^(\d+|all|\*|everyone)\s*[:>\-]\s*(.+)$/i);
+            var coder = m ? (/^\d+$/.test(m[1]) ? parseInt(m[1], 10) : 0) : 1;   // 0 = whole crew
             var text = m ? m[2].trim() : v;
             Promise.resolve(window.crewSteer ? window.crewSteer(coder, text) : null).then(function (r) {
                 msg.value = '';
-                msg.placeholder = (r && r.error) ? ('⚠ ' + r.error) : ('✓ sent to coder ' + coder);
-                setTimeout(function () { msg.placeholder = 'Steer a coder — e.g. "2: focus on tests"'; }, 2500);
+                msg.placeholder = (r && r.error) ? ('⚠ ' + r.error) : ('✓ sent to ' + (coder === 0 ? 'the crew' : 'coder ' + coder));
+                setTimeout(function () { msg.placeholder = 'Steer a coder — e.g. "2: focus on tests" or "all: ..."'; }, 2500);
             });
         };
         send.onclick = fire;
