@@ -168,6 +168,16 @@ Tools::register('multi_edit', function($p) {
 
 // TodoWrite (Claude Code parity): maintain a structured todo list so the agent
 // can plan and track multi-step work. Replaces the whole list each call.
+// Clear the live crew kanban board ONLY on an explicit user request. Shared engine
+// path with `crew clear` + the desktop. Guarded twice: requires confirm=true (so the
+// model can't fire it as incidental cleanup) and Crew::clearBoard refuses mid-run.
+Tools::register('clear_board', function($p) {
+    $confirm = filter_var($p['confirm'] ?? false, FILTER_VALIDATE_BOOLEAN);
+    if (!$confirm) return "Board NOT cleared. clear_board only runs when the user explicitly asked to clear/dismiss the board — pass confirm=true only then. Do not call this on your own initiative.";
+    $r = Crew::clearBoard();
+    return !empty($r['ok']) ? "Crew board cleared (crew cards, ideas, and manual cards)." : ("Could not clear the board: " . ($r['error'] ?? 'unknown'));
+});
+
 Tools::register('todo_write', function($p) {
     $todos = $p['todos'] ?? $p['items'] ?? [];
     if (!is_array($todos)) return "missing todos (array of {content, status})";

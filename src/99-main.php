@@ -1756,6 +1756,11 @@ if ($cmd === 'chat') {
 
     // Resume an interrupted run from disk: `crew resume [runId]`.
     if ($arg1 === 'resume') { exit(Crew::resume($positional[2] ?? '')); }
+    if ($arg1 === 'clear') {
+        $cr = Crew::clearBoard();
+        if (!empty($cr['ok'])) { echo "\033[32m✓\033[0m crew board cleared\n"; exit(0); }
+        echo "\033[31m" . ($cr['error'] ?? 'could not clear the board') . "\033[0m\n"; exit(1);
+    }
 
     $taskParts = array_slice($positional, 1);
     $task = $arg1 === '' ? '' : implode(' ', $taskParts);

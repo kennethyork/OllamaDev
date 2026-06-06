@@ -52,6 +52,9 @@ class Tools {
             $fn('todo_write', 'Create or replace the session todo list to plan and track multi-step work. Pass the FULL list each time; mark items in_progress/completed as you go.', [
                 'todos' => ['type' => 'array', 'description' => 'Full list: [{"content":"..","status":"pending|in_progress|completed","activeForm":".."}]', 'items' => ['type' => 'object']],
             ], ['todos']),
+            $fn('clear_board', 'Clear/dismiss the crew kanban board (crew cards, ideas, AND manual cards). ONLY call this when the user EXPLICITLY asks to clear/dismiss/reset the board in their latest message — NEVER on your own initiative or as cleanup. Refused while a crew run is active.', [
+                'confirm' => ['type' => 'boolean', 'description' => 'Must be true. Set true ONLY when the user explicitly asked to clear the board in their latest message.'],
+            ], ['confirm']),
             $fn('ls', 'List the contents of a directory.', [
                 'path' => $str('Directory path (defaults to current directory)'),
             ], []),

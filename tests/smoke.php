@@ -434,6 +434,27 @@ if (preg_match('/class Crew \{.*?\n\}/s', $src, $fm)) {
     ok('Crew::extractJson returns null on none', Crew::extractJson('no json here') === null);
     ok('Crew::slug normalizes titles', Crew::slug('Add /Health Route!') === 'add-health-route');
 } else { ok('Crew class extractable', false); }
+// "Clear the board" — explicit-only, idle-only, across CLI + agent tool + desktop.
+$chome = sys_get_temp_dir() . '/crew_clear_' . getmypid(); @mkdir($chome . '/.ollamadev/crew', 0777, true);
+$cboard = $chome . '/.ollamadev/crew/current.json';
+file_put_contents($cboard, json_encode(['active' => true, 'subtasks' => [['n' => 1, 'title' => 't', 'state' => 'doing']]]));
+[$out, , $code] = run_bin(['crew', 'clear'], '', ['HOME' => $chome]);
+$still = json_decode((string) @file_get_contents($cboard), true);
+ok('crew clear refuses while a run is active', $code === 1 && count($still['subtasks'] ?? []) === 1 && stripos($out, 'active') !== false, trim($out));
+file_put_contents($cboard, json_encode(['active' => false, 'subtasks' => [['n' => 1, 'title' => 't', 'state' => 'held']], 'ideas' => ['x']]));
+[$out, , $code] = run_bin(['crew', 'clear'], '', ['HOME' => $chome]);
+$after = json_decode((string) @file_get_contents($cboard), true);
+ok('crew clear wipes the board + writes a cleared sentinel when idle', $code === 0 && empty($after['subtasks']) && empty($after['ideas']) && !empty($after['cleared']), trim($out));
+shell_exec('rm -rf ' . escapeshellarg($chome));
+// Agent tool: explicit-only (needs confirm=true) so the model can't clear unprompted.
+ok('clear_board tool requires confirm + refuses without it', strpos($src, "Tools::register('clear_board'") !== false &&
+    strpos($src, 'FILTER_VALIDATE_BOOLEAN') !== false && strpos($src, 'Board NOT cleared') !== false);
+ok('clear_board schema marks it explicit-only with required confirm', strpos($src, 'ONLY call this when the user EXPLICITLY') !== false &&
+    strpos($src, "'confirm'") !== false);
+// Desktop: a cleared sentinel wipes the localStorage-only manual cards (once, watermarked).
+$appjs = (string) @file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/app.js');
+ok('desktop applies the cleared sentinel to manual cards', strpos($appjs, 'ade.boardCleared') !== false &&
+    strpos($appjs, "removeItem('ade.tasks')") !== false && strpos($appjs, 'b.cleared') !== false);
 // Source wiring: the four roles + worktree + json-mode are present
 ok('crew has a Researcher role', strpos($src, 'Researcher worker') !== false || strpos($src, 'function research(') !== false);
 ok('crew Director uses JSON mode', strpos($src, 'chatJson(') !== false);
@@ -720,7 +741,7 @@ ok('downloads page points desktop at archives', strpos($dlPage, 'OllamaDev-ADE-l
 // Self-contained Linux AppImage: bundles a PHP runtime; archives (mac/win/linux) stay.
 $appImg = (string)@file_get_contents($repoRoot . '/scripts/build-appimage.sh');
 ok('build-appimage.sh bundles PHP + Boson into a self-contained AppImage', is_file($repoRoot . '/scripts/build-appimage.sh') &&
-    is_executable($repoRoot . '/scripts/build-appimage.sh') && strpos($appImg, 'extension=ffi') !== false &&
+    is_executable($repoRoot . '/scripts/build-appimage.sh') && strpos($appImg, 'extension=$(basename') !== false &&
     strpos($appImg, 'appimagetool') !== false && strpos($appImg, 'usr/bin/php') !== false);
 ok('AppImage build is arch-aware (x86_64 + aarch64)', strpos($appImg, 'AIARCH=x86_64') !== false &&
     strpos($appImg, 'AIARCH=aarch64') !== false && strpos($appImg, 'OllamaDev-ADE-$AIARCH.AppImage') !== false);
@@ -728,6 +749,14 @@ ok('AppImage build is arch-aware (x86_64 + aarch64)', strpos($appImg, 'AIARCH=x8
 // and a bundled (build-runner) nghttp2 shadows the host's matched copy → "undefined symbol".
 ok('AppImage does not bundle libnghttp2 (host WebView owns curl+nghttp2)', strpos($appImg, "SHARED='libnghttp2'") !== false &&
     strpos($appImg, '"$CORE|$SHARED"') !== false);
+// AppRun runs `php -n` (no ini), so shared posix/pcntl must be bundled AND loaded
+// explicitly — else the engine's posix_isatty / PtyManager's posix_kill are undefined
+// (the "Call to undefined function posix_kill()" desktop crash).
+ok('AppImage bundles posix/pcntl and AppRun loads every bundled extension', strpos($appImg, 'for ext in ffi curl posix pcntl') !== false &&
+    strpos($appImg, 'basename "$so" .so') !== false && strpos($appImg, '-d extension=$(basename') !== false);
+$pty = (string)@file_get_contents($repoRoot . '/Desktop/ollamadev-ade/src/PtyManager.php');
+ok('PtyManager guards posix_kill (graceful kill fallback when posix is absent)',
+    strpos($pty, "function_exists('posix_kill')") !== false && strpos($pty, 'kill -TERM') !== false);
 $relYml = (string)@file_get_contents($repoRoot . '/.github/workflows/release.yml');
 ok('release builds x86_64 + arm64 AppImages + keeps all desktop archives', strpos($relYml, 'build-appimage.sh') !== false &&
     strpos($relYml, 'extensions: ffi, curl') !== false && strpos($relYml, 'ubuntu-22.04-arm') !== false &&

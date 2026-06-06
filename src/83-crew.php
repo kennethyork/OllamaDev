@@ -681,6 +681,23 @@ class Crew {
         $d = self::loadRun($runId); if (!$d) return;
         $d['status'] = $status; self::saveRun($runId, $d);
     }
+    // Dismiss the live kanban board on request (agent tool / `crew clear` / desktop).
+    // Refuses while a run is active so we never yank the board out from under coders.
+    // Writes a "cleared" sentinel (empty board + timestamp) rather than deleting the
+    // file: the desktop poll watches that flag to ALSO wipe its localStorage-only manual
+    // cards (the engine can't reach those). Per-run history/logs are left untouched.
+    public static function clearBoard(): array {
+        $home = getenv('HOME') ?: sys_get_temp_dir();
+        $f = $home . '/.ollamadev/crew/current.json';
+        if (is_file($f)) {
+            $d = json_decode((string)@file_get_contents($f), true);
+            if (is_array($d) && !empty($d['active'])) return ['ok' => false, 'error' => 'a crew run is active — clear the board once it finishes'];
+        }
+        @mkdir(dirname($f), 0755, true);
+        @file_put_contents($f, json_encode(['cleared' => time(), 'active' => false, 'subtasks' => [], 'ideas' => []]));
+        return ['ok' => true];
+    }
+
     // Newest unfinished run (status != 'done') belonging to the current repo, or null.
     public static function findResumable(): ?array {
         $home = getenv('HOME') ?: sys_get_temp_dir();

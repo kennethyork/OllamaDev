@@ -42,12 +42,21 @@ cp -R "$STAGE/." "$APPDIR/usr/share/ollamadev-ade/"
 find "$APPDIR/usr/share/ollamadev-ade/vendor/boson-php/saucer/bin" -type f \
   ! -name "libboson-linux-${AIARCH}.so" -delete 2>/dev/null || true
 
-# Bundle the PHP binary + the ffi/curl extensions.
+# Bundle the PHP binary + the extensions the app needs as SHARED .so. ffi+curl are
+# for Boson/HTTP; posix+pcntl are needed by the CLI engine (posix_isatty tty checks,
+# signal handling) AND the desktop PtyManager (posix_kill). On Debian/Ubuntu these
+# ship as shared .so loaded via conf.d — but AppRun runs `php -n` (no ini), so any we
+# don't copy + load explicitly are simply absent → the "undefined function posix_kill()"
+# class of runtime crash. Extensions already built into this php (e.g. pcntl on some
+# builds) have no .so here and load regardless, so copying only the shared ones is right.
 PHP_BIN="$(readlink -f "$(command -v php)")"
 cp "$PHP_BIN" "$APPDIR/usr/bin/php"
 EXTDIR="$(php -r 'echo ini_get("extension_dir");')"
-cp "$EXTDIR/ffi.so" "$APPDIR/usr/lib/php/" 2>/dev/null || true
-cp "$EXTDIR/curl.so" "$APPDIR/usr/lib/php/" 2>/dev/null || true
+for ext in ffi curl posix pcntl; do
+  cp "$EXTDIR/$ext.so" "$APPDIR/usr/lib/php/" 2>/dev/null || true
+done
+[ -f "$APPDIR/usr/lib/php/posix.so" ] || php -n -r 'exit(function_exists("posix_kill")?0:1);' \
+  || { echo "✗ posix is neither a bundled .so nor built into this php — the desktop terminal/crew would crash (posix_kill)" >&2; exit 1; }
 
 # Bundle the shared libs php + those extensions need — EXCEPT the glibc core,
 # which must come from the host to match its dynamic loader.
@@ -67,8 +76,7 @@ bundle_libs() { # <binary-or-.so>
   done
 }
 bundle_libs "$APPDIR/usr/bin/php"
-bundle_libs "$APPDIR/usr/lib/php/ffi.so"
-bundle_libs "$APPDIR/usr/lib/php/curl.so"
+for so in "$APPDIR"/usr/lib/php/*.so; do [ -f "$so" ] && bundle_libs "$so"; done
 
 # 2b. Bundle the Whisper STT engine + model so /voice works fully offline out of
 #     the box (the "bake-in"). Skip with STT_BUNDLE=0; choose the model with
@@ -96,8 +104,15 @@ export LD_LIBRARY_PATH="$HERE/usr/lib:${LD_LIBRARY_PATH:-}"
 export OLLAMADEV_BINARY="$HERE/usr/share/ollamadev-ade/bin/ollamadev"
 # Bundled Whisper STT engine + model (if packed) — /voice uses it with no download.
 [ -d "$HERE/usr/share/ollamadev-ade/stt" ] && export OLLAMADEV_STT_DIR="$HERE/usr/share/ollamadev-ade/stt"
+# `-n` ignores any host php.ini, so enable each bundled extension explicitly. Globbing
+# whatever .so we packed (ffi/curl for Boson, posix/pcntl for the engine) keeps this in
+# lockstep with the bundling step above — no hardcoded list to forget to update.
+EXTS=""
+for so in "$HERE"/usr/lib/php/*.so; do
+  [ -f "$so" ] && EXTS="$EXTS -d extension=$(basename "$so" .so)"
+done
 exec "$HERE/usr/bin/php" -n \
-  -d extension_dir="$HERE/usr/lib/php" -d extension=ffi -d extension=curl \
+  -d extension_dir="$HERE/usr/lib/php" $EXTS \
   "$HERE/usr/share/ollamadev-ade/index.php" "$@"
 SH
 chmod +x "$APPDIR/AppRun"

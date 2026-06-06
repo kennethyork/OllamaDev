@@ -1363,7 +1363,7 @@ var App = {
         $('#boardView').hidden = v !== 'board';
         $('#graphView').hidden = v !== 'graph';
         $('#browserView').hidden = v !== 'browser';
-        if (v === 'board') { Tasks.render(); CrewPanes.sync(this.crewBoard); }
+        if (v === 'board') { this.startCrewPoll(); Tasks.render(); CrewPanes.sync(this.crewBoard); }
         if (v === 'graph') Graph.load();
         if (v === 'browser') Browser.onShow();
     },
@@ -1665,6 +1665,18 @@ var App = {
         var idle = 0;
         this.crewPoll = setInterval(function () {
             Promise.resolve(window.crewBoard ? window.crewBoard() : null).then(function (b) {
+                // A "clear the board" (agent tool / `crew clear` / CLI) writes a cleared
+                // sentinel. Apply it once via a localStorage watermark — survives poll &
+                // app restarts — wiping the localStorage-only manual cards the engine
+                // can't reach. (Crew cards/ideas clear via the empty board below.)
+                if (b && b.cleared) {
+                    var seen = 0; try { seen = parseInt(localStorage.getItem('ade.boardCleared') || '0', 10) || 0; } catch (e) {}
+                    if (b.cleared > seen) {
+                        try { localStorage.setItem('ade.boardCleared', String(b.cleared)); } catch (e) {}
+                        try { localStorage.removeItem('ade.tasks'); } catch (e) {}
+                        Tasks.items = [];
+                    }
+                }
                 self.crewBoard = (b && b.subtasks) ? b : self.crewBoard;
                 if (self.view === 'board') { Tasks.render(); CrewPanes.sync(self.crewBoard); }
                 // Stop polling a while after the run goes inactive.

@@ -104,7 +104,11 @@ class PtyManager
 
         $pid = $this->daemonPid($id);
         if ($pid) {
-            @posix_kill($pid, defined('SIGTERM') ? SIGTERM : 15);
+            // The AppImage's bundled PHP has no posix extension, so guard it (and
+            // calling an undefined function is fatal even under @). Fall back to a
+            // graceful `kill -TERM`; the kill -9 below is the hard backstop either way.
+            if (function_exists('posix_kill')) @posix_kill($pid, defined('SIGTERM') ? SIGTERM : 15);
+            else @exec('kill -TERM ' . (int)$pid . ' 2>/dev/null');
             usleep(150000);
             @exec('kill -9 ' . (int)$pid . ' 2>/dev/null');
         }

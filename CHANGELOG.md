@@ -1,5 +1,13 @@
 # Changelog
 
+## v4.8.33 (2026-06-06)
+
+### Fixed
+- **Desktop app crashed with `Call to undefined function posix_kill()`** (and the crew/terminal could fail on `posix_isatty`). The AppImage's `AppRun` runs `php -n` (no php.ini), which skips the conf.d files that load Debian/Ubuntu's *shared* `posix.so` — so posix functions were undefined at runtime. The build now bundles `posix`/`pcntl` alongside `ffi`/`curl` and AppRun loads every bundled extension (globbing `usr/lib/php/*.so`, so the list can't drift). `PtyManager` also guards `posix_kill` with a `kill -TERM` fallback. The release smoke-gate now replicates AppRun and fails the build if `posix_kill`/`posix_isatty` don't resolve.
+
+### Added
+- **"Clear the board"** — dismiss the crew kanban (crew cards, ideas, and your manual cards). Available as `ollamadev crew clear`, as an agent tool (`clear_board`) the Director/coders can invoke when you ask, and reflected live in the desktop. It's explicit-only (the tool requires `confirm=true` and is told never to clear on its own initiative) and refused while a crew run is active.
+
 ## v4.8.32 (2026-06-06)
 
 ### Fixed

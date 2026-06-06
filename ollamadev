@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '4.8.32');
+define('OLLAMADEV_VERSION', '4.8.33');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -2595,6 +2595,9 @@ class Tools {
             $fn('todo_write', 'Create or replace the session todo list to plan and track multi-step work. Pass the FULL list each time; mark items in_progress/completed as you go.', [
                 'todos' => ['type' => 'array', 'description' => 'Full list: [{"content":"..","status":"pending|in_progress|completed","activeForm":".."}]', 'items' => ['type' => 'object']],
             ], ['todos']),
+            $fn('clear_board', 'Clear/dismiss the crew kanban board (crew cards, ideas, AND manual cards). ONLY call this when the user EXPLICITLY asks to clear/dismiss/reset the board in their latest message — NEVER on your own initiative or as cleanup. Refused while a crew run is active.', [
+                'confirm' => ['type' => 'boolean', 'description' => 'Must be true. Set true ONLY when the user explicitly asked to clear the board in their latest message.'],
+            ], ['confirm']),
             $fn('ls', 'List the contents of a directory.', [
                 'path' => $str('Directory path (defaults to current directory)'),
             ], []),
@@ -3010,6 +3013,16 @@ Tools::register('multi_edit', function($p) {
 
 // TodoWrite (Claude Code parity): maintain a structured todo list so the agent
 // can plan and track multi-step work. Replaces the whole list each call.
+// Clear the live crew kanban board ONLY on an explicit user request. Shared engine
+// path with `crew clear` + the desktop. Guarded twice: requires confirm=true (so the
+// model can't fire it as incidental cleanup) and Crew::clearBoard refuses mid-run.
+Tools::register('clear_board', function($p) {
+    $confirm = filter_var($p['confirm'] ?? false, FILTER_VALIDATE_BOOLEAN);
+    if (!$confirm) return "Board NOT cleared. clear_board only runs when the user explicitly asked to clear/dismiss the board — pass confirm=true only then. Do not call this on your own initiative.";
+    $r = Crew::clearBoard();
+    return !empty($r['ok']) ? "Crew board cleared (crew cards, ideas, and manual cards)." : ("Could not clear the board: " . ($r['error'] ?? 'unknown'));
+});
+
 Tools::register('todo_write', function($p) {
     $todos = $p['todos'] ?? $p['items'] ?? [];
     if (!is_array($todos)) return "missing todos (array of {content, status})";
@@ -6719,6 +6732,23 @@ class Crew {
         $d = self::loadRun($runId); if (!$d) return;
         $d['status'] = $status; self::saveRun($runId, $d);
     }
+    // Dismiss the live kanban board on request (agent tool / `crew clear` / desktop).
+    // Refuses while a run is active so we never yank the board out from under coders.
+    // Writes a "cleared" sentinel (empty board + timestamp) rather than deleting the
+    // file: the desktop poll watches that flag to ALSO wipe its localStorage-only manual
+    // cards (the engine can't reach those). Per-run history/logs are left untouched.
+    public static function clearBoard(): array {
+        $home = getenv('HOME') ?: sys_get_temp_dir();
+        $f = $home . '/.ollamadev/crew/current.json';
+        if (is_file($f)) {
+            $d = json_decode((string)@file_get_contents($f), true);
+            if (is_array($d) && !empty($d['active'])) return ['ok' => false, 'error' => 'a crew run is active — clear the board once it finishes'];
+        }
+        @mkdir(dirname($f), 0755, true);
+        @file_put_contents($f, json_encode(['cleared' => time(), 'active' => false, 'subtasks' => [], 'ideas' => []]));
+        return ['ok' => true];
+    }
+
     // Newest unfinished run (status != 'done') belonging to the current repo, or null.
     public static function findResumable(): ?array {
         $home = getenv('HOME') ?: sys_get_temp_dir();
@@ -10847,6 +10877,11 @@ if ($cmd === 'chat') {
 
     // Resume an interrupted run from disk: `crew resume [runId]`.
     if ($arg1 === 'resume') { exit(Crew::resume($positional[2] ?? '')); }
+    if ($arg1 === 'clear') {
+        $cr = Crew::clearBoard();
+        if (!empty($cr['ok'])) { echo "\033[32m✓\033[0m crew board cleared\n"; exit(0); }
+        echo "\033[31m" . ($cr['error'] ?? 'could not clear the board') . "\033[0m\n"; exit(1);
+    }
 
     $taskParts = array_slice($positional, 1);
     $task = $arg1 === '' ? '' : implode(' ', $taskParts);
