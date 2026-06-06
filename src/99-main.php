@@ -1761,6 +1761,14 @@ if ($cmd === 'chat') {
         if (!empty($cr['ok'])) { echo "\033[32m✓\033[0m crew board cleared\n"; exit(0); }
         echo "\033[31m" . ($cr['error'] ?? 'could not clear the board') . "\033[0m\n"; exit(1);
     }
+    // Separate Director: redirect a running coder from another pane/terminal.
+    if ($arg1 === 'steer') {
+        $tgt = (int)($positional[2] ?? 0);
+        $msg = trim(implode(' ', array_slice($positional, 3)));
+        $sr = Crew::steer($tgt, $msg);
+        if (!empty($sr['ok'])) { echo "\033[32m✓\033[0m steered coder {$tgt}\n"; exit(0); }
+        echo "\033[31m" . ($sr['error'] ?? 'could not steer') . "\033[0m\n  Usage: ollamadev crew steer <coder#> \"<instruction>\"\n"; exit(1);
+    }
 
     $taskParts = array_slice($positional, 1);
     $task = $arg1 === '' ? '' : implode(' ', $taskParts);

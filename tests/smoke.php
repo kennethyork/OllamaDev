@@ -454,6 +454,22 @@ ok('clear_board schema marks it explicit-only with required confirm', strpos($sr
 // Interactive Director: "clear board" is handled directly (not spent on a crew run).
 ok('interactive Director clears the board directly on "clear board"',
     preg_match('/\^\(clear\|reset\|wipe\|empty\).*board\$/', $src) === 1 && strpos($src, 'Crew::clearBoard()') !== false);
+// Separate-Director steering: `crew steer <#> "..."` / desktop box → run's steer.jsonl,
+// injected into the targeted coder between iterations (works sequential + forked).
+ok('crew has a separate-Director steer channel (command + injection)',
+    strpos($src, 'function steer(') !== false && strpos($src, 'injectSteerFor') !== false &&
+    strpos($src, 'steer.jsonl') !== false && strpos($src, "\$arg1 === 'steer'") !== false);
+// Functional: steer refuses with no active run, and queues to steer.jsonl when active.
+$shome = sys_get_temp_dir() . '/crew_steer_' . getmypid(); @mkdir($shome . '/.ollamadev/crew/crew_x/', 0777, true);
+[$o1, , $c1] = run_bin(['crew', 'steer', '2', 'focus on tests'], '', ['HOME' => $shome]);
+ok('crew steer refuses when no run is active', $c1 === 1 && stripos($o1, 'no active crew run') !== false, trim($o1));
+file_put_contents($shome . '/.ollamadev/crew/current.json', json_encode(['active' => true, 'runId' => 'crew_x', 'subtasks' => []]));
+[$o2, , $c2] = run_bin(['crew', 'steer', '2', 'focus on tests'], '', ['HOME' => $shome]);
+$sj = (string) @file_get_contents($shome . '/.ollamadev/crew/crew_x/steer.jsonl');
+ok('crew steer queues a targeted message to steer.jsonl', $c2 === 0 && strpos($sj, '"target":2') !== false && strpos($sj, 'focus on tests') !== false, trim($o2 . ' | ' . $sj));
+shell_exec('rm -rf ' . escapeshellarg($shome));
+$bind = (string) @file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/src/Bindings.php');
+ok('desktop exposes crewSteer for the Director box', strpos($bind, 'function crewSteer') !== false && strpos($bind, "'crewSteer'") !== false);
 // Desktop: a cleared sentinel wipes the localStorage-only manual cards (once, watermarked).
 $appjs = (string) @file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/app.js');
 ok('desktop applies the cleared sentinel to manual cards', strpos($appjs, 'ade.boardCleared') !== false &&

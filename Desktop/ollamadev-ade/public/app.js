@@ -388,6 +388,9 @@ var Tasks = {
         var crew = (App.crewBoard && Array.isArray(App.crewBoard.subtasks)) ? App.crewBoard.subtasks : [];
         // Crew's auto-suggested next steps (ideas) land in To-do as 💡 cards.
         var ideas = (App.crewBoard && Array.isArray(App.crewBoard.ideas)) ? App.crewBoard.ideas : [];
+        // Separate Director: show the steering bar only while a run is active.
+        var dbar = $('#directorBar'); if (dbar) dbar.hidden = !(App.crewBoard && App.crewBoard.active);
+        this.wireDirector();
         board.innerHTML = this.COLS.map(function (c) {
             // Director's plan as live, read-only crew cards.
             var crewInCol = crew.filter(function (s) { return self.crewCol(s.state) === c[0]; });
@@ -420,6 +423,26 @@ var Tasks = {
                 '<span class="count">' + count + '</span></div><div class="col-body">' + body + '</div></div>';
         }).join('');
         this.wire(board);
+    },
+    // Wire the separate-Director steering bar once. Parses "<#>: instruction"
+    // (defaults to coder 1 if no number) and sends it to the running crew.
+    wireDirector: function () {
+        var send = $('#directorSend'), msg = $('#directorMsg');
+        if (!send || !msg || send._wired) return;
+        send._wired = true;
+        var fire = function () {
+            var v = (msg.value || '').trim(); if (!v) return;
+            var m = v.match(/^(\d+)\s*[:>\-]\s*(.+)$/);
+            var coder = m ? parseInt(m[1], 10) : 1;
+            var text = m ? m[2].trim() : v;
+            Promise.resolve(window.crewSteer ? window.crewSteer(coder, text) : null).then(function (r) {
+                msg.value = '';
+                msg.placeholder = (r && r.error) ? ('⚠ ' + r.error) : ('✓ sent to coder ' + coder);
+                setTimeout(function () { msg.placeholder = 'Steer a coder — e.g. "2: focus on tests"'; }, 2500);
+            });
+        };
+        send.onclick = fire;
+        msg.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); fire(); } });
     },
     order: ['todo', 'doing', 'done'],
     wire: function (board) {

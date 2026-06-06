@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.8.37 (2026-06-06)
+
+### Added
+- **Live mid-run crew steering via a separate Director.** Redirect a coder *while it's working*, without typing into the coder's output stream: run `ollamadev crew steer <coder#> "instruction"` from another pane, or use the new **Director box** on the desktop board view. The message is routed to that coder through the run's `steer.jsonl` and applied on its next step (queued if the coder hasn't started yet). Pure vanilla PHP/JS — file-based, so it works for sequential *and* forked/parallel runs.
+
 ## v4.8.36 (2026-06-06)
 
 ### Fixed

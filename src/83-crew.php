@@ -5,6 +5,13 @@
 // 100% vanilla PHP + git + the local Ollama model. No parallel inference (one
 // local model serialises anyway), so coders run sequentially in isolation.
 class Crew {
+    // Live mid-run steering: a SEPARATE Director (the `crew steer` command or the
+    // desktop Director box) appends "<coder#> + instruction" to the run's steer.jsonl.
+    // Each coder injects messages targeting its number between iterations (queued if
+    // that coder hasn't started yet). File-based, so it works for sequential AND
+    // forked/parallel runs without sharing the terminal's stdin.
+    private static array $steerSeen = [];   // [coderN => last-consumed ts]
+
     public static function run(string $task, array $opts = []): int {
         $task = trim($task);
         if ($task === '') { echo "Usage: ollamadev crew \"<high-level task>\"\n"; return 1; }
@@ -140,6 +147,12 @@ class Crew {
         $hosts = array_values(array_unique(array_filter(array_merge([$baseHost], array_map('trim', $extraHosts)))));
         $canFork = function_exists('pcntl_fork');
         $parallel = count($jobs) > 1 && count($hosts) > 1 && $canFork;
+
+        // Reset per-coder steering marks. A SEPARATE Director (the `crew steer` command
+        // in another pane, or the desktop Director box) can redirect any coder mid-run.
+        self::$steerSeen = [];
+        if (count($jobs) > 0 && function_exists('posix_isatty') && @posix_isatty(STDIN))
+            echo "  {$d}steer a coder from another pane: ollamadev crew steer " . $jobs[0]['n'] . " \"focus on tests\"{$r}\n";
 
         // Phase 2: run coders. Parallel across hosts when possible; else sequential.
         if ($parallel) {
@@ -474,6 +487,12 @@ class Crew {
         $useModel = ($role['model'] ?? '') !== '' ? $role['model'] : $model;
         $roleMode = ($role['permission'] ?? 'auto') === 'readonly' ? 'readonly' : 'auto';
 
+        // Steering: this coder's number + the run's shared inbox (derived from the log path).
+        $steerN = 0; $steerFile = '';
+        if ($logFile !== '' && preg_match('/coder-(\d+)\.log$/', $logFile, $sm)) {
+            $steerN = (int)$sm[1]; $steerFile = dirname($logFile) . '/steer.jsonl';
+        }
+
         $prevCwd = getcwd();
         $oldMode = Permission::getMode(); $oldInt = Permission::isInteractive();
         @chdir($wt);
@@ -493,6 +512,7 @@ class Crew {
             $messages = [['role' => 'user', 'content' => $prompt]];
             $dbg = (bool)getenv('CREW_DEBUG');
             for ($i = 0; $i < $maxIter; $i++) {
+                if ($steerN > 0) self::injectSteerFor($messages, $steerFile, $steerN);   // separate Director redirects
                 echo "\033[2m·\033[0m"; @flush();   // heartbeat
                 $turn = $agent->chatTurn($messages);
                 $calls = $turn['calls'] ?? [];
@@ -518,6 +538,38 @@ class Crew {
         } finally {
             Permission::setMode($oldMode); Permission::setInteractive($oldInt);
             @chdir($prevCwd);
+        }
+    }
+
+    // The separate Director writes here. Find the active run + append a targeted message
+    // to its steer.jsonl. Returns ['ok'=>bool, 'error'?]. Used by `crew steer` + desktop.
+    public static function steer(int $target, string $msg): array {
+        $msg = trim($msg);
+        if ($target < 1) return ['ok' => false, 'error' => 'coder number must be 1 or higher'];
+        if ($msg === '') return ['ok' => false, 'error' => 'nothing to say'];
+        $home = getenv('HOME') ?: sys_get_temp_dir();
+        $board = json_decode((string)@file_get_contents($home . '/.ollamadev/crew/current.json'), true);
+        if (!is_array($board) || empty($board['active']) || empty($board['runId']))
+            return ['ok' => false, 'error' => 'no active crew run to steer'];
+        $steerFile = $home . '/.ollamadev/crew/' . $board['runId'] . '/steer.jsonl';
+        @mkdir(dirname($steerFile), 0755, true);
+        $entry = ['target' => $target, 'msg' => $msg, 'ts' => microtime(true)];
+        $ok = @file_put_contents($steerFile, json_encode($entry) . "\n", FILE_APPEND | LOCK_EX) !== false;
+        return $ok ? ['ok' => true, 'runId' => $board['runId']] : ['ok' => false, 'error' => 'could not write to the steer inbox'];
+    }
+
+    // Inject any not-yet-seen steering messages addressed to coder $n as user turns.
+    private static function injectSteerFor(array &$messages, string $steerFile, int $n): void {
+        if ($n <= 0 || $steerFile === '' || !is_file($steerFile)) return;
+        $seen = self::$steerSeen[$n] ?? 0.0;
+        foreach (file($steerFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $ln) {
+            $e = json_decode($ln, true);
+            if (!is_array($e) || (int)($e['target'] ?? 0) !== $n) continue;
+            $ts = (float)($e['ts'] ?? 0);
+            if ($ts <= $seen) continue;
+            $messages[] = ['role' => 'user', 'content' => "🧭 Director steering (apply this now): " . (string)($e['msg'] ?? '')];
+            self::$steerSeen[$n] = $ts;
+            echo "\033[36m  ⇄ coder {$n} got steering\033[0m\n";
         }
     }
 

@@ -28,7 +28,7 @@ final class Bindings
         'codeSearch', 'codeIndexStatus', 'codeIndexBuild',
         'reviewDiff', 'temperature', 'setTemperature',
         'sttModel', 'setSttModel', 'sttHistory', 'sttClearHistory',
-        'openExternal', 'proxyFetch', 'crewModels',
+        'openExternal', 'proxyFetch', 'crewModels', 'crewSteer',
     ];
 
     // Dispatch an allow-listed call with positional args (used by server.php).
@@ -80,6 +80,25 @@ final class Bindings
         if (!is_file($f)) return [];
         $d = json_decode((string) @file_get_contents($f), true);
         return is_array($d) ? $d : [];
+    }
+
+    // Separate Director: redirect a running coder. Writes the active run's steer.jsonl
+    // directly (the CLI engine's Crew class isn't loaded here) — coders read it between
+    // steps. Mirrors Crew::steer so CLI + desktop hit the same channel.
+    public function crewSteer(int $coder, string $msg): array
+    {
+        $msg = trim($msg);
+        if ($coder < 1) return ['error' => 'coder number must be 1 or higher'];
+        if ($msg === '') return ['error' => 'nothing to say'];
+        $home = getenv('HOME') ?: sys_get_temp_dir();
+        $board = json_decode((string) @file_get_contents($home . '/.ollamadev/crew/current.json'), true);
+        if (!is_array($board) || empty($board['active']) || empty($board['runId']))
+            return ['error' => 'no active crew run to steer'];
+        $steerFile = $home . '/.ollamadev/crew/' . $board['runId'] . '/steer.jsonl';
+        @mkdir(dirname($steerFile), 0755, true);
+        $entry = ['target' => $coder, 'msg' => $msg, 'ts' => microtime(true)];
+        $ok = @file_put_contents($steerFile, json_encode($entry) . "\n", FILE_APPEND | LOCK_EX) !== false;
+        return $ok ? ['ok' => true] : ['error' => 'could not write to the steer inbox'];
     }
 
     // Configured per-role crew models, so the desktop Crew modal can default to them
