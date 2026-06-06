@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OllamaDev ADE</title>
+<style>/* {{CSS}} */</style>
+</head>
+<body data-theme="void">
+    <div id="banner">starting…</div>
+
+    <header id="topbar">
+        <span class="brand">OllamaDev <span class="dim">ADE</span></span>
+        <span id="conn" class="conn" title="Ollama connection">●</span>
+        <div class="spacer"></div>
+        <select id="modelSelect" title="Model"></select>
+        <select id="tempSelect" title="Temperature — lower is more precise/deterministic (better tool-calling), higher is more creative">
+            <option value="0">0.0 · Exact</option>
+            <option value="0.2">0.2 · Precise</option>
+            <option value="0.3">0.3 · Balanced</option>
+            <option value="0.5">0.5 · Standard</option>
+            <option value="0.7">0.7 · Creative</option>
+            <option value="1">1.0 · Wild</option>
+        </select>
+        <select id="sttSelect" title="Voice model — speech-to-text accuracy (CPU-only, 100% local). Lower = faster, higher = more accurate." hidden>
+            <option value="tiny">🎙 tiny · fastest</option>
+            <option value="base">🎙 base · fast</option>
+            <option value="small">🎙 small · balanced</option>
+            <option value="medium">🎙 medium · accurate</option>
+            <option value="large-v3">🎙 large-v3 · best</option>
+            <option value="turbo">🎙 turbo · fast+</option>
+        </select>
+        <select id="themeSelect" title="Theme"></select>
+        <button id="openFolderBtn" title="Open another folder (adds it as a workspace)">📂 Open</button>
+        <button id="newTermBtn" class="primary">+ Terminal</button>
+        <button id="crewBtn" title="OllamaDev Crew — a team of agents (Director / Coders / Auditor)">👥 Crew</button>
+        <button id="diffBtn" title="Review the agent's working-tree changes (read-only git diff)">⇄ Review</button>
+        <button id="webToggle" title="Web access for the agent (search, fetch, remote git). Off = air-gapped. Applies to new runs.">🌐 Web</button>
+        <button id="searchToggle" title="Web search on/off (leaves fetch &amp; remote git alone). Applies to new runs.">🔍 Search</button>
+        <button id="sttHistoryBtn" title="Voice transcription history" hidden>🎙 History</button>
+        <button id="layoutBtn" title="Cycle layout: split / terminals / editor">Split</button>
+        <span id="cwd" class="dim"></span>
+    </header>
+
+    <main id="main">
+        <nav id="rail">
+            <button class="rail-btn active" data-panel="files" title="Files">▤</button>
+            <button class="rail-btn" data-panel="search" title="Semantic code search">🔎</button>
+            <button class="rail-btn" data-panel="tasks" title="Tasks">▦</button>
+        </nav>
+
+        <aside id="sidebar">
+            <!-- Project workspaces — a vertical list at the top of the left pane.
+                 One row per project; click to switch, ＋ opens another. -->
+            <div id="wsBar">
+                <div class="side-title">Projects</div>
+                <div id="wsStrip" class="ws-strip"></div>
+                <button id="wsBarAdd" class="ws-bar-add" title="Open another project as a new tab">＋ Open project</button>
+            </div>
+            <div id="filesPanel" class="panel">
+                <div class="side-title">Files</div>
+                <div id="breadcrumb" class="dim"></div>
+                <div id="fileTree"></div>
+            </div>
+            <div id="searchPanel" class="panel" hidden>
+                <div class="side-title">Code search</div>
+                <div class="task-add">
+                    <input id="codeSearchInput" placeholder="Find code by meaning… (Enter)">
+                </div>
+                <div id="codeSearchHint" class="dim">Semantic search over this project (local embeddings).</div>
+                <div id="codeSearchResults"></div>
+            </div>
+            <div id="tasksPanel" class="panel" hidden>
+                <div class="side-title">Tasks</div>
+                <div class="task-add">
+                    <input id="taskInput" placeholder="New task… (Enter)">
+                </div>
+                <div id="taskHint" class="dim">Tasks live on the Board. Press Run to hand one to an agent terminal.</div>
+            </div>
+        </aside>
+
+        <section id="workspace">
+            <div id="wsTabs">
+                <button class="ws-tab active" data-view="code">Workspace</button>
+                <button class="ws-tab" data-view="board">Board</button>
+                <button class="ws-tab" data-view="graph">Graph</button>
+                <button class="ws-tab" data-view="browser">Browser</button>
+            </div>
+
+            <div id="codeView" class="ws-view">
+                <section id="editorPane">
+                    <div id="editorTabs"></div>
+                    <div id="editorBody">
+                        <div id="editorEmpty" class="dim">Select a file from the sidebar to edit it.</div>
+                    </div>
+                </section>
+                <div id="vsplit" class="vsplit" title="Drag to resize editor / terminals"></div>
+                <section id="terminals"></section>
+            </div>
+
+            <div id="boardView" class="ws-view" hidden>
+                <div id="crewPanes" hidden></div>
+                <div id="board"></div>
+            </div>
+
+            <div id="graphView" class="ws-view" hidden>
+                <div id="graphBar">
+                    <span class="dim">Project memory graph — notes linked with [[wiki-links]].</span>
+                    <span id="graphStat" class="dim"></span>
+                    <button id="graphRefresh" title="Reload the graph">↻ Refresh</button>
+                </div>
+                <canvas id="graphCanvas"></canvas>
+                <div id="graphEmpty" class="dim" hidden>No memories yet. The agent saves them with the <code>remember</code> tool, or run <code>ollamadev memory new &lt;title&gt;</code>.</div>
+            </div>
+
+            <div id="browserView" class="ws-view" hidden>
+                <div id="browserBar">
+                    <button id="brBack" title="Back" disabled>←</button>
+                    <button id="brFwd" title="Forward" disabled>→</button>
+                    <button id="brReload" title="Reload">⟳</button>
+                    <input id="brUrl" type="text" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="localhost:3000  ·  or a full URL">
+                    <button id="brGo" class="primary">Go</button>
+                    <span id="brPorts"></span>
+                    <button id="brExt" title="Open in your real browser">↗</button>
+                </div>
+                <div id="browserBody">
+                    <iframe id="brFrame" referrerpolicy="no-referrer" title="Local preview"></iframe>
+                    <div id="brEmpty" class="dim">Preview a local app you're building — enter a URL or pick a port. Localhost loads instantly; some external sites refuse to embed (use ↗ to open them in your real browser).</div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div id="folderOverlay" class="modal-overlay" hidden>
+        <div class="modal">
+            <div class="modal-title">📂 Open project folder</div>
+            <div class="modal-sub dim">Points the file tree, terminals, and Crew at this folder.</div>
+            <label class="modal-label">Path</label>
+            <input id="folderPath" placeholder="/home/you/projects/my-app  (or ~/projects/my-app)">
+            <div class="modal-actions">
+                <button id="folderCancel">Cancel</button>
+                <button id="folderOpen" class="primary">Open</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="voiceOverlay" class="modal-overlay" hidden>
+        <div class="modal">
+            <div class="modal-title">🎙 Voice history</div>
+            <div class="modal-sub dim">Past speech-to-text transcriptions (local). Same history as the CLI <code>/voice history</code>.</div>
+            <div id="voiceHistoryList" class="voice-history"></div>
+            <div class="modal-actions">
+                <button id="voiceHistClear">Clear history</button>
+                <button id="voiceHistClose" class="primary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="modalOverlay" class="modal-overlay" hidden>
+        <div class="modal">
+            <div class="modal-title">👥 OllamaDev Crew</div>
+            <div class="modal-sub dim">Set up the team, then either give the Director a task now — or leave it blank to launch the crew and prompt the Director live in the terminal.</div>
+
+            <div id="crewTemplates" class="wiz-templates"></div>
+            <div class="task-input-wrap">
+              <textarea id="crewTask" placeholder="Optional — tell the Director what to build, or leave blank to prompt it live (e.g. add input validation + tests to the signup form)"></textarea>
+              <button id="crewMic" class="mic-btn" type="button" title="Dictate (local speech-to-text)" hidden>🎤</button>
+            </div>
+            <div id="crewProjLine" class="modal-hint dim"></div>
+
+            <details class="crew-adv">
+                <summary>Advanced — folder, team &amp; models</summary>
+                <label class="modal-label">Saved crew preset</label>
+                <div class="preset-row">
+                    <select id="crewPreset"><option value="">— preset —</option></select>
+                    <input id="crewPresetName" placeholder="name to save as…">
+                    <button id="crewPresetSave" type="button">💾 Save</button>
+                    <button id="crewPresetDel" type="button" title="Delete selected preset">🗑</button>
+                </div>
+                <label class="modal-label">Project folder</label>
+                <input id="crewFolder" placeholder="~/projects/my-app">
+                <label class="modal-label">Team — pick a model per role</label>
+                <div class="roster">
+                    <div class="rmate locked" title="The Director always plans the work — it can't be turned off">
+                        <span class="rico">🧭</span><span class="rname">Director</span><select id="crewModelDirector" class="rmodel"></select>
+                    </div>
+                    <label class="rmate"><input type="checkbox" id="crewResearcher" checked><span class="rico">🔎</span><span class="rname">Researcher</span><select id="crewModelResearcher" class="rmodel"></select></label>
+                    <div class="rmate"><span class="rico">👷</span><span class="rname">Coders</span>
+                        <select id="crewMax" class="rcount"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select>
+                        <select id="crewModelCoder" class="rmodel"></select>
+                    </div>
+                    <label class="rmate"><input type="checkbox" id="crewAuditor" checked><span class="rico">🔍</span><span class="rname">Auditor</span><select id="crewModelAuditor" class="rmodel"></select></label>
+                </div>
+                <div class="roles-line modal-hint dim">The Director assigns each subtask a <strong>role</strong> (coder, tester, docs, security…). <button type="button" id="crewManageRoles" class="linklike">🎭 Manage roles…</button></div>
+                <label class="modal-check"><input type="checkbox" id="crewReview" checked> 🧑 You — review before merge (hold every branch; nothing auto-merges)</label>
+                <label class="modal-label">Ollama hosts <span class="dim">(optional — comma-separated, runs coders in parallel across machines/GPUs)</span></label>
+                <input id="crewHosts" placeholder="http://localhost:11434, http://192.168.1.50:11434">
+            </details>
+
+            <div class="modal-actions">
+                <button id="crewCancel">Cancel</button>
+                <div class="spacer"></div>
+                <button id="crewRun" class="primary">Launch Crew</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="rolesOverlay" class="modal-overlay" hidden>
+        <div class="modal">
+            <div class="modal-title">🎭 Crew roles</div>
+            <div class="modal-sub dim">The Director assigns one role to each subtask. Built-ins always exist; add your own below. Roles are shared by the terminal, desktop, and web.</div>
+            <div id="rolesList" class="roles-list"></div>
+            <details class="crew-adv" id="roleAddBox">
+                <summary>＋ Add a role</summary>
+                <label class="modal-label">Name</label>
+                <input id="roleName" placeholder="e.g. reviewer">
+                <label class="modal-label">Persona <span class="dim">— the system prompt the agent runs with</span></label>
+                <textarea id="rolePersona" placeholder="You are a … agent in an isolated git worktree. …"></textarea>
+                <label class="modal-label">Description <span class="dim">(what the Director sees when choosing)</span></label>
+                <input id="roleDesc" placeholder="Short summary of what this role does">
+                <label class="modal-label">Pinned model <span class="dim">(optional — defaults to the crew's coder model)</span></label>
+                <select id="roleModel"><option value="">— crew coder model —</option></select>
+                <label class="modal-check"><input type="checkbox" id="roleReadonly"> Read-only (survey/advise without editing files)</label>
+                <div class="modal-actions">
+                    <div class="spacer"></div>
+                    <button id="roleSave" class="primary" type="button">Save role</button>
+                </div>
+            </details>
+            <div class="modal-actions">
+                <button id="rolesClose">Done</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="diffOverlay" class="modal-overlay" hidden>
+        <div class="modal modal-wide">
+            <div class="modal-title">⇄ Review changes</div>
+            <div class="modal-sub dim">Read-only diff of the working tree (changed &amp; new files). Tell the agent to commit when it looks right — git stays agent-driven.</div>
+            <div id="diffFiles" class="diff-files"></div>
+            <div id="diffBody" class="diff-body"><div class="dim diff-empty">Loading…</div></div>
+            <div class="modal-actions">
+                <button id="diffRefresh">↻ Refresh</button>
+                <div class="spacer"></div>
+                <button id="diffClose">Done</button>
+            </div>
+        </div>
+    </div>
+
+<script>/* {{JS}} */</script>
+</body>
+</html>

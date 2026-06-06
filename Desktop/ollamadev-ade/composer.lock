@@ -1,0 +1,1055 @@
+{
+    "_readme": [
+        "This file locks the dependencies of your project to a known state",
+        "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
+        "This file is @generated automatically"
+    ],
+    "content-hash": "3e498897c650d9ebeaec65cd38919bf4",
+    "packages": [
+        {
+            "name": "boson-php/cpu-info",
+            "version": "0.19.5",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/boson-php/cpu-info.git",
+                "reference": "dbdd70ad57edd1dd33da1b6351158250f87b5ee0"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/boson-php/cpu-info/zipball/dbdd70ad57edd1dd33da1b6351158250f87b5ee0",
+                "reference": "dbdd70ad57edd1dd33da1b6351158250f87b5ee0",
+                "shasum": ""
+            },
+            "require": {
+                "boson-php/pasm": "^0.19",
+                "boson-php/value-object-contracts": "^0.19",
+                "ffi/env": "^1.0",
+                "php": "^8.4"
+            },
+            "require-dev": {
+                "phpunit/phpunit": "^12.0"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-main": "0.19.x-dev",
+                    "dev-master": "0.19.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Boson\\Component\\CpuInfo\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Kirill Nesmeyanov",
+                    "email": "nesk@xakep.ru"
+                }
+            ],
+            "description": "Provides object-oriented interfaces to detect CPU",
+            "homepage": "https://bosonphp.com",
+            "support": {
+                "issues": "https://github.com/boson-php/boson/issues",
+                "source": "https://github.com/boson-php/cpu-info"
+            },
+            "time": "2025-10-08T09:29:01+00:00"
+        },
+        {
+            "name": "boson-php/event-listener-contracts",
+            "version": "0.19.5",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/boson-php/event-listener-contracts.git",
+                "reference": "aaf98b8dd8d5dc13d5a8b30459273800c6d522ec"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/boson-php/event-listener-contracts/zipball/aaf98b8dd8d5dc13d5a8b30459273800c6d522ec",
+                "reference": "aaf98b8dd8d5dc13d5a8b30459273800c6d522ec",
+                "shasum": ""
+            },
+            "require": {
+                "php": "^8.4",
+                "psr/event-dispatcher": "^1.0"
+            },
+            "require-dev": {
+                "phpunit/phpunit": "^12.0"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-main": "0.19.x-dev",
+                    "dev-master": "0.19.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Boson\\Contracts\\EventListener\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Kirill Nesmeyanov",
+                    "email": "nesk@xakep.ru"
+                }
+            ],
+            "description": "Provides basic event listener component interfaces",
+            "homepage": "https://bosonphp.com",
+            "support": {
+                "issues": "https://github.com/boson-php/boson/issues",
+                "source": "https://github.com/boson-php/event-listener-contracts"
+            },
+            "time": "2025-10-08T09:42:19+00:00"
+        },
+        {
+            "name": "boson-php/http",
+            "version": "0.19.5",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/boson-php/http.git",
+                "reference": "7884a908b419f60eab39906f843f16f3f067fa33"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/boson-php/http/zipball/7884a908b419f60eab39906f843f16f3f067fa33",
+                "reference": "7884a908b419f60eab39906f843f16f3f067fa33",
+                "shasum": ""
+            },
+            "require": {
+                "boson-php/http-contracts": "^0.19",
+                "boson-php/uri-factory": "^0.19",
+                "php": "^8.4"
+            },
+            "provide": {
+                "boson-php/http-contracts-implementation": "^0.19"
+            },
+            "require-dev": {
+                "phpunit/phpunit": "^12.0"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-main": "0.19.x-dev",
+                    "dev-master": "0.19.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Boson\\Component\\Http\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Kirill Nesmeyanov",
+                    "email": "nesk@xakep.ru"
+                }
+            ],
+            "description": "Provides basic HTTP structures",
+            "homepage": "https://bosonphp.com",
+            "support": {
+                "issues": "https://github.com/boson-php/boson/issues",
+                "source": "https://github.com/boson-php/http"
+            },
+            "time": "2025-10-08T09:43:54+00:00"
+        },
+        {
+            "name": "boson-php/http-contracts",
+            "version": "0.19.5",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/boson-php/http-contracts.git",
+                "reference": "07b543fc1c50e436a89ab7f4dda02d1edf642823"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/boson-php/http-contracts/zipball/07b543fc1c50e436a89ab7f4dda02d1edf642823",
+                "reference": "07b543fc1c50e436a89ab7f4dda02d1edf642823",
+                "shasum": ""
+            },
+            "require": {
+                "boson-php/value-object-contracts": "^0.19",
+                "php": "^8.4"
+            },
+            "require-dev": {
+                "phpunit/phpunit": "^12.0"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-main": "0.19.x-dev",
+                    "dev-master": "0.19.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Boson\\Contracts\\Http\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Kirill Nesmeyanov",
+                    "email": "nesk@xakep.ru"
+                }
+            ],
+            "description": "Provides basic HTTP component structures",
+            "homepage": "https://bosonphp.com",
+            "support": {
+                "issues": "https://github.com/boson-php/boson/issues",
+                "source": "https://github.com/boson-php/http-contracts"
+            },
+            "time": "2025-10-08T09:36:57+00:00"
+        },
+        {
+            "name": "boson-php/id-contracts",
+            "version": "0.19.5",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/boson-php/id-contracts.git",
+                "reference": "1a342773be909f262153d67fbb4a60856c838847"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/boson-php/id-contracts/zipball/1a342773be909f262153d67fbb4a60856c838847",
+                "reference": "1a342773be909f262153d67fbb4a60856c838847",
+                "shasum": ""
+            },
+            "require": {
+                "boson-php/value-object-contracts": "^0.19",
+                "php": "^8.4"
+            },
+            "require-dev": {
+                "phpunit/phpunit": "^12.0"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-main": "0.19.x-dev",
+                    "dev-master": "0.19.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Boson\\Contracts\\Id\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Kirill Nesmeyanov",
+                    "email": "nesk@xakep.ru"
+                }
+            ],
+            "description": "Provides basic ID interfaces",
+            "homepage": "https://bosonphp.com",
+            "support": {
+                "issues": "https://github.com/boson-php/boson/issues",
+                "source": "https://github.com/boson-php/id-contracts"
+            },
+            "time": "2025-10-08T09:43:36+00:00"
+        },
+        {
+            "name": "boson-php/os-info",
+            "version": "0.19.5",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/boson-php/os-info.git",
+                "reference": "017c6cdf3922f8566ed27b1c8aa17267f5f004ee"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/boson-php/os-info/zipball/017c6cdf3922f8566ed27b1c8aa17267f5f004ee",
+                "reference": "017c6cdf3922f8566ed27b1c8aa17267f5f004ee",
+                "shasum": ""
+            },
+            "require": {
+                "boson-php/value-object-contracts": "^0.19",
+                "ext-ffi": "*",
+                "ext-pcre": "*",
+                "ffi/env": "^1.0",
+                "php": "^8.4"
+            },
+            "require-dev": {
+                "phpunit/phpunit": "^12.0"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-main": "0.19.x-dev",
+                    "dev-master": "0.19.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Boson\\Component\\OsInfo\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Kirill Nesmeyanov",
+                    "email": "nesk@xakep.ru"
+                }
+            ],
+            "description": "Provides object-oriented interfaces to detect operating system",
+            "homepage": "https://bosonphp.com",
+            "support": {
+                "issues": "https://github.com/boson-php/boson/issues",
+                "source": "https://github.com/boson-php/os-info"
+            },
+            "time": "2025-10-08T09:36:46+00:00"
+        },
+        {
+            "name": "boson-php/pasm",
+            "version": "0.19.5",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/boson-php/pasm.git",
+                "reference": "1fd6d88c7984634a254ac46d346021e8420e1f7c"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/boson-php/pasm/zipball/1fd6d88c7984634a254ac46d346021e8420e1f7c",
+                "reference": "1fd6d88c7984634a254ac46d346021e8420e1f7c",
+                "shasum": ""
+            },
+            "require": {
+                "boson-php/weak-types": "^0.19",
+                "ffi/env": "^1.0",
+                "php": "^8.4"
+            },
+            "require-dev": {
+                "phpunit/phpunit": "^12.0"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-main": "0.19.x-dev",
+                    "dev-master": "0.19.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Boson\\Component\\Pasm\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Kirill Nesmeyanov",
+                    "email": "nesk@xakep.ru"
+                }
+            ],
+            "description": "Provides lightweight PHP assembly executor",
+            "homepage": "https://bosonphp.com",
+            "support": {
+                "issues": "https://github.com/boson-php/boson/issues",
+                "source": "https://github.com/boson-php/pasm"
+            },
+            "time": "2025-10-15T03:58:50+00:00"
+        },
+        {
+            "name": "boson-php/runtime",
+            "version": "0.19.5",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/boson-php/runtime.git",
+                "reference": "1d2489a085b77967111f1d0113576c9e654b1c0d"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/boson-php/runtime/zipball/1d2489a085b77967111f1d0113576c9e654b1c0d",
+                "reference": "1d2489a085b77967111f1d0113576c9e654b1c0d",
+                "shasum": ""
+            },
+            "require": {
+                "boson-php/cpu-info": "^0.19",
+                "boson-php/event-listener-contracts": "^0.19",
+                "boson-php/http": "^0.19",
+                "boson-php/http-contracts": "^0.19",
+                "boson-php/id-contracts": "^0.19",
+                "boson-php/os-info": "^0.19",
+                "boson-php/saucer": "^0.19",
+                "boson-php/uri": "^0.19",
+                "boson-php/uri-contracts": "^0.19",
+                "boson-php/uri-factory": "^0.19",
+                "boson-php/uri-factory-contracts": "^0.19",
+                "boson-php/value-object-contracts": "^0.19",
+                "boson-php/weak-types": "^0.19",
+                "ext-ffi": "*",
+                "ext-iconv": "*",
+                "php": "^8.4",
+                "psr/container": "^2.0",
+                "psr/event-dispatcher": "^1.0",
+                "react/promise": "^3.0"
+            },
+            "require-dev": {
+                "phpunit/phpunit": "^12.0"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-main": "0.19.x-dev",
+                    "dev-master": "0.19.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Boson\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Kirill Nesmeyanov",
+                    "email": "nesk@xakep.ru"
+                }
+            ],
+            "description": "Boson WebView runtime library",
+            "homepage": "https://bosonphp.com",
+            "support": {
+                "issues": "https://github.com/boson-php/boson/issues",
+                "source": "https://github.com/boson-php/runtime"
+            },
+            "time": "2025-12-08T14:48:28+00:00"
+        },
+        {
+            "name": "boson-php/saucer",
+            "version": "0.19.5",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/boson-php/saucer.git",
+                "reference": "546bf8b81b515b37f0d85c8a4d3799b07523f112"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/boson-php/saucer/zipball/546bf8b81b515b37f0d85c8a4d3799b07523f112",
+                "reference": "546bf8b81b515b37f0d85c8a4d3799b07523f112",
+                "shasum": ""
+            },
+            "require": {
+                "ffi/env": "^1.0",
+                "php": "^8.4"
+            },
+            "require-dev": {
+                "phpunit/phpunit": "^12.0"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-main": "0.19.x-dev",
+                    "dev-master": "0.19.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Boson\\Component\\Saucer\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Kirill Nesmeyanov",
+                    "email": "nesk@xakep.ru"
+                }
+            ],
+            "description": "Provides Saucer FFI bindings",
+            "homepage": "https://bosonphp.com",
+            "support": {
+                "issues": "https://github.com/boson-php/boson/issues",
+                "source": "https://github.com/boson-php/saucer"
+            },
+            "time": "2025-10-08T09:36:21+00:00"
+        },
+        {
+            "name": "boson-php/uri",
+            "version": "0.19.5",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/boson-php/uri.git",
+                "reference": "d742e60db7110224a27023fe1f2b0ca91e85d5a6"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/boson-php/uri/zipball/d742e60db7110224a27023fe1f2b0ca91e85d5a6",
+                "reference": "d742e60db7110224a27023fe1f2b0ca91e85d5a6",
+                "shasum": ""
+            },
+            "require": {
+                "boson-php/uri-contracts": "^0.19",
+                "php": "^8.4"
+            },
+            "provide": {
+                "boson-php/uri-contracts-implementation": "^0.19"
+            },
+            "require-dev": {
+                "phpunit/phpunit": "^12.0"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-main": "0.19.x-dev",
+                    "dev-master": "0.19.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Boson\\Component\\Uri\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Kirill Nesmeyanov",
+                    "email": "nesk@xakep.ru"
+                }
+            ],
+            "description": "Provides modern object-oriented API to interact with URI",
+            "homepage": "https://bosonphp.com",
+            "support": {
+                "issues": "https://github.com/boson-php/boson/issues",
+                "source": "https://github.com/boson-php/uri"
+            },
+            "time": "2025-10-08T09:30:22+00:00"
+        },
+        {
+            "name": "boson-php/uri-contracts",
+            "version": "0.19.5",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/boson-php/uri-contracts.git",
+                "reference": "8a84acac6de489dde2a5c8b734f7b2ae9bd667a2"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/boson-php/uri-contracts/zipball/8a84acac6de489dde2a5c8b734f7b2ae9bd667a2",
+                "reference": "8a84acac6de489dde2a5c8b734f7b2ae9bd667a2",
+                "shasum": ""
+            },
+            "require": {
+                "boson-php/value-object-contracts": "^0.19",
+                "php": "^8.4"
+            },
+            "require-dev": {
+                "phpunit/phpunit": "^12.0"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-main": "0.19.x-dev",
+                    "dev-master": "0.19.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Boson\\Contracts\\Uri\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Kirill Nesmeyanov",
+                    "email": "nesk@xakep.ru"
+                }
+            ],
+            "description": "Provides basic URI interfaces",
+            "homepage": "https://bosonphp.com",
+            "support": {
+                "issues": "https://github.com/boson-php/boson/issues",
+                "source": "https://github.com/boson-php/uri-contracts"
+            },
+            "time": "2025-10-08T09:43:07+00:00"
+        },
+        {
+            "name": "boson-php/uri-factory",
+            "version": "0.19.5",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/boson-php/uri-factory.git",
+                "reference": "3e64d78dc509baa150bc5bbdfa0b70851c09e698"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/boson-php/uri-factory/zipball/3e64d78dc509baa150bc5bbdfa0b70851c09e698",
+                "reference": "3e64d78dc509baa150bc5bbdfa0b70851c09e698",
+                "shasum": ""
+            },
+            "require": {
+                "boson-php/uri": "^0.19",
+                "boson-php/uri-factory-contracts": "^0.19",
+                "php": "^8.4"
+            },
+            "provide": {
+                "boson-php/uri-factory-contracts-implementation": "^0.19"
+            },
+            "require-dev": {
+                "phpunit/phpunit": "^12.0"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-main": "0.19.x-dev",
+                    "dev-master": "0.19.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Boson\\Component\\Uri\\Factory\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Kirill Nesmeyanov",
+                    "email": "nesk@xakep.ru"
+                }
+            ],
+            "description": "Provides URI factory implementations",
+            "homepage": "https://bosonphp.com",
+            "support": {
+                "issues": "https://github.com/boson-php/boson/issues",
+                "source": "https://github.com/boson-php/uri-factory"
+            },
+            "time": "2025-10-08T09:44:13+00:00"
+        },
+        {
+            "name": "boson-php/uri-factory-contracts",
+            "version": "0.19.5",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/boson-php/uri-factory-contracts.git",
+                "reference": "4fc4fabdce57bedeccefc02c314bb6b1bacfc9d3"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/boson-php/uri-factory-contracts/zipball/4fc4fabdce57bedeccefc02c314bb6b1bacfc9d3",
+                "reference": "4fc4fabdce57bedeccefc02c314bb6b1bacfc9d3",
+                "shasum": ""
+            },
+            "require": {
+                "boson-php/uri-contracts": "^0.19",
+                "php": "^8.4"
+            },
+            "require-dev": {
+                "phpunit/phpunit": "^12.0"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-main": "0.19.x-dev",
+                    "dev-master": "0.19.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Boson\\Contracts\\Uri\\Factory\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Kirill Nesmeyanov",
+                    "email": "nesk@xakep.ru"
+                }
+            ],
+            "description": "Provides basic URI factory interfaces",
+            "homepage": "https://bosonphp.com",
+            "support": {
+                "issues": "https://github.com/boson-php/boson/issues",
+                "source": "https://github.com/boson-php/uri-factory-contracts"
+            },
+            "time": "2025-10-08T09:39:27+00:00"
+        },
+        {
+            "name": "boson-php/value-object-contracts",
+            "version": "0.19.5",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/boson-php/value-object-contracts.git",
+                "reference": "674627cdaef023b8d2077a70c5d141de3130a630"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/boson-php/value-object-contracts/zipball/674627cdaef023b8d2077a70c5d141de3130a630",
+                "reference": "674627cdaef023b8d2077a70c5d141de3130a630",
+                "shasum": ""
+            },
+            "require": {
+                "php": "^8.4"
+            },
+            "require-dev": {
+                "phpunit/phpunit": "^12.0"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-main": "0.19.x-dev",
+                    "dev-master": "0.19.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Boson\\Contracts\\ValueObject\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Kirill Nesmeyanov",
+                    "email": "nesk@xakep.ru"
+                }
+            ],
+            "description": "Provides basic value object interfaces",
+            "homepage": "https://bosonphp.com",
+            "support": {
+                "issues": "https://github.com/boson-php/boson/issues",
+                "source": "https://github.com/boson-php/value-object-contracts"
+            },
+            "time": "2025-10-08T09:38:20+00:00"
+        },
+        {
+            "name": "boson-php/weak-types",
+            "version": "0.19.5",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/boson-php/weak-types.git",
+                "reference": "4f3a2b9aa2baeccc7fefc9e063a66af786e34e27"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/boson-php/weak-types/zipball/4f3a2b9aa2baeccc7fefc9e063a66af786e34e27",
+                "reference": "4f3a2b9aa2baeccc7fefc9e063a66af786e34e27",
+                "shasum": ""
+            },
+            "require": {
+                "php": "^8.4"
+            },
+            "require-dev": {
+                "phpunit/phpunit": "^12.0"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-main": "0.19.x-dev",
+                    "dev-master": "0.19.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Boson\\Component\\WeakType\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Kirill Nesmeyanov",
+                    "email": "nesk@xakep.ru"
+                }
+            ],
+            "description": "Provides weak structures and types",
+            "homepage": "https://bosonphp.com",
+            "support": {
+                "issues": "https://github.com/boson-php/boson/issues",
+                "source": "https://github.com/boson-php/weak-types"
+            },
+            "time": "2025-10-08T09:39:48+00:00"
+        },
+        {
+            "name": "ffi/env",
+            "version": "1.0.3",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/php-ffi/env.git",
+                "reference": "ce5b90f1c379ab99b9b030c492c4618240ccdd39"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/php-ffi/env/zipball/ce5b90f1c379ab99b9b030c492c4618240ccdd39",
+                "reference": "ce5b90f1c379ab99b9b030c492c4618240ccdd39",
+                "shasum": ""
+            },
+            "require": {
+                "php": "^7.4|^8.0"
+            },
+            "require-dev": {
+                "friendsofphp/php-cs-fixer": "^3.53",
+                "phpstan/phpstan": "^2.0",
+                "phpstan/phpstan-deprecation-rules": "^2.0",
+                "phpstan/phpstan-strict-rules": "^2.0",
+                "phpunit/phpunit": "^9.5"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-main": "1.0.x-dev",
+                    "dev-master": "1.0.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "FFI\\Env\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Nesmeyanov Kirill",
+                    "email": "nesk@xakep.ru",
+                    "homepage": "https://nesk.me",
+                    "role": "maintainer"
+                }
+            ],
+            "description": "PHP FFI Environment",
+            "keywords": [
+                "env",
+                "environment",
+                "ffi"
+            ],
+            "support": {
+                "docs": "https://github.com/php-ffi/env/blob/master/README.md",
+                "issues": "https://github.com/php-ffi/env/issues",
+                "source": "https://github.com/php-ffi/env"
+            },
+            "time": "2025-05-08T15:03:58+00:00"
+        },
+        {
+            "name": "psr/container",
+            "version": "2.0.2",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/php-fig/container.git",
+                "reference": "c71ecc56dfe541dbd90c5360474fbc405f8d5963"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/php-fig/container/zipball/c71ecc56dfe541dbd90c5360474fbc405f8d5963",
+                "reference": "c71ecc56dfe541dbd90c5360474fbc405f8d5963",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=7.4.0"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-master": "2.0.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Psr\\Container\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "PHP-FIG",
+                    "homepage": "https://www.php-fig.org/"
+                }
+            ],
+            "description": "Common Container Interface (PHP FIG PSR-11)",
+            "homepage": "https://github.com/php-fig/container",
+            "keywords": [
+                "PSR-11",
+                "container",
+                "container-interface",
+                "container-interop",
+                "psr"
+            ],
+            "support": {
+                "issues": "https://github.com/php-fig/container/issues",
+                "source": "https://github.com/php-fig/container/tree/2.0.2"
+            },
+            "time": "2021-11-05T16:47:00+00:00"
+        },
+        {
+            "name": "psr/event-dispatcher",
+            "version": "1.0.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/php-fig/event-dispatcher.git",
+                "reference": "dbefd12671e8a14ec7f180cab83036ed26714bb0"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/php-fig/event-dispatcher/zipball/dbefd12671e8a14ec7f180cab83036ed26714bb0",
+                "reference": "dbefd12671e8a14ec7f180cab83036ed26714bb0",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=7.2.0"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-master": "1.0.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Psr\\EventDispatcher\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "PHP-FIG",
+                    "homepage": "http://www.php-fig.org/"
+                }
+            ],
+            "description": "Standard interfaces for event handling.",
+            "keywords": [
+                "events",
+                "psr",
+                "psr-14"
+            ],
+            "support": {
+                "issues": "https://github.com/php-fig/event-dispatcher/issues",
+                "source": "https://github.com/php-fig/event-dispatcher/tree/1.0.0"
+            },
+            "time": "2019-01-08T18:20:26+00:00"
+        },
+        {
+            "name": "react/promise",
+            "version": "v3.3.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/reactphp/promise.git",
+                "reference": "23444f53a813a3296c1368bb104793ce8d88f04a"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/reactphp/promise/zipball/23444f53a813a3296c1368bb104793ce8d88f04a",
+                "reference": "23444f53a813a3296c1368bb104793ce8d88f04a",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=7.1.0"
+            },
+            "require-dev": {
+                "phpstan/phpstan": "1.12.28 || 1.4.10",
+                "phpunit/phpunit": "^9.6 || ^7.5"
+            },
+            "type": "library",
+            "autoload": {
+                "files": [
+                    "src/functions_include.php"
+                ],
+                "psr-4": {
+                    "React\\Promise\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Jan Sorgalla",
+                    "email": "jsorgalla@gmail.com",
+                    "homepage": "https://sorgalla.com/"
+                },
+                {
+                    "name": "Christian Lück",
+                    "email": "christian@clue.engineering",
+                    "homepage": "https://clue.engineering/"
+                },
+                {
+                    "name": "Cees-Jan Kiewiet",
+                    "email": "reactphp@ceesjankiewiet.nl",
+                    "homepage": "https://wyrihaximus.net/"
+                },
+                {
+                    "name": "Chris Boden",
+                    "email": "cboden@gmail.com",
+                    "homepage": "https://cboden.dev/"
+                }
+            ],
+            "description": "A lightweight implementation of CommonJS Promises/A for PHP",
+            "keywords": [
+                "promise",
+                "promises"
+            ],
+            "support": {
+                "issues": "https://github.com/reactphp/promise/issues",
+                "source": "https://github.com/reactphp/promise/tree/v3.3.0"
+            },
+            "funding": [
+                {
+                    "url": "https://opencollective.com/reactphp",
+                    "type": "open_collective"
+                }
+            ],
+            "time": "2025-08-19T18:57:03+00:00"
+        }
+    ],
+    "packages-dev": [],
+    "aliases": [],
+    "minimum-stability": "stable",
+    "stability-flags": {},
+    "prefer-stable": false,
+    "prefer-lowest": false,
+    "platform": {
+        "php": "^8.4"
+    },
+    "platform-dev": {},
+    "plugin-api-version": "2.9.0"
+}

@@ -1,0 +1,35 @@
+name: ci
+
+# Fast, deterministic gate on every push/PR. No model required — it rebuilds the
+# single-file binary from src/, checks it's in sync, lints it, and runs the smoke
+# suite (which guards the tool-schema regression that silently broke tool-calling).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: none
+      - name: Rebuild the single-file binary from src/
+        run: bash build.sh
+      - name: Binary is in sync with src/ (did you forget to ./build.sh?)
+        run: |
+          git diff --exit-code ollamadev \
+            || { echo "::error::ollamadev is stale — run ./build.sh and commit the result"; exit 1; }
+      - name: Lint the built binary
+        run: php -l ollamadev
+      - name: Smoke tests
+        run: php tests/smoke.php
+      - name: Tool-layer functional tests
+        run: bash tests/tools.sh

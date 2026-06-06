@@ -1,0 +1,58 @@
+name: eval
+
+# Real model-backed agent eval. CI runners have no GPU, so a 7B model runs on CPU
+# (slow) — this is NOT a per-PR gate. It runs weekly and on demand, installs Ollama,
+# pulls a tool-capable model, and runs `ollamadev eval` in text mode. It fails only
+# on a CATASTROPHIC drop (e.g. tool-calling fully broken → 0 passes), which is the
+# exact class of regression the schema bug was — while tolerating normal per-task
+# variance of a small local model.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1'   # Mondays 06:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: none
+      - name: Build the CLI
+        run: bash build.sh
+      - name: Install Ollama
+        run: curl -fsSL https://ollama.com/install.sh | sh
+      - name: Start Ollama and wait for it
+        run: |
+          ollama serve > /tmp/ollama.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:11434/api/tags >/dev/null && break
+            sleep 1
+          done
+      - name: Pull a tool-capable model
+        run: ollama pull qwen2.5-coder:7b
+      - name: Run the eval (text protocol)
+        run: |
+          php ollamadev config set tools.mode text
+          php ollamadev eval --model qwen2.5-coder --json | tee /tmp/eval.json
+      - name: Gate on catastrophic regression (pass rate >= 25%)
+        run: |
+          read pass total rate < <(php -r '$j=json_decode(file_get_contents("/tmp/eval.json"),true); echo (int)($j["pass"]??0)." ".(int)($j["total"]??0)." ".(int)($j["rate"]??0);')
+          echo "eval: $pass/$total passed ($rate%)"
+          if [ "$rate" -lt 25 ]; then
+            echo "::error::Pass rate $rate% (<25%) — likely a real regression (e.g. tool-calling broken). See the log."
+            cat /tmp/ollama.log | tail -40
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-result
+          path: /tmp/eval.json

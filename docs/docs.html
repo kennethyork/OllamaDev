@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Docs — OllamaDev</title>
+<meta name="description" content="OllamaDev documentation: install, commands, permission modes, Crew, skills, graph memory, MCP/LSP, configuration, and troubleshooting.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="index.html"><span class="dot">▰</span> OllamaDev</a>
+    <div class="nav-links">
+      <a href="index.html#features">Features</a>
+      <a href="compare.html">Compare</a>
+      <a href="downloads.html">Download</a>
+      <a href="docs.html">Docs</a>
+      <a class="pill" href="https://github.com/kennethyork/OllamaDev">GitHub ↗</a>
+    </div>
+  </div>
+</nav>
+
+<div class="docs">
+  <aside class="docs-side">
+    <h4>Start here</h4>
+    <a href="#getting-started">Getting started</a>
+    <a href="#three-ways">CLI · Desktop · Web</a>
+    <a href="#installation">Installation</a>
+    <a href="#why-php">Why PHP &amp; make</a>
+    <a href="#develop">Develop with itself</a>
+    <a href="#quick-start">Quick start</a>
+    <h4>Using it</h4>
+    <a href="#commands">CLI commands</a>
+    <a href="#slash">Slash commands</a>
+    <a href="#permissions">Permission modes</a>
+    <a href="#context">Context &amp; input</a>
+    <a href="#workspaces">Workspaces</a>
+    <h4>Power features</h4>
+    <a href="#crew">Crew (multi-agent)</a>
+    <a href="#skills">Skills</a>
+    <a href="#memory">Graph memory</a>
+    <a href="#mcp-lsp">MCP &amp; LSP</a>
+    <a href="#search">Web search</a>
+    <a href="#codeintel">Code intelligence</a>
+    <h4>Reference</h4>
+    <a href="#config">Configuration</a>
+    <a href="#env">Environment vars</a>
+    <a href="#storage">Data storage</a>
+    <a href="#selfhost">Self-hosting (VPS)</a>
+    <a href="#troubleshooting">Troubleshooting</a>
+  </aside>
+
+  <main class="docs-main">
+    <h1>OllamaDev Documentation</h1>
+    <p class="sub">A local, private, dependency-free AI coding agent for your terminal.</p>
+
+    <h2 id="getting-started" class="anchor">Getting started</h2>
+    <p>OllamaDev is a terminal coding agent that runs entirely against your local <a href="https://ollama.com">Ollama</a> instance (or LM Studio). It's a single self-contained <strong>vanilla PHP</strong> binary — no Composer, no extensions beyond PHP core + curl — with diff-previewed edits, undo, an interruptible agent loop, real context management, and 60+ tools.</p>
+    <p><strong>Requirements:</strong></p>
+    <ul>
+      <li><strong>PHP 8.0+</strong> (CLI) with curl — that's it.</li>
+      <li><strong>Ollama</strong> running locally (<code>ollama serve</code>).</li>
+      <li>At least one model pulled, e.g. <code>ollama pull qwen2.5-coder</code>.</li>
+    </ul>
+    <div class="callout">
+      <strong>Recommended models</strong> for reliable tool use: <code>qwen2.5-coder</code>, <code>qwen3-coder</code>, <code>mistral</code>, <code>codestral</code>, <code>llama3.1</code>, <code>gpt-oss</code>.
+    </div>
+
+    <h2 id="three-ways" class="anchor">CLI · Desktop · Web — what each needs</h2>
+    <p>OllamaDev runs three ways, all over the <strong>same local engine</strong> (Ollama/LM Studio), the same agent, tools, crew, and the same shared <code>~/.ollamadev</code> data (sessions, memory, crew packs, skills). Pick one or use all three — work flows between them.</p>
+
+    <p><strong>Shared prerequisite (all three):</strong> a local model server running with at least one model:</p>
+<pre class="code">ollama serve              <span class="cm"># or LM Studio's local server</span>
+ollama pull qwen2.5-coder<button class="copy-btn">Copy</button></pre>
+
+    <table>
+      <thead><tr><th>&nbsp;</th><th>CLI</th><th>Desktop (ADE)</th><th>Web</th></tr></thead>
+      <tbody>
+        <tr><td><strong>What</strong></td><td>terminal agent</td><td>native window</td><td>the ADE in a browser</td></tr>
+        <tr><td><strong>Runtime needed</strong></td><td><strong>nothing</strong> (standalone binary bundles PHP) — or PHP 8.0+ from source</td><td><strong>PHP 8.4+</strong> (Boson runtime)</td><td><strong>PHP 8.0+</strong> + a browser (no Boson)</td></tr>
+        <tr><td><strong>Get it</strong></td><td><code>install.sh</code> or a CLI binary</td><td><code>OllamaDev-ADE-&lt;os&gt;</code> archive</td><td>same archive (bundles <code>web/</code>) or from source</td></tr>
+        <tr><td><strong>Run</strong></td><td><code>ollamadev</code></td><td><code>./OllamaDev-ADE</code></td><td><code>./OllamaDev-Web</code> → <code>localhost:41434</code></td></tr>
+        <tr><td><strong>Best for</strong></td><td>everyday work, scripts, SSH</td><td>a local GUI</td><td>remote / phone / when you're out</td></tr>
+      </tbody>
+    </table>
+
+    <h3>CLI</h3>
+    <p>Zero-dependency standalone binary (PHP is bundled in). Install and run:</p>
+<pre class="code">curl -fsSL https://raw.githubusercontent.com/kennethyork/OllamaDev/main/install.sh | sh
+ollamadev                 <span class="cm"># interactive · or: ollamadev crew "…", ollamadev watch "…"</span><button class="copy-btn">Copy</button></pre>
+    <p>From source instead: PHP 8.0+, then <code>make install</code> (see Installation). Needs only <code>php</code> + <code>curl</code>.</p>
+
+    <h3>Desktop (ADE)</h3>
+    <p>Native windowed GUI (file tree, terminals, crew board, memory graph). Download the archive for your OS, unzip, and run — it bundles the CLI and the Boson libraries:</p>
+<pre class="code">./OllamaDev-ADE           <span class="cm"># Windows: OllamaDev-ADE.bat</span><button class="copy-btn">Copy</button></pre>
+    <p><strong>Needs PHP 8.4+</strong> (the Boson WebView runtime). From source: <code>composer install</code> then <code>php index.php</code>.</p>
+
+    <h3>Web</h3>
+    <p>The same ADE in a browser — no native window, no Boson. The archive bundles a launcher:</p>
+<pre class="code">./OllamaDev-Web           <span class="cm"># Windows: OllamaDev-Web.bat → open http://localhost:41434</span>
+<span class="cm"># from source:  cd Desktop/ollamadev-ade && composer serve</span><button class="copy-btn">Copy</button></pre>
+    <p><strong>Needs PHP 8.0+</strong> and a browser — web mode doesn't load Boson, so the 8.4 desktop requirement doesn't apply (running it from the prebuilt archive needs no Composer at all). Localhost-only by default; for remote access see <a href="#selfhost">Self-hosting on a VPS</a>.</p>
+
+    <p><strong>Using it</strong> — open <code>http://localhost:41434</code> and you get the <em>same</em> ADE as the desktop (it's the identical UI; only the bridge differs), so everything in these docs applies. A quick tour:</p>
+    <ol>
+      <li><strong>Open a project</strong> — click <em>📂 Open</em> and point it at a folder; the file tree, terminals, and Crew all work in that directory.</li>
+      <li><strong>Terminals</strong> — <em>+ Terminal</em> launches the live CLI; ⤢ focuses one full-screen, ⤡ restores it. On a phone, use the touch bar (type a line + Enter, or the Tab/Esc/↑↓/Ctrl-C keys).</li>
+      <li><strong>Crew</strong> — the <em>👥 Crew</em> button runs a multi-agent task; watch it on the <strong>Board</strong> tab (To-do → Doing → Done) with a live pane per coder, and 💡 idea cards when it finishes.</li>
+      <li><strong>Memory &amp; files</strong> — the <strong>Graph</strong> tab shows your knowledge graph; the sidebar edits files (saved straight to disk).</li>
+      <li><strong>Voice</strong> — the 🎤 mic dictates locally (auto-detects a Whisper engine, CPU-only); a header dropdown picks the voice model and 🎙 History lists past transcriptions. Browsers need HTTPS/localhost for the mic — see Self-hosting. Full details under <a href="#context">Context &amp; input</a>.</li>
+    </ol>
+    <p>Because it shares <code>~/.ollamadev</code> with the CLI and desktop, your sessions, memory, and crew packs are the same across all three.</p>
+
+    <h2 id="installation" class="anchor">Installation</h2>
+    <h3>Download a binary (easiest)</h3>
+    <p>Standalone, PHP-free native binaries — nothing else to install. One-liner for Linux/macOS:</p>
+<pre class="code">curl -fsSL https://raw.githubusercontent.com/kennethyork/OllamaDev/main/install.sh | sh<button class="copy-btn">Copy</button></pre>
+    <p>Or pick your platform (CLI + desktop app) on the <a href="downloads.html">Downloads page</a>. Update in place anytime with <code>ollamadev update --install</code>.</p>
+
+    <h3>From source</h3>
+<pre class="code">git clone https://github.com/kennethyork/OllamaDev.git
+cd OllamaDev
+
+<span class="cm"># Build + run the test suite + install to ~/.local/bin/ollamadev</span>
+make install
+
+<span class="cm"># or just build the single-file binary in place</span>
+./build.sh        <span class="cm"># produces ./ollamadev</span><button class="copy-btn">Copy</button></pre>
+    <p><code>make install</code> only installs if the build and the offline smoke suite pass, and it backs up the previously installed binary so you can <code>make rollback</code> instantly. Make sure <code>~/.local/bin</code> is on your <code>PATH</code>, then run <code>ollamadev help</code>.</p>
+
+    <h3>Desktop app (ADE)</h3>
+    <p><strong>OllamaDev ADE</strong> (Agentic Development Environment) is an optional desktop GUI in <code>Desktop/ollamadev-ade/</code> — a <a href="https://github.com/boson-php/boson">Boson</a> WebView app built with vanilla PHP/JS/HTML/CSS (no front-end frameworks). It wraps the agent in a windowed interface with a file browser and a real PTY terminal.</p>
+    <div class="callout warn">Unlike the CLI binary (which is dependency-free), the desktop app uses Composer for the Boson runtime and needs <strong>PHP 8.4+</strong>.</div>
+<p>Grab a prebuilt <strong>desktop archive</strong> for your OS from the <a href="downloads.html">Downloads page</a> — unzip and run <code>./OllamaDev-ADE</code> (Windows: <code>OllamaDev-ADE.bat</code>). It bundles the agent CLI and Boson's platform libraries. Or run from source:</p>
+<pre class="code">cd Desktop/ollamadev-ade
+composer install
+php index.php        <span class="cm"># launch the desktop window (PHP 8.4+)</span>
+composer build       <span class="cm"># package OS archives → dist/binaries/</span><button class="copy-btn">Copy</button></pre>
+    <div class="callout">Boson <code>runtime ^0.19</code> is a runtime, not a compiler — there's no single-file <code>boson compile</code>. The desktop ships as a portable app archive (app + Boson libs + bundled CLI + launcher), so it needs PHP 8.4+ to run, unlike the standalone CLI binary.</div>
+
+    <h4 id="no-install">No-install desktop builds (PHP bundled)</h4>
+    <p>If you'd rather not install PHP 8.4, two self-contained builds bundle their own PHP runtime — download, run, done. Both are on the <a href="downloads.html">Downloads page</a>.</p>
+
+    <p><strong>🐧 Linux — AppImage</strong> (<code>x86_64</code> and <code>aarch64</code>). One portable file with PHP + the Boson libs + the agent CLI <em>and</em> the local voice (whisper.cpp + model) engine baked in — so <code>/voice</code> works offline too. Nothing to install:</p>
+<pre class="code">chmod +x OllamaDev-ADE-x86_64.AppImage   <span class="cm"># or -aarch64 on ARM</span>
+./OllamaDev-ADE-x86_64.AppImage          <span class="cm"># double-click also works</span><button class="copy-btn">Copy</button></pre>
+    <p class="dim">Built with <code>scripts/build-appimage.sh</code> (arch-aware: bundles that arch's PHP + matching Boson lib). The arm64 image is built on a native ARM runner. The <code>.tar.gz</code> archive (system PHP) stays as a fallback.</p>
+
+    <p><strong>🪟 Windows — installer</strong> (<code>OllamaDev-ADE-Setup.exe</code>). A self-contained Inno Setup installer that bundles a PHP 8.4 runtime (with the VC++ runtime + the Boson DLL + the agent CLI), so it installs and runs with <strong>no separate PHP install</strong> — the Windows equivalent of the AppImage. Double-click to install; it adds Start-menu and optional desktop shortcuts and launches windowless via <code>php-win.exe</code>.</p>
+    <div class="callout warn">The installer is unsigned, so on first run Windows SmartScreen may show a “Windows protected your PC” warning — click <em>More info → Run anyway</em>. The <code>.zip</code> archive (system PHP) remains as a fallback.</div>
+    <p class="dim">There's no native macOS app — macOS uses the <code>.tar.gz</code> archive (needs system PHP 8.4+), since a signed/notarized <code>.app</code> requires an Apple Developer account.</p>
+
+    <h3>VS Code extension</h3>
+<pre class="code">cd vscode-extension
+code --install-extension ollamadev-extension.vsix<button class="copy-btn">Copy</button></pre>
+
+    <h2 id="why-php" class="anchor">Why PHP &amp; <code>make install</code>?</h2>
+    <p>OllamaDev is written in <strong>vanilla PHP</strong>. The <code>ollamadev</code> "binary" is a PHP script with a <code>#!/usr/bin/env php</code> shebang — not a compiled executable — so <code>php</code> is its runtime. There's no compile step: you edit the modules in <code>src/</code>, and <code>build.sh</code> concatenates them into one self-contained file you can read and audit.</p>
+    <ul>
+      <li><strong>Why PHP?</strong> It's the project's language and ships almost everywhere. The CLI needs only <code>php</code> 8.0+ and <code>curl</code> — no Composer, no npm, no toolchain. (The desktop app needs PHP 8.4+ for its Boson runtime.)</li>
+      <li><strong>Why <code>make</code>?</strong> It's just a convenience wrapper around the workflow. <code>make install</code> runs <strong>build → test → install</strong> in order, and because each step depends on the previous, it <strong>only installs when the build lints clean and all tests pass</strong> — then backs up the old binary so <code>make rollback</code> is instant.</li>
+    </ul>
+    <p>You can always skip <code>make</code> and do it by hand:</p>
+<pre class="code">./build.sh                    <span class="cm"># concatenate src/ into ./ollamadev</span>
+cp ollamadev ~/.local/bin/    <span class="cm"># install it yourself</span><button class="copy-btn">Copy</button></pre>
+
+    <h2 id="develop" class="anchor">Developing OllamaDev with OllamaDev</h2>
+    <p>You can dogfood it — point the CLI or desktop ADE at this repo and let your local model build features for OllamaDev itself. It's built for that:</p>
+    <ul>
+      <li><strong>Self-modification is guarded.</strong> When Crew detects it's running on the OllamaDev source (it finds <code>build.sh</code> + the <code>OLLAMADEV_VERSION</code> header), it <strong>forces review mode</strong> — every branch is held, nothing auto-merges. Interactive edits still show a diff and ask first; every change is checkpointed (<code>/undo</code> reverts).</li>
+      <li><strong>The vanilla rule is enforced at build time</strong> — no frameworks, no <code>package.json</code>/CDN, deps limited to PHP + Boson — so the agent can't pull in a dependency.</li>
+    </ul>
+    <p>The loop is <strong>edit → review → build → test → verify → commit</strong>:</p>
+    <ol>
+      <li>Run the agent in <code>ask</code> mode (diff + approve), or <code>ollamadev crew "&lt;task&gt;"</code> (review is forced on this repo).</li>
+      <li><strong>Review the diff</strong> before it lands.</li>
+      <li>If <code>src/*.php</code> changed, <strong><code>./build.sh</code></strong> — the running CLI/ADE won't see <code>src/</code> edits until you rebuild <strong>and restart</strong>. Desktop UI edits (<code>public/*</code>) only need a window reload, no build.</li>
+      <li><strong><code>php tests/smoke.php</code></strong> (offline, deterministic) — your safety net.</li>
+      <li>Reload/restart to verify in the real app, then commit when <em>you</em> decide.</li>
+    </ol>
+    <div class="callout">Your local model's quality is the ceiling — keep changes scoped, lean on the diff review + smoke tests + <code>/undo</code>, and don't run it unattended on its own source. A larger coder model (<code>--coder-model &lt;model&gt;</code>) helps for subtle work.</div>
+
+    <h2 id="quick-start" class="anchor">Quick start</h2>
+    <h3>Interactive</h3>
+<pre class="code">ollamadev                      <span class="cm"># start a chat session</span>
+ollamadev --auto               <span class="cm"># auto-approve all tools (no prompts)</span>
+ollamadev --readonly           <span class="cm"># plan mode: block all mutating tools</span>
+ollamadev -m qwen2.5-coder     <span class="cm"># pick a model for this session</span>
+ollamadev resume               <span class="cm"># pick a recent session to resume</span>
+ollamadev -c                   <span class="cm"># continue the most recent session</span><button class="copy-btn">Copy</button></pre>
+    <h3>One-shot</h3>
+<pre class="code">ollamadev -p "explain @src/app.js"
+echo "summarize this" | ollamadev chat<button class="copy-btn">Copy</button></pre>
+
+    <h2 id="commands" class="anchor">CLI commands</h2>
+    <table>
+      <thead><tr><th>Command</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>ollamadev new</code></td><td>New session</td></tr>
+        <tr><td><code>ollamadev list</code></td><td>List sessions</td></tr>
+        <tr><td><code>ollamadev resume</code></td><td>Interactive resume picker</td></tr>
+        <tr><td><code>ollamadev workspace</code> (<code>ws</code>)</td><td>Named project list: <code>list</code> / <code>add</code> / <code>remove</code> / <code>open</code></td></tr>
+        <tr><td><code>ollamadev load &lt;id&gt;</code></td><td>Load a session by id</td></tr>
+        <tr><td><code>ollamadev pull &lt;model&gt;</code></td><td>Download a model from Ollama</td></tr>
+        <tr><td><code>ollamadev init</code></td><td>Generate <code>OLLAMADEV.md</code> project memory</td></tr>
+        <tr><td><code>ollamadev models</code></td><td>List installed models; also <code>presets</code> (recommended), <code>pull &lt;alias&gt;</code>, <code>chain</code> (tool-calling fallback)</td></tr>
+        <tr><td><code>ollamadev eval</code></td><td>Measure the agent's pass rate on a fixed task suite (<code>list</code>, <code>--only</code>, <code>--model</code>, <code>--keep</code>, <code>--json</code>)</td></tr>
+        <tr><td><code>ollamadev crew &lt;task&gt;</code></td><td>Run a multi-agent Crew</td></tr>
+        <tr><td><code>ollamadev transcribe &lt;file&gt;</code></td><td>Local speech-to-text on an audio file (Whisper); <code>--enabled</code> probes for an engine</td></tr>
+        <tr><td><code>ollamadev voice model &lt;size&gt;</code></td><td>Get/set the STT model; also <code>voice install [size]</code> (download the engine), <code>voice history [--json N]</code>, <code>voice status</code>, <code>voice clear-history</code></td></tr>
+        <tr><td><code>ollamadev search &lt;query&gt;</code></td><td>Web search — <code>--provider duckduckgo|searxng|brave</code>, <code>--limit N</code>. Blocked when air-gapped.</td></tr>
+        <tr><td><code>ollamadev index build</code></td><td>Build a local semantic code index (embeddings); also <code>status</code> / <code>clear</code></td></tr>
+        <tr><td><code>ollamadev code-search &lt;query&gt;</code></td><td>Find code by <em>meaning</em> over the local index (<code>--limit N</code>)</td></tr>
+        <tr><td><code>ollamadev test</code></td><td>Run the project's tests (auto-detected)</td></tr>
+        <tr><td><code>ollamadev verify</code></td><td>Run tests, then let the agent fix failures until green (<code>--max N</code>)</td></tr>
+        <tr><td><code>ollamadev diff</code></td><td>Working-tree diff for review (<code>--json</code>); powers the desktop/web <strong>⇄ Review</strong> panel</td></tr>
+        <tr><td><code>ollamadev commit</code></td><td>Commit with an AI-generated message (<code>-a</code> stage all, <code>-m</code> override)</td></tr>
+        <tr><td><code>ollamadev pr create|review &lt;n&gt;</code></td><td>Open a PR, or review one with the local model (needs <code>gh</code>; blocked air-gapped)</td></tr>
+        <tr><td><code>ollamadev config get|set &lt;key&gt; [value]</code></td><td>Inspect or persist settings in <code>~/.ollamadev/config.json</code></td></tr>
+        <tr><td><code>ollamadev skills</code></td><td>List / scaffold / install / export skills</td></tr>
+        <tr><td><code>ollamadev memory</code></td><td>Inspect the graph memory knowledge base</td></tr>
+        <tr><td><code>ollamadev git &lt;cmd&gt;</code></td><td>Run git</td></tr>
+        <tr><td><code>ollamadev terminal ...</code></td><td>Terminal multiplexer</td></tr>
+        <tr><td><code>ollamadev lsp</code></td><td>LSP server mode (for editors)</td></tr>
+        <tr><td><code>ollamadev help [topic]</code></td><td>Help (commands, tools, git, terminal, session, tips)</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="slash" class="anchor">In-chat slash commands</h2>
+    <p>Type <code>/help</code> in a session for the full, grouped list. Highlights:</p>
+    <table>
+      <thead><tr><th>Command</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>/model &lt;name&gt;</code> · <code>/models</code> · <code>/pull &lt;m&gt;</code></td><td>Switch / list / download models</td></tr>
+        <tr><td><code>@path/to/file</code></td><td>Inline a file into your message</td></tr>
+        <tr><td><code>/image &lt;path&gt;</code></td><td>Attach an image (vision models)</td></tr>
+        <tr><td><code>/voice</code> · <code>/voice model &lt;size&gt;</code> · <code>/voice history</code></td><td>Speak your prompt (local Whisper STT, CPU-only) / set accuracy / review transcriptions</td></tr>
+        <tr><td><code>/undo</code> · <code>/checkpoints</code></td><td>Revert the last edit / list checkpoints</td></tr>
+        <tr><td><code>/retry</code></td><td>Regenerate the last response</td></tr>
+        <tr><td><code>/init</code></td><td>Generate <code>OLLAMADEV.md</code> project memory</td></tr>
+        <tr><td><code>/context</code> · <code>/status</code></td><td>Context fill &amp; real token usage</td></tr>
+        <tr><td><code>/permission &lt;mode|allow|deny&gt;</code></td><td>Manage tool approval</td></tr>
+        <tr><td><code>/crew</code> · <code>/skills</code> · <code>/memory</code></td><td>Launch a crew · manage skills · browse memory</td></tr>
+        <tr><td><code>/chat</code> · <code>/agent</code></td><td>Toggle chat-only vs. tool-using mode</td></tr>
+        <tr><td><code>/compact</code> · <code>/new</code> · <code>/tools</code> · <code>/commands</code></td><td>Compact, new session, list tools/custom commands</td></tr>
+      </tbody>
+    </table>
+    <p>The input line supports history (↑/↓), cursor editing, <strong>Tab completion</strong> (commands, paths, model names), and <strong>Ctrl-C</strong> to interrupt a response without quitting.</p>
+
+    <h2 id="permissions" class="anchor">Permission modes</h2>
+    <table>
+      <thead><tr><th>Mode</th><th>Behavior</th><th>Flag</th></tr></thead>
+      <tbody>
+        <tr><td><code>ask</code> (default)</td><td>Prompts before mutating tools (shows the diff)</td><td>—</td></tr>
+        <tr><td><code>auto</code></td><td>Runs every tool without asking</td><td><code>--auto</code> / <code>--yolo</code></td></tr>
+        <tr><td><code>readonly</code></td><td>Blocks all mutating tools (plan mode)</td><td><code>--readonly</code> / <code>--plan</code></td></tr>
+      </tbody>
+    </table>
+    <p>Switch at runtime with <code>/permission mode &lt;auto|ask|readonly&gt;</code>. Sub-agents run <strong>read-only</strong> regardless of the parent mode unless explicitly granted writes.</p>
+
+    <h2 id="context" class="anchor">Context &amp; input</h2>
+    <ul>
+      <li><strong><code>@file</code> mentions</strong> — <code>explain @src/foo.php</code> inlines the file into your message.</li>
+      <li><strong>Image / vision input</strong> — attach images with <code>@image.png</code>, <code>@~/shot.png</code>, or <code>/image &lt;path&gt;</code> for multimodal models. OllamaDev base64-encodes them into Ollama's <code>images</code> field, and warns (pointing at an installed vision model) if the active model can't see — pull one with <code>ollamadev models pull llava</code>.</li>
+      <li><strong>Voice input (local STT) — nothing to install</strong> — <code>/voice</code> records your mic and transcribes it locally, then submits the text as your prompt. The <strong>Whisper engine is baked in</strong>: the desktop builds (AppImage / Windows installer) <strong>bundle</strong> a self-contained <a href="https://github.com/ggerganov/whisper.cpp">whisper.cpp</a> + model so it works instantly &amp; offline; the standalone CLI <strong>auto-downloads</strong> it once on first <code>/voice</code> (into <code>~/.ollamadev/stt</code>), then runs fully offline forever. <strong>CPU-only</strong> — nothing leaves the machine; air-gap mode blocks the one-time download (drop a whisper.cpp binary + ggml model into <code>~/.ollamadev/stt</code> instead, or <code>pip install -U openai-whisper</code>). Press <strong>Enter</strong> to stop. Accuracy: <code>/voice model &lt;tiny|base|small|medium|large-v3|turbo&gt;</code> (<code>small</code> is the CPU sweet spot); history: <code>/voice history</code>; non-interactive install: <code>ollamadev voice install</code>. In the desktop/web app it's the 🎤 mic button plus a voice-model dropdown and a 🎙 History panel in the header.</li>
+      <li><strong>Real token/context meter</strong> — <code>/status</code> and <code>/context</code> show actual token counts and context fill.</li>
+      <li><strong>Auto-compaction</strong> — older messages are summarized by the model to stay within the window. Fires automatically on <strong>real context fill</strong> (≥75% of <code>num_ctx</code>, from Ollama's actual prompt-token count) <em>or</em> a message-count threshold, keeping the most recent turns verbatim and preserving tool output the recent steps still reference. Tune with <code>agents.compactContextPct</code> / <code>agents.compactThreshold</code> / <code>agents.compactKeep</code>; force it with <code>/compact</code>.</li>
+      <li><strong>Checkpoint &amp; undo</strong> — every file change is snapshotted; <code>/undo</code> reverts the last one, <code>/checkpoints</code> lists them.</li>
+    </ul>
+
+    <h2 id="workspaces" class="anchor">Workspaces</h2>
+    <p>A <strong>workspace</strong> is a named project folder you switch between. The list is global — stored once in <code>~/.ollamadev/workspaces.json</code> — so a workspace you add in the terminal shows up in the desktop app and the browser, and vice-versa. Because sessions, graph memory, and Crew runs are already keyed by the working directory, opening a workspace automatically resumes that project's session and memory; workspaces add a named switcher and saved window state on top.</p>
+
+    <h3>Desktop &amp; web</h3>
+    <ul>
+      <li><strong>Project list</strong> — a vertical list at the top of the left pane (under a "Projects" header), one row per workspace. Click a project to switch; the active one is highlighted. The list keeps a stable order so it doesn't jump around.</li>
+      <li><strong>Full state restore</strong> — switching tabs opens that project's folder and brings back its <em>terminals</em>, <em>open editor tabs</em>, <em>layout</em>, and <em>active view</em>. Within a session the terminals <strong>re-attach to their still-running processes</strong> (a build keeps going); after an app restart they respawn fresh.</li>
+      <li><strong>Open / close</strong> — <code>＋ Open project</code> at the bottom of the list (or <code>📂 Open</code>) opens another folder as a new project; <code>×</code> on a row closes it (removes it from the list — your files are untouched), and the neighbouring project takes over.</li>
+      <li>On launch the app reopens your <strong>active</strong> workspace instead of prompting for a folder.</li>
+    </ul>
+    <p class="callout">Tabs are a fast <em>switcher</em>, not split panes — one project fills the window at a time (the others' terminals keep running in the background). To see two projects on screen at once, open the app (or a browser window) twice.</p>
+
+    <h3>CLI</h3>
+    <pre class="code">ollamadev workspace list                 <span class="cm"># show all (* = active)</span>
+ollamadev workspace add [path] [name]    <span class="cm"># add a folder (defaults to the current dir)</span>
+ollamadev workspace remove &lt;name&gt;         <span class="cm"># drop it from the list</span>
+ollamadev workspace open &lt;name&gt;           <span class="cm"># print its path</span>
+
+<span class="cm"># jump to a workspace in your shell:</span>
+cd $(ollamadev workspace open my-app)<button class="copy-btn">Copy</button></pre>
+    <p><code>ws</code> is a shorthand alias for <code>workspace</code>.</p>
+
+    <h2 id="crew" class="anchor">Crew — multi-agent</h2>
+    <p>Crew is a bench of agents: a <strong>Researcher</strong> gathers context, a <strong>Director</strong> plans and decomposes the task, parallel <strong>Coders</strong> implement in isolated git worktrees, and an <strong>Auditor</strong> reviews before anything lands.</p>
+<pre class="code"><span class="cm"># run a task</span>
+ollamadev crew "add a /health route and tests"
+
+<span class="cm"># interactive — configure the team, then prompt the Director live</span>
+ollamadev crew
+
+<span class="cm"># pick a model per role</span>
+ollamadev crew "refactor auth" \
+  --director-model qwen2.5-coder --coder-model codestral
+
+<span class="cm"># run coders across multiple local hosts, in live tmux panes</span>
+ollamadev crew "big refactor" --hosts host-a,host-b --panes<button class="copy-btn">Copy</button></pre>
+    <ul>
+      <li><strong>Per-subtask roles</strong> — the Director tags each subtask with a <strong>role</strong> from a catalog (built-ins: <code>coder</code>, <code>tester</code>, <code>docs</code>, <code>refactor</code>, <code>security</code>), and each coder runs with that role's persona, optional pinned model, and permission mode. The role shows on each card of the live board.</li>
+      <li><strong>Custom roles</strong> — add your own: <code>crew role add &lt;name&gt; "&lt;persona&gt;" [--desc "…"] [--model &lt;m&gt;] [--readonly]</code>; manage with <code>crew role list | show | remove</code>. Or use the <strong>🎭 Manage roles</strong> panel in the desktop/web Crew screen. Roles are plain JSON in <code>~/.ollamadev/crew-roles/</code>, one catalog shared by CLI, desktop, and web.</li>
+      <li><strong>Per-role models</strong> — <code>--director-model</code>, <code>--coder-model</code>, <code>--auditor-model</code>, <code>--researcher-model</code> (a role can also pin its own).</li>
+      <li><strong>Parallel + multi-host</strong> — <code>--hosts a,b,c</code> spreads Coders across local model servers.</li>
+      <li><strong>Live panes</strong> — <code>--panes</code> opens one tmux pane per Coder (logs still written without tmux).</li>
+      <li><strong>Review gating</strong> — <code>--review</code> holds every branch for review; nothing auto-merges. Self-repo edits are gated automatically.</li>
+      <li><strong>Team skill packs</strong> — Crews are seeded with relevant skills by focus; disable with <code>--no-skills</code>.</li>
+    </ul>
+
+    <h2 id="skills" class="anchor">Skills</h2>
+    <p>Skills are reusable instruction packs (<code>SKILL.md</code> folders) the model loads on demand via progressive disclosure — only the catalog of names/descriptions sits in the prompt; the full body is fetched when a skill is invoked. You can author your own and share them.</p>
+<pre class="code">ollamadev skills                       <span class="cm"># list discovered skills</span>
+ollamadev skills new my-skill          <span class="cm"># scaffold a SKILL.md</span>
+ollamadev skills install &lt;dir|git-url|.tar.gz|.zip&gt;
+ollamadev skills export my-skill       <span class="cm"># package to share</span>
+ollamadev skills remove my-skill<button class="copy-btn">Copy</button></pre>
+    <div class="callout warn">A skill is instructions the model may follow. Review what you install — your permission mode (auto/ask/readonly) still gates writes and shell.</div>
+
+    <h2 id="memory" class="anchor">Graph memory</h2>
+    <p>A wiki-linked knowledge base that persists across sessions. Notes link to each other with <code>[[slug]]</code>; the agent sees an index in its prompt and recalls full notes on demand. Two tools drive it: <code>recall</code> (read-only) and <code>remember</code> (write).</p>
+<pre class="code">ollamadev memory                  <span class="cm"># list notes</span>
+ollamadev memory new "API design"  <span class="cm"># create a note</span>
+ollamadev memory show &lt;slug&gt;        <span class="cm"># read a note</span>
+ollamadev memory search &lt;query&gt;     <span class="cm"># search notes</span>
+ollamadev memory graph             <span class="cm"># print the link graph (--json for data)</span><button class="copy-btn">Copy</button></pre>
+    <p>The desktop ADE renders this graph visually in its Memory tab.</p>
+
+    <h2 id="mcp-lsp" class="anchor">MCP &amp; LSP</h2>
+    <p><strong>MCP</strong> — connect Model Context Protocol servers over the standard stdio transport (JSON-RPC 2.0) or an HTTP/SSE fallback. Configure them under <code>mcpServers</code> in your config, or manage at runtime:</p>
+<pre class="code">ollamadev mcp list
+ollamadev mcp add filesystem "npx -y @modelcontextprotocol/server-filesystem /path"<button class="copy-btn">Copy</button></pre>
+    <p><strong>LSP</strong> — built-in code intelligence (goto, find_refs, symbols, hover, diagnostics, format) plus an LSP <em>server</em> mode so editors can use OllamaDev for AI completions and diagnostics: <code>ollamadev lsp --port 4389</code>.</p>
+
+    <h2 id="search" class="anchor">Web search</h2>
+    <p>The agent can search the web (the <code>search</code> tool) and read a page (<code>fetch</code>). Run a search directly, too:</p>
+<pre class="code">ollamadev search "fastify health route" --limit 5
+ollamadev search "rust async" --provider searxng    <span class="cm"># self-hosted instance</span><button class="copy-btn">Copy</button></pre>
+    <ul>
+      <li><strong>Backends</strong> — <code>duckduckgo</code> (default, no key), <code>searxng</code> (self-hosted, most local-first — set <code>search.host</code>), or <code>brave</code> (Brave Search API — set <code>search.key</code> / <code>BRAVE_API_KEY</code>). Choose with <code>search.provider</code> in config or <code>--provider</code> per run.</li>
+      <li><strong>Still local-first</strong> — only your <em>query</em> leaves the machine; the AI stays on your hardware. No code or prompt is sent to a cloud model.</li>
+      <li><strong>Search-only switch</strong> — <code>search.enabled:false</code> (or <code>config set search.enabled false</code>, or the <strong>🔍 Search</strong> top-bar button) turns off web search while leaving <code>fetch</code> and remote git working.</li>
+      <li><strong>Air-gap wins</strong> — <code>--offline</code> / <code>OLLAMADEV_OFFLINE</code> / config <code>offline:true</code> hard-blocks search &amp; fetch &amp; remote git, unwaivably. In the desktop &amp; browser, the <strong>🌐 Web</strong> button toggles this (✈️ Offline when off); both settings are shared with the CLI.</li>
+    </ul>
+
+    <h2 id="codeintel" class="anchor">Code intelligence</h2>
+    <p>Three commands make the agent work like it knows your codebase — all local:</p>
+<pre class="code"><span class="cm"># find code by meaning, not keywords (local embeddings)</span>
+ollamadev index build          <span class="cm"># embed the repo (model: embed.model, default nomic-embed-text)</span>
+ollamadev code-search "where do we gate network tools when offline"
+
+<span class="cm"># test-aware: run the suite, or fix failures until green</span>
+ollamadev test                 <span class="cm"># auto-detects npm/phpunit/composer/go/cargo/pytest/make</span>
+ollamadev verify --max 4       <span class="cm"># run → agent fixes failures → re-run, until green</span>
+
+<span class="cm"># ship it</span>
+ollamadev commit -a            <span class="cm"># AI Conventional Commit message from the diff</span>
+ollamadev pr create            <span class="cm"># push + open a PR (AI title/body) via gh</span>
+ollamadev pr review 42 --comment   <span class="cm"># review a PR with the local model</span><button class="copy-btn">Copy</button></pre>
+    <ul>
+      <li><strong>Semantic search</strong> needs an embedding model pulled once: <code>ollama pull nomic-embed-text</code>. The index lives in <code>.ollamadev/index/</code> and is rebuilt with <code>index build</code>. The agent can call it as the <code>code_search</code> tool, and the desktop/browser have a <strong>🔎 search panel</strong> in the sidebar (type a query → click a result to open it).</li>
+      <li><strong>verify</strong> and the <code>run_tests</code> tool let the agent confirm its own changes; set <code>test.command</code> to override detection.</li>
+      <li><strong>PR commands</strong> use the GitHub CLI (<code>gh</code>) and are blocked in air-gap mode; <code>commit</code> is local and always available.</li>
+    </ul>
+
+    <h2 id="config" class="anchor">Configuration</h2>
+    <p>Config is read from the first of: <code>~/.ollamadev/config.json</code>, <code>~/.config/ollamadev/config.json</code>, <code>.ollamadev.json</code> (project-local). Environment variables override the config file.</p>
+<pre class="code">{
+  "provider": "ollama",
+  "ollama": {
+    "host": "http://localhost:11434",
+    "defaultModel": "qwen2.5-coder:latest",
+    "contextWindow": 16384,
+    "temperature": 0.3,
+    "stream": true
+  },
+  "lmstudio": { "host": "http://localhost:1234/v1" },
+  "model": { "nagWeakModel": true },
+  "stt": { "model": "base", "language": "", "maxSeconds": 60, "host": "", "command": "" },
+  "agents": {
+    "maxIterations": 12,
+    "maxToolOutput": 12000,
+    "subagentPermission": "readonly"
+  },
+  "permissions": { "mode": "ask" },
+  "offline": false,
+  "search": { "enabled": true, "provider": "duckduckgo", "host": "", "key": "" },
+  "embed": { "model": "nomic-embed-text" },
+  "test": { "command": "" },
+  "ui": { "markdown": true },
+  "hooks": { "afterEdit": "echo edited" },
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
+    }
+  }
+}<button class="copy-btn">Copy</button></pre>
+
+    <p class="dim"><strong>Voice (<code>stt</code>)</strong>: <code>model</code> is the Whisper size (<code>tiny</code>…<code>large-v3</code>/<code>turbo</code>); <code>language</code> empty = auto-detect; <code>maxSeconds</code> caps a recording. Leave <code>host</code>/<code>command</code> empty to auto-detect a local Whisper engine — or set <code>command</code> to drive your own (e.g. <code>"whisper-cli -m model.bin -f {file} -nt"</code>) / <code>host</code> for a local transcription server. All local. <strong><code>model.nagWeakModel</code></strong>: set <code>false</code> to silence the startup hint that suggests a stronger installed model for tool use.</p>
+
+    <h3>LM Studio (opt-in local backend)</h3>
+    <p>Ollama is the default. To use LM Studio's local OpenAI-compatible server instead, start its server (Developer → Start Server, port 1234), then:</p>
+<pre class="code">ollamadev --lmstudio              <span class="cm"># this session</span>
+ollamadev --host http://localhost:1234/v1
+<span class="cm"># or set "provider": "lmstudio" in config</span><button class="copy-btn">Copy</button></pre>
+    <div class="callout">Still 100% local: LM Studio uses the OpenAI <em>wire format</em>, but the server runs on your machine. The cloud ban holds — the format is fine, hitting a hosted provider is not.</div>
+
+    <h2 id="env" class="anchor">Environment variables</h2>
+    <table>
+      <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>OLLAMA_HOST</code></td><td><code>http://localhost:11434</code></td><td>Ollama API endpoint</td></tr>
+        <tr><td><code>OLLAMA_MODEL</code></td><td>first installed model</td><td>Default model</td></tr>
+        <tr><td><code>OLLAMA_NUM_CTX</code></td><td><code>16384</code></td><td>Context window size</td></tr>
+        <tr><td><code>OLLAMADEV_PROVIDER</code></td><td><code>ollama</code></td><td>Backend: <code>ollama</code> or <code>lmstudio</code></td></tr>
+        <tr><td><code>LMSTUDIO_HOST</code></td><td><code>http://localhost:1234/v1</code></td><td>LM Studio endpoint</td></tr>
+        <tr><td><code>OLLAMADEV_SERVE_PORT</code></td><td><code>41434</code></td><td>Web-mode port (chosen to avoid clashes — mirrors Ollama's <code>11434</code>, clear of 8080 and other common dev ports)</td></tr>
+        <tr><td><code>OLLAMADEV_SERVE_HOST</code></td><td><code>localhost</code></td><td>Web-mode bind address. Leave as <code>localhost</code> (use a tunnel/VPN for remote); only set to <code>0.0.0.0</code> with a token + firewall</td></tr>
+        <tr><td><code>OLLAMADEV_SERVE_TOKEN</code></td><td><em>(none)</em></td><td>Required auth token for every web API call. Unset = open to anyone who can reach the port, so always set it for remote use</td></tr>
+        <tr><td><code>OLLAMADEV_OFFLINE</code></td><td><em>(unset)</em></td><td>Air-gapped mode — hard-blocks every network tool (search, fetch, remote git), unwaivable. Same as <code>--offline</code> or config <code>offline:true</code></td></tr>
+        <tr><td><code>BRAVE_API_KEY</code></td><td><em>(none)</em></td><td>API key for the Brave Search backend (only if <code>search.provider</code> is <code>brave</code>)</td></tr>
+      </tbody>
+    </table>
+    <p class="dim">The web app listens on <code>http://localhost:41434</code> by default. Change it with <code>OLLAMADEV_SERVE_PORT=&lt;port&gt;</code> (or <code>PORT=</code> for the VPS script).</p>
+
+    <h2 id="storage" class="anchor">Data storage</h2>
+    <ul>
+      <li>Sessions: <code>~/.ollamadev/sessions/</code></li>
+      <li>Checkpoints: <code>~/.ollamadev/checkpoints/</code></li>
+      <li>Terminals: <code>~/.ollamadev/terminals/</code></li>
+      <li>Custom commands: <code>~/.ollamadev/commands/</code></li>
+    </ul>
+    <p>Put a prompt template in <code>~/.ollamadev/commands/review.md</code> (supports <code>$ARGS</code> / <code>$1</code>) and invoke it as <code>/review ...</code>. Configure <code>hooks.beforePrompt</code> / <code>hooks.afterEdit</code> shell commands to run at those points.</p>
+
+    <h2 id="selfhost" class="anchor">Self-hosting on a VPS</h2>
+    <p>Run OllamaDev on a server you control and reach it from anywhere — handy when you're away from your desktop. Everything still runs on <em>your</em> box (a VPS is your server, not a cloud AI provider), so it stays self-hosted.</p>
+
+    <h3>Two ways to use it remotely</h3>
+    <p>Both run the <em>same</em> agent on the VPS — they differ only in the front-end you drive it with. You don't need both; pick what fits the moment.</p>
+    <table>
+      <thead><tr><th>Path</th><th>What you do</th><th>Best for</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Plain SSH + the CLI</strong><br><span class="dim">no web server, no tunnel, no token</span></td>
+          <td><code>ssh you@your-vps</code> then <code>ollamadev</code></td>
+          <td>A terminal you're already in (laptop). The full agent — diffs, undo, Crew, memory — in the shell.</td>
+        </tr>
+        <tr>
+          <td><strong>SSH tunnel + web mode</strong><br><span class="dim">the browser GUI</span></td>
+          <td><code>ssh -L 41434:localhost:41434 you@your-vps</code>, then open <code>http://localhost:41434/?token=…</code></td>
+          <td>A graphical interface on a phone/tablet — file tree, editor, Crew board, memory graph, touch terminals, voice.</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="callout">The browser interface <em>is</em> web mode — the SSH tunnel is just the secure pipe that carries it, not a separate version. If the terminal CLI over SSH is enough for you, you don't need to run the web server at all. The rest of this page sets up web mode (the GUI path); the CLI path needs nothing beyond <code>ollamadev</code> on the VPS.</div>
+
+    <h3>One-shot setup script</h3>
+    <p>Installs Ollama + a model, fetches the ADE, and starts web mode <strong>bound to <code>localhost</code> with a randomly-generated auth token</strong> — so it is not reachable from the internet and even other users on the box can't use it without the token. Then reach it over an SSH tunnel:</p>
+<pre class="code"><span class="cm"># PHP 8.0+ must already be installed (e.g. sudo apt install -y php-cli)</span>
+curl -fsSL https://raw.githubusercontent.com/kennethyork/OllamaDev/main/scripts/vps-setup.sh | bash
+<span class="cm"># override: MODEL=llama3.2:3b PORT=41434 CLI=0 FIREWALL=1 … | bash</span><button class="copy-btn">Copy</button></pre>
+    <div class="callout">It picks a small-model default, sets up an always-on systemd service when it can, generates an <code>OLLAMADEV_SERVE_TOKEN</code>, and prints your token plus the exact <code>ssh -L</code> tunnel command and <code>http://localhost:PORT/?token=…</code> URL at the end. Pass <code>FIREWALL=1</code> to also enable <code>ufw</code> (it allows SSH first, then keeps the app port private). Set <code>OLLAMADEV_SERVE_TOKEN</code> yourself to pin a specific token. Prefer to do it by hand? The manual steps follow.</div>
+
+    <h3>1. Install Ollama + a model</h3>
+<pre class="code">curl -fsSL https://ollama.com/install.sh | sh   <span class="cm"># installs + a systemd service</span>
+systemctl status ollama                          <span class="cm"># runs on localhost:11434</span>
+ollama pull qwen2.5-coder:7b                      <span class="cm"># or a smaller model — see the note</span><button class="copy-btn">Copy</button></pre>
+    <div class="callout warn">Most VPSes have <strong>no GPU</strong>, so inference is CPU-bound (slower) and model size is capped by RAM. Prefer small models (<code>llama3.2:3b</code>, <code>qwen2.5-coder:3b/7b</code>). Run <code>ollamadev context</code> on the VPS for a num_ctx that fits its memory. Expect lower quality than a local GPU box.</div>
+
+    <h3>2. Get the web app + run it</h3>
+    <p>On a headless VPS, download and extract the ADE archive (it bundles the agent CLI and needs no Boson), then start the browser app. Pick <code>linux-x64</code> or <code>linux-arm64</code> to match your VPS:</p>
+<pre class="code"><span class="cm"># download + extract the ADE (one line, no GUI needed)</span>
+curl -fsSL https://github.com/kennethyork/OllamaDev/releases/latest/download/OllamaDev-ADE-linux-x64.tar.gz | tar -xz
+cd OllamaDev-ADE
+./OllamaDev-Web            <span class="cm"># → http://localhost:41434  (needs PHP 8.0+)</span><button class="copy-btn">Copy</button></pre>
+    <p>That's all web mode needs — the archive ships its own <code>bin/ollamadev</code>. If you <em>also</em> want the <code>ollamadev</code> command in your shell (for crew/watch over SSH), add the standalone CLI too:</p>
+<pre class="code">curl -fsSL https://raw.githubusercontent.com/kennethyork/OllamaDev/main/install.sh | sh<button class="copy-btn">Copy</button></pre>
+
+    <h3>3. Reach it securely from anywhere</h3>
+    <p>The web app exposes shell, PTY, and file-write over HTTP — <strong>never put it on the open internet raw.</strong> Two safe options:</p>
+    <p><strong>Best — SSH tunnel</strong> (keep it localhost on the VPS, encrypt the hop):</p>
+<pre class="code"><span class="cm"># on your laptop:</span>
+ssh -L 41434:localhost:41434 you@your-vps
+<span class="cm"># then open http://localhost:41434/?token=… — traffic is tunnelled, nothing public</span><button class="copy-btn">Copy</button></pre>
+    <p>With this setup the app is on <code>127.0.0.1</code> only, so the <em>sole</em> way in from outside is forwarding the port over SSH — which means <strong>only someone who can SSH into that account can reach the ADE</strong>, and access lasts exactly as long as the tunnel is open. To make that truly just you, lock SSH to your key:</p>
+<pre class="code"><span class="cm"># on the VPS — key-only SSH, no passwords:</span>
+sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+sudo systemctl restart ssh<button class="copy-btn">Copy</button></pre>
+    <p>The <code>OLLAMADEV_SERVE_TOKEN</code> is then a second lock — even another user already on the box can't use the API without it. (<a href="https://tailscale.com">Tailscale</a> gives the same guarantee for phones without an SSH client: the port is reachable only from your private tailnet.)</p>
+    <p><strong>Or bind public with a token</strong> (and firewall the port to your IP):</p>
+<pre class="code">export OLLAMADEV_SERVE_TOKEN="$(openssl rand -hex 16)"
+OLLAMADEV_SERVE_HOST=0.0.0.0 ./OllamaDev-Web
+<span class="cm"># open http://your-vps:41434/?token=&lt;the token&gt;</span><button class="copy-btn">Copy</button></pre>
+    <div class="callout">Keep Ollama's port <code>11434</code> private (localhost). Only the web app port is exposed, and only behind a tunnel or token + firewall. For sensitive code, prefer your local desktop — a VPS is yours, but it's off your machine.</div>
+
+    <h3>HTTPS &amp; the microphone</h3>
+    <p>Ollama serves plain HTTP and has no built-in TLS — but it doesn't need it here: OllamaDev talks to Ollama over <code>localhost</code> on the VPS, which never leaves the box. The hop that crosses the internet is <strong>your browser → the web app</strong>, and that's what to encrypt:</p>
+    <ul>
+      <li><strong>SSH tunnel (simplest)</strong> — encrypts the hop and makes the app <code>localhost</code> on your device; no certificates.</li>
+      <li><strong>HTTPS via a reverse proxy</strong> — front the web app with <a href="https://caddyserver.com">Caddy</a> (automatic Let's Encrypt) or nginx, and pair it with <code>OLLAMADEV_SERVE_TOKEN</code>:</li>
+    </ul>
+<pre class="code"><span class="cm"># Caddyfile — terminates HTTPS, proxies to the local web app</span>
+ade.example.com {
+    reverse_proxy localhost:41434
+}<button class="copy-btn">Copy</button></pre>
+    <div class="callout warn"><strong>The mic needs a secure context.</strong> Browsers only allow the microphone (the voice-input feature) over <strong>HTTPS or <code>localhost</code></strong>. So voice works over an SSH tunnel (it's localhost) or behind HTTPS — but on plain <code>http://your-vps:41434</code> the browser silently blocks it. For remote voice, use the tunnel or real HTTPS.</div>
+
+    <h3>Using it from your phone</h3>
+    <p>The ADE is responsive, so once the VPS is reachable you can drive it from a phone browser — file tree, crew board, memory graph, terminals (with the touch key bar), even voice. No control panel needed.</p>
+
+    <p><strong>First, keep the server running</strong> so it survives your SSH session ending — a tiny systemd service:</p>
+<pre class="code"><span class="cm"># /etc/systemd/system/ollamadev-web.service</span>
+[Unit]
+Description=OllamaDev ADE (web)
+After=network.target
+[Service]
+WorkingDirectory=/home/you/OllamaDev-ADE
+ExecStart=/home/you/OllamaDev-ADE/OllamaDev-Web
+Restart=on-failure
+User=you
+[Install]
+WantedBy=multi-user.target<button class="copy-btn">Copy</button></pre>
+<pre class="code">sudo systemctl enable --now ollamadev-web   <span class="cm"># now always serving localhost:41434 on the VPS</span><button class="copy-btn">Copy</button></pre>
+
+    <p><strong>Option A — SSH tunnel from the phone</strong> (simple; voice works because it's <code>localhost</code>):</p>
+    <ul>
+      <li>Install a phone SSH app that supports port forwarding — <strong>Termius</strong> (iOS/Android), <strong>Blink</strong> (iOS), or <strong>JuiceSSH</strong> (Android).</li>
+      <li>Add a <em>local port forward</em>: phone <code>localhost:41434</code> → VPS <code>localhost:41434</code>, then connect.</li>
+      <li>Open <code>http://localhost:41434</code> in the phone's browser. That's it.</li>
+    </ul>
+
+    <p><strong>Option B — Tailscale</strong> (easiest on a phone, and gives HTTPS so the mic works without an SSH app):</p>
+<pre class="code"><span class="cm"># on the VPS</span>
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+sudo tailscale serve --bg 41434     <span class="cm"># serves localhost:41434 as HTTPS on your tailnet</span><button class="copy-btn">Copy</button></pre>
+    <ul>
+      <li>Install the <strong>Tailscale</strong> app on your phone and sign in with the same account.</li>
+      <li>Open the <code>https://&lt;host&gt;.&lt;tailnet&gt;.ts.net</code> URL that <code>serve</code> prints — done. No SSH, no certificates, and voice works (it's HTTPS).</li>
+    </ul>
+
+    <div class="callout">Both ways keep Ollama (<code>11434</code>) and the app (<code>41434</code>) bound to <code>localhost</code> on the VPS — nothing is exposed to the public internet. Your phone reaches them only through the encrypted SSH tunnel or your private tailnet.</div>
+
+    <h2 id="troubleshooting" class="anchor">Troubleshooting</h2>
+    <p><strong>Cannot connect to Ollama</strong> — start it with <code>ollama serve</code>, or set <code>OLLAMA_HOST</code>. (On launch, OllamaDev prints the exact fix-up steps for whichever backend is configured.)</p>
+    <p><strong>Model not found / no models installed</strong> — <code>ollama pull qwen2.5-coder</code>, or just <code>/pull qwen2.5-coder</code> in-session.</p>
+    <p><strong>Unreliable tool use</strong> — small models struggle with tool-calling; try a recommended model (qwen2.5-coder, mistral, codestral) or use <code>/chat</code> for plain conversation.</p>
+    <p><strong>Permission denied running the binary</strong> — <code>chmod +x ~/.local/bin/ollamadev</code>.</p>
+    <p><strong>Need to undo a change</strong> — <code>/undo</code> reverts the last edit; <code>/checkpoints</code> lists every snapshot. Rolling back an install: <code>make rollback</code>.</p>
+  </main>
+</div>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <div>OllamaDev · GPL-3.0 licensed · 100% local AI coding</div>
+    <div class="links">
+      <a href="index.html">Home</a>
+      <a href="https://github.com/kennethyork/OllamaDev">GitHub</a>
+      <a href="https://ollama.com">Ollama</a>
+    </div>
+  </div>
+</footer>
+
+<script src="site.js"></script>
+</body>
+</html>

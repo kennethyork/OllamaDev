@@ -1,0 +1,177 @@
+name: release
+
+# Cut a release by pushing a tag:  git tag v4.1.0 && git push --tags
+# Produces standalone, PHP-free downloads for both the CLI (phpacker) and the
+# desktop app (Boson), attached to the GitHub Release the website links to.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build/upload for'
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  # Create (or reuse) the GitHub Release the other jobs upload assets to.
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Ensure a release exists for ${{ env.TAG }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 \
+            || gh release create "$TAG" --title "$TAG" --generate-notes
+      - name: Attach the GPL-3.0 license to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" LICENSE --clobber
+
+  # ---- CLI: one Linux runner cross-builds every target (phpacker fetches
+  # prebuilt php-micro runtimes per OS/arch), so all binaries come from here.
+  cli:
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer
+      - name: Build standalone CLI binaries (all platforms)
+        run: scripts/build-binary.sh all
+      - name: Upload CLI binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist/binaries/* --clobber
+
+  # ---- Whisper STT engine: a tiny, self-contained whisper.cpp CLI binary built
+  # natively per platform (no cross-compile). These power /voice's "bake-in":
+  # the desktop builds bundle them, and the standalone CLI auto-fetches the right
+  # one (whisper-<os>-<arch>) from the release on first /voice. Models (ggml-*.bin)
+  # come from Hugging Face at runtime, so they're not built here.
+  whisper:
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-latest,    asset: whisper-linux-x64 }
+          - { runner: ubuntu-24.04-arm, asset: whisper-linux-arm64 }
+          - { runner: macos-14,         asset: whisper-mac-arm64 }
+          - { runner: macos-13,         asset: whisper-mac-x64 }
+    runs-on: ${{ matrix.runner }}
+    env:
+      WHISPER_REF: v1.7.5
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build whisper.cpp (self-contained, CPU)
+        run: scripts/build-whisper.sh
+      - name: Upload ${{ matrix.asset }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" "dist/whisper/${{ matrix.asset }}" --clobber
+
+  # ---- Whisper for Windows: cmake on a Windows runner (the bash script is
+  # unix-only). Statically linked so it's a single .exe.
+  whisper-windows:
+    needs: create-release
+    runs-on: windows-latest
+    env:
+      WHISPER_REF: v1.7.5
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build whisper.cpp (Windows, static)
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch $env:WHISPER_REF https://github.com/ggerganov/whisper.cpp wcpp
+          cmake -S wcpp -B wcpp/build -DCMAKE_BUILD_TYPE=Release `
+            -DBUILD_SHARED_LIBS=OFF -DGGML_OPENMP=OFF -DGGML_NATIVE=OFF `
+            -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF
+          cmake --build wcpp/build --config Release --target whisper-cli
+          New-Item -ItemType Directory -Force dist/whisper | Out-Null
+          $bin = Get-ChildItem -Recurse wcpp/build -Filter whisper-cli.exe | Select-Object -First 1
+          Copy-Item $bin.FullName dist/whisper/whisper-windows-x64.exe
+      - name: Upload whisper-windows-x64.exe
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$env:TAG" dist/whisper/whisper-windows-x64.exe --clobber
+
+  # ---- Desktop: Boson 0.19 is a runtime (FFI + shared libs), not a compiler, so
+  # there's no single-binary compile step. We package the app + its vendored Boson
+  # libs + the bundled CLI + a launcher into one archive per OS (mac/windows/linux),
+  # PLUS a self-contained Linux AppImage that bundles a PHP 8.4 runtime so it runs
+  # with no install. One Linux runner builds them all.
+  desktop:
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: ffi, curl       # the AppImage bundles these for Boson
+          tools: composer
+      - name: Install AppImage tooling
+        run: sudo apt-get update -qq && sudo apt-get install -y squashfs-tools
+      - name: Build desktop archives + Linux AppImage (CLI bundled)
+        run: scripts/build-appimage.sh   # runs build-desktop.sh, then packs the AppImage
+      - name: Upload desktop archives + AppImage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist/binaries/OllamaDev-ADE-* --clobber
+
+  # ---- Linux arm64 AppImage: built on a native arm64 runner (an AppImage must
+  # bundle arch-specific PHP + the matching Boson lib, so it can't be cross-built
+  # from x86_64). Uploads only the aarch64 AppImage; the archives come from the
+  # x86_64 desktop job above (they're arch-independent).
+  desktop-arm64:
+    needs: create-release
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: ffi, curl
+          tools: composer
+      - name: Install AppImage tooling
+        run: sudo apt-get update -qq && sudo apt-get install -y squashfs-tools
+      - name: Build the Linux arm64 AppImage
+        run: scripts/build-appimage.sh
+      - name: Upload the arm64 AppImage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist/binaries/OllamaDev-ADE-aarch64.AppImage --clobber
+
+  # ---- Windows installer: a self-contained .exe (Inno Setup) that bundles a
+  # PHP 8.4 runtime + the Boson Windows DLL + the app + CLI, so it installs and
+  # runs with no PHP install. Built on a Windows runner (PHP + Inno are Windows
+  # tools). The .zip archive (system PHP) stays as a fallback.
+  desktop-windows:
+    needs: [create-release, whisper-windows]   # installer bundles the whisper .exe
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: ffi, curl, mbstring, openssl, fileinfo
+      - name: Build the Windows installer
+        shell: pwsh
+        run: scripts/windows/build-installer.ps1
+      - name: Upload the installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$env:TAG" dist/binaries/OllamaDev-ADE-Setup.exe --clobber

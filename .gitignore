@@ -1,0 +1,14 @@
+.ollamadev/sessions/
+.ollamadev/checkpoints/
+.ollamadev/costs/
+.ollamadev/terminals/
+.ollamadev.json
+
+# Runtime data (sessions/terminals) wherever it appears, e.g. the desktop app
+**/.ollamadev/
+
+# Build-time artifacts (standalone-binary toolchain + outputs)
+.build/
+dist/binaries/
+.whisper-build/
+dist/whisper/

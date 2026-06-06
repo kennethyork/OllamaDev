@@ -1,0 +1,20 @@
+{
+    "name": "ollamadev/ade",
+    "description": "OllamaDev ADE - Agentic Development Environment",
+    "type": "project",
+    "license": "GPL-3.0-or-later",
+    "require": {
+        "php": "^8.4",
+        "boson-php/runtime": "^0.19"
+    },
+    "autoload": {
+        "psr-4": {
+            "OllamaDev\\": "src/"
+        }
+    },
+    "scripts": {
+        "start": "php -S localhost:41434 -t public",
+        "serve": "php -S localhost:41434 web/server.php",
+        "build": "bash ../../scripts/build-desktop.sh"
+    }
+}
