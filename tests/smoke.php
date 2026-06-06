@@ -480,6 +480,17 @@ ok('desktop opens a dedicated Director terminal on crew launch', strpos($ajs, 'o
 ok('desktop terminals support a per-terminal working folder', strpos($bind, 'termCreate(string $id, string $model, string $cwd') !== false &&
     strpos($ajs, 'changeTermFolder') !== false && strpos($ajs, "class=\"term-cd\"") !== false &&
     strpos($ajs, 'cdPrefix: function (cwd)') !== false && strpos($ajs, 'expandHome') !== false);
+// Desktop Skills manager: list / view / create-edit / remove, backed by the CLI.
+$shk = sys_get_temp_dir() . '/skills_mgr_' . getmypid(); @mkdir($shk, 0777, true);
+[$so, , $sc] = run_bin(['skills', 'save', 'Demo Skill'], '{"description":"d","body":"# Demo\nBody."}', ['HOME' => $shk]);
+[$sl] = run_bin(['skills', 'list', '--json'], '', ['HOME' => $shk]);
+[$sg] = run_bin(['skills', 'show', 'Demo Skill', '--json'], '', ['HOME' => $shk]);
+ok('skills save/list/show --json round-trip (CLI surface for the desktop)', $sc === 0 &&
+    strpos($sl, '"name":"Demo Skill"') !== false && strpos($sg, '"body":"# Demo') !== false);
+shell_exec('rm -rf ' . escapeshellarg($shk));
+ok('desktop exposes skill bindings + a Skills manager UI', strpos($bind, 'function skillsList') !== false &&
+    strpos($bind, 'function skillsSave') !== false && strpos($bind, "'skillsList'") !== false &&
+    strpos($ajs, 'var SkillMgr') !== false && strpos($ajs, 'SkillMgr.bind()') !== false);
 // Desktop: a cleared sentinel wipes the localStorage-only manual cards (once, watermarked).
 $appjs = (string) @file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/app.js');
 ok('desktop applies the cleared sentinel to manual cards', strpos($appjs, 'ade.boardCleared') !== false &&

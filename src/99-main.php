@@ -1120,6 +1120,32 @@ if ($argc >= 2 && $argv[1] === 'models') {
 // Skills Command - list / scaffold on-demand skills
 if ($argc >= 2 && $argv[1] === 'skills') {
     $sub = $argv[2] ?? 'list';
+    $jsonMode = in_array('--json', $argv, true);
+    // JSON surfaces for the desktop Skills manager (list / show / save).
+    if (($sub === 'list' || $sub === 'ls') && $jsonMode) {
+        $out = [];
+        foreach (Skills::all() as $s) $out[] = ['name' => $s['name'], 'description' => $s['description'] ?? '', 'dir' => $s['dir'] ?? ''];
+        echo json_encode(['skills' => $out]); exit(0);
+    }
+    if ($sub === 'show' || $sub === 'get') {
+        $name = $argv[3] ?? '';
+        $s = $name !== '' ? Skills::get($name) : null;
+        if ($jsonMode) {
+            if (!$s) { echo json_encode(['error' => 'not found']); exit(0); }
+            $body = preg_replace('/^---\s*\n.*?\n---\s*\n/s', '', (string)($s['body'] ?? ''));
+            echo json_encode(['name' => $s['name'], 'description' => $s['description'] ?? '', 'body' => ltrim((string)$body), 'files' => $s['files'] ?? []]); exit(0);
+        }
+        if (!$s) { echo "No such skill: $name\n"; exit(1); }
+        echo ($s['body'] ?? '') . "\n"; exit(0);
+    }
+    if ($sub === 'save') {
+        $name = $argv[3] ?? '';
+        if ($name === '') { echo "Usage: ollamadev skills save <name>  (JSON {description, body} on stdin)\n"; exit(1); }
+        $payload = json_decode((string) stream_get_contents(STDIN), true);
+        if (!is_array($payload)) $payload = [];
+        $slug = Skills::save($name, (string)($payload['description'] ?? ''), (string)($payload['body'] ?? ''));
+        echo $slug ? "Saved: $slug\n" : "Save failed.\n"; exit($slug ? 0 : 1);
+    }
     if ($sub === 'new' || $sub === 'add') {
         $name = $argv[3] ?? '';
         if ($name === '') { echo "Usage: ollamadev skills new <name>\n"; exit(1); }

@@ -851,6 +851,73 @@ var Roles = {
     }
 };
 
+// ---------- Skills: reusable instructions the agent/crew load on demand ----------
+// Backed by the CLI (window.skills*) → ~/.ollamadev/skills, one catalog for all surfaces.
+var SkillMgr = {
+    skills: [],
+    bind: function () {
+        var self = this;
+        var open = $('#manageSkills'); if (open) open.onclick = function (e) { e.preventDefault(); self.open(); };
+        var close = $('#skillsClose'); if (close) close.onclick = function () { self.close(); };
+        var ov = $('#skillsOverlay'); if (ov) ov.onclick = function (e) { if (e.target === ov) self.close(); };
+        var save = $('#skillSave'); if (save) save.onclick = function () { self.save(); };
+    },
+    open: function () { var ov = $('#skillsOverlay'); if (!ov) return; ov.hidden = false; this.clearForm(); this.load(); },
+    close: function () { var ov = $('#skillsOverlay'); if (ov) ov.hidden = true; },
+    load: function () {
+        var self = this;
+        if (!window.skillsList) { this.render({ skills: [] }); return Promise.resolve(); }
+        return Promise.resolve(window.skillsList()).then(function (d) { self.render(d); }).catch(function () { self.render({ skills: [] }); });
+    },
+    render: function (d) {
+        var box = $('#skillsList'); if (!box) return;
+        var self = this;
+        var skills = (d && Array.isArray(d.skills)) ? d.skills : [];
+        this.skills = skills;
+        if (!skills.length) { box.innerHTML = '<div class="board-empty">No skills yet — create one below.</div>'; return; }
+        box.innerHTML = skills.map(function (s) {
+            return '<div class="role-row"><div class="role-main"><span class="role-name">' + esc(s.name) + '</span>' +
+                '<div class="role-desc dim">' + esc(s.description || 'no description') + '</div></div>' +
+                '<button class="role-edit" data-skill="' + esc(s.name) + '" title="Edit this skill">✎</button>' +
+                '<button class="role-del" data-skill="' + esc(s.name) + '" title="Remove this skill">✕</button></div>';
+        }).join('');
+        box.querySelectorAll('.role-edit').forEach(function (b) { b.onclick = function () { self.edit(b.dataset.skill); }; });
+        box.querySelectorAll('.role-del').forEach(function (b) { b.onclick = function () { self.remove(b.dataset.skill); }; });
+    },
+    edit: function (name) {
+        if (!window.skillsGet) return;
+        Promise.resolve(window.skillsGet(name)).then(function (s) {
+            if (!s || s.error) { banner('could not load skill', 'err'); return; }
+            if ($('#skillName')) $('#skillName').value = s.name || name;
+            if ($('#skillDesc')) $('#skillDesc').value = s.description || '';
+            if ($('#skillBody')) $('#skillBody').value = s.body || '';
+            var box = $('#skillAddBox'); if (box) box.open = true;
+            var n = $('#skillName'); if (n) n.focus();
+        }).catch(function () { banner('could not load skill', 'err'); });
+    },
+    save: function () {
+        var self = this;
+        var name = (($('#skillName') || {}).value || '').trim();
+        var desc = (($('#skillDesc') || {}).value || '').trim();
+        var body = (($('#skillBody') || {}).value || '').trim();
+        if (!name) { banner('give the skill a name', 'err'); return; }
+        if (!body) { banner('a skill needs instructions', 'err'); return; }
+        if (!window.skillsSave) { banner('skills unavailable here', 'err'); return; }
+        Promise.resolve(window.skillsSave(name, desc, body)).then(function (d) {
+            if (d && d.error) { banner(d.error, 'err'); return; }
+            self.render(d); self.clearForm();
+            var box = $('#skillAddBox'); if (box) box.open = false;
+            banner('skill "' + name + '" saved', 'ok');
+        }).catch(function () { banner('could not save skill', 'err'); });
+    },
+    remove: function (name) {
+        var self = this;
+        if (!name || !window.skillsRemove) return;
+        Promise.resolve(window.skillsRemove(name)).then(function (d) { self.render(d); banner('skill "' + name + '" removed', 'ok'); }).catch(function () { banner('could not remove skill', 'err'); });
+    },
+    clearForm: function () { ['#skillName', '#skillDesc', '#skillBody'].forEach(function (id) { var el = $(id); if (el) el.value = ''; }); }
+};
+
 // ---------- Network toggles, shared with the CLI via config ----------
 // 🌐 Web = the air-gap (offline) flag: all network tools (search/fetch/remote git).
 // 🔍 Search = a finer switch for web search only (fetch/git unaffected).
@@ -1270,6 +1337,7 @@ var App = {
         Graph.bind();
         Workspaces.bind();
         Roles.bind();
+        SkillMgr.bind();
         Net.bind(); Net.load();
         Browser.bind();
         CodeSearch.bind();

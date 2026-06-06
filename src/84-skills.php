@@ -237,6 +237,21 @@ class Skills {
         }
         return $md;
     }
+
+    // Create or overwrite a user skill at ~/.ollamadev/skills/<slug>/SKILL.md.
+    // Returns the slug, or null on failure. Powers the desktop Skills manager.
+    public static function save(string $name, string $description, string $body): ?string {
+        $name = trim($name);
+        if ($name === '') return null;
+        $slug = trim(strtolower(preg_replace('/[^a-zA-Z0-9._-]+/', '-', $name)), '-._');
+        if ($slug === '') return null;
+        $home = getenv('HOME') ?: sys_get_temp_dir();
+        $dir = $home . '/.ollamadev/skills/' . $slug;
+        if (!@mkdir($dir, 0755, true) && !is_dir($dir)) return null;
+        $desc = trim(preg_replace('/\s+/', ' ', $description));
+        $fm = "---\nname: " . $name . "\ndescription: " . ($desc !== '' ? $desc : 'One line on when to use this skill.') . "\n---\n\n";
+        return @file_put_contents($dir . '/SKILL.md', $fm . ltrim($body) . "\n") !== false ? $slug : null;
+    }
 }
 
 // The `skill` tool: load a skill's full instructions on demand.

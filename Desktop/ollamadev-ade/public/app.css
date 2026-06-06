@@ -422,6 +422,9 @@ textarea.field { min-height: 84px; resize: vertical; line-height: 1.5; }
 .role-row .role-desc { margin-top: 4px; font-size: 12px; word-break: break-word; }
 .role-del { flex: none; background: var(--bg3); border: 1px solid var(--border); color: var(--dim); border-radius: 5px; width: 24px; height: 24px; cursor: pointer; }
 .role-del:hover { color: var(--err); border-color: var(--err); }
+.role-edit { flex: none; background: var(--bg3); border: 1px solid var(--border); color: var(--dim); border-radius: 5px; width: 24px; height: 24px; cursor: pointer; margin-left: 6px; }
+.role-edit:hover { color: var(--accent); border-color: var(--accent); }
+#skillBody { min-height: 140px; }
 .card.crew .cmeta { margin-top: 6px; font-size: 11px; color: var(--dim); }
 .card.crew.held .cmeta { color: var(--warn); }
 

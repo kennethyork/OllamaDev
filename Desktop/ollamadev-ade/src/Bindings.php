@@ -29,6 +29,7 @@ final class Bindings
         'reviewDiff', 'temperature', 'setTemperature',
         'sttModel', 'setSttModel', 'sttHistory', 'sttClearHistory',
         'openExternal', 'proxyFetch', 'crewModels', 'crewSteer',
+        'skillsList', 'skillsGet', 'skillsSave', 'skillsRemove',
     ];
 
     // Dispatch an allow-listed call with positional args (used by server.php).
@@ -107,6 +108,42 @@ final class Bindings
         $entry = ['target' => $coder, 'msg' => $msg, 'ts' => microtime(true)];
         $ok = @file_put_contents($steerFile, json_encode($entry) . "\n", FILE_APPEND | LOCK_EX) !== false;
         return $ok ? ['ok' => true] : ['error' => 'could not write to the steer inbox'];
+    }
+
+    // ---- Skills manager: list / view / create-or-edit / remove. Shells out to the
+    // CLI engine (the one source of truth, shared with terminal + web). ----
+    public function skillsList(): array
+    {
+        $out = shell_exec('php ' . escapeshellarg($this->cli) . ' skills list --json 2>/dev/null');
+        $d = json_decode((string) $out, true);
+        return is_array($d) && isset($d['skills']) ? $d : ['skills' => []];
+    }
+    public function skillsGet(string $name): array
+    {
+        if (trim($name) === '') return ['error' => 'no name'];
+        $out = shell_exec('php ' . escapeshellarg($this->cli) . ' skills show ' . escapeshellarg($name) . ' --json 2>/dev/null');
+        $d = json_decode((string) $out, true);
+        return is_array($d) ? $d : ['error' => 'not found'];
+    }
+    public function skillsSave(string $name, string $description, string $body): array
+    {
+        if (trim($name) === '') return ['error' => 'a skill needs a name'];
+        // Multiline body → pipe a JSON payload on stdin (no shell-escaping nightmares).
+        $cmd = 'php ' . escapeshellarg($this->cli) . ' skills save ' . escapeshellarg($name) . ' 2>/dev/null';
+        $proc = @proc_open($cmd, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes);
+        if (!is_resource($proc)) return ['error' => 'could not run skills save'];
+        fwrite($pipes[0], (string) json_encode(['description' => $description, 'body' => $body]));
+        fclose($pipes[0]);
+        $out = stream_get_contents($pipes[1]); fclose($pipes[1]); fclose($pipes[2]);
+        $code = proc_close($proc);
+        if ($code !== 0) return ['error' => trim((string) $out) ?: 'save failed'];
+        return ['ok' => true] + $this->skillsList();
+    }
+    public function skillsRemove(string $name): array
+    {
+        if (trim($name) === '') return ['error' => 'no name'];
+        @shell_exec('php ' . escapeshellarg($this->cli) . ' skills remove ' . escapeshellarg($name) . ' 2>/dev/null');
+        return $this->skillsList();
     }
 
     // Configured per-role crew models, so the desktop Crew modal can default to them

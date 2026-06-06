@@ -197,6 +197,7 @@
                     <label class="rmate"><input type="checkbox" id="crewAuditor" checked><span class="rico">🔍</span><span class="rname">Auditor</span><select id="crewModelAuditor" class="rmodel"></select></label>
                 </div>
                 <div class="roles-line modal-hint dim">The Director assigns each subtask a <strong>role</strong> (coder, tester, docs, security…). <button type="button" id="crewManageRoles" class="linklike">🎭 Manage roles…</button></div>
+                <div class="roles-line modal-hint dim"><strong>Skills</strong> are reusable instructions the agent loads on demand. <button type="button" id="manageSkills" class="linklike">🧩 Manage skills…</button></div>
                 <label class="modal-check"><input type="checkbox" id="crewReview" checked> 🧑 You — review before merge (hold every branch; nothing auto-merges)</label>
                 <label class="modal-label">Ollama hosts <span class="dim">(optional — comma-separated, runs coders in parallel across machines/GPUs)</span></label>
                 <input id="crewHosts" class="field mono" placeholder="http://localhost:11434, http://192.168.1.50:11434">
@@ -233,6 +234,30 @@
             </details>
             <div class="modal-actions">
                 <button id="rolesClose">Done</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="skillsOverlay" class="modal-overlay" hidden>
+        <div class="modal">
+            <div class="modal-title">🧩 Skills</div>
+            <div class="modal-sub dim">Reusable instructions the agent loads on demand (the <code>skill</code> tool) and crews pick up by focus. Shared by the terminal, desktop, and web.</div>
+            <div id="skillsList" class="roles-list"></div>
+            <details class="crew-adv" id="skillAddBox">
+                <summary>＋ New / edit a skill</summary>
+                <label class="modal-label">Name</label>
+                <input id="skillName" class="field" placeholder="e.g. stripe-payments">
+                <label class="modal-label">Description <span class="dim">— one line on when to use it</span></label>
+                <input id="skillDesc" class="field" placeholder="Use when writing Stripe/billing code">
+                <label class="modal-label">Instructions <span class="dim">(the SKILL.md body the model follows)</span></label>
+                <textarea id="skillBody" class="field mono" placeholder="# Stripe&#10;&#10;Always use idempotency keys. Never log card data. …"></textarea>
+                <div class="modal-actions">
+                    <div class="spacer"></div>
+                    <button id="skillSave" class="primary" type="button">Save skill</button>
+                </div>
+            </details>
+            <div class="modal-actions">
+                <button id="skillsClose">Done</button>
             </div>
         </div>
     </div>
