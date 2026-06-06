@@ -1,5 +1,12 @@
 # Changelog
 
+## v4.8.38 (2026-06-06)
+
+### Added
+- **The Director in its own terminal.** `ollamadev crew director` opens a live steering console — any terminal running it becomes the Director. It auto-refreshes your crew's board as coders change state (reading the same `current.json` as the desktop kanban), and lets you redirect one coder (`2: focus on tests`) or the **whole crew** (`all: stop using deprecated APIs`). On the desktop, launching a crew auto-opens a dedicated **Director** terminal tab.
+- **Talk to the whole crew at once.** Broadcast steering via `all:` (target 0) reaches every coder, not just one — available in the Director console, `crew steer all "…"`, and the desktop Director box.
+- **Per-terminal working folders (desktop).** Each terminal can now run in its own directory. A folder chip in the terminal header edits the path inline and respawns that terminal there (`~` expansion supported), so you can have one terminal in each of several projects side by side.
+
 ## v4.8.37 (2026-06-06)
 
 ### Added
