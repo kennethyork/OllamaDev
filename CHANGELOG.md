@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.8.27 (2026-06-06)
+
+### Added
+- **GPU↔RAM offload + CPU thread controls.** New `ollama.gpuLayers` (→ Ollama's `num_gpu`: how many model layers stay on the GPU; the rest spill to system RAM) and `ollama.numThreads` (→ `num_thread`: cap CPU threads). Unset = Ollama decides (best when the model fits in VRAM); `gpuLayers: 0` runs fully on CPU/RAM. Lets you trade VRAM for RAM or leave cores free. Note: for *cooler/quieter* runs, a lighter model (e.g. the `qwen3-coder` MoE — only ~3B active params) reduces compute and heat far more effectively than RAM offload, which just shifts the load to the CPU.
+
 ## v4.8.26 (2026-06-05)
 
 ### Added
