@@ -1,5 +1,11 @@
 # Changelog
 
+## v4.8.39 (2026-06-06)
+
+### Added
+- **Desktop Skills manager.** A 🧩 Manage skills panel (in the Crew modal) to list, view, create, edit, and remove skills from the GUI — backed by the CLI engine, so it's the same `~/.ollamadev/skills/` catalog the terminal, web, crews (`--focus`), and the agent's `skill` tool all use. New CLI surfaces back it: `skills list --json`, `skills show <name> --json`, `skills save <name>`.
+- **Plain shell terminal.** An always-available **+ Shell** button opens a bare shell (your real `bash`, no ollamadev launched) in the project folder, alongside the default **+ Terminal** (the agent). Each terminal's kind and working folder now persist across workspace switches and restarts.
+
 ## v4.8.38 (2026-06-06)
 
 ### Added
