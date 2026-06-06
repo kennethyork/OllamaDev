@@ -190,7 +190,8 @@ class Crew {
         }
 
         // ---- Auditor reviews each diff, then gated landing (shared with resume). ----
-        self::auditAndLand($agent, $results, $opts, $base, $baseCommit, $mAuditor, $amplify, $task, $setState);
+        self::auditAndLand($agent, $results, $opts, $base, $baseCommit, $mAuditor, $amplify, $task, $setState,
+            ['coderModel' => $mCoder, 'maxIter' => $maxIter, 'research' => $research, 'focus' => $focus, 'logDir' => $logDir]);
         self::offerIdeas($runId, $agent, $task, $research, $results, $mDirector, $opts, $board, $writeBoard);
         self::rememberFacts($task, $research, $results, $mDirector, $opts);
         $board['active'] = false; $writeBoard();
@@ -206,7 +207,7 @@ class Crew {
     // resume(). Audits each non-empty diff (amplify = N-reviewer panel), then lands:
     // 'review' holds everything; 'auto' merges audit-clean branches and holds the
     // rest (self-repo forces 'review' unless --auto-merge). Updates the board.
-    private static function auditAndLand(Agent $agent, array $results, array $opts, string $base, string $baseCommit, string $mAuditor, int $amplify, string $task, callable $setState): void {
+    private static function auditAndLand(Agent $agent, array $results, array $opts, string $base, string $baseCommit, string $mAuditor, int $amplify, string $task, callable $setState, ?array $ctx = null): void {
         $d = "\033[2m"; $b = "\033[1m"; $g = "\033[32m"; $y = "\033[33m"; $r = "\033[0m";
         $doAudit = ($opts['audit'] ?? true) !== false;
         echo "\n{$b}▸ Auditor{$r} " . ($doAudit ? ("reviewing…" . ($amplify > 1 ? " {$d}({$amplify}-reviewer panel, majority rules){$r}" : '')) : "{$d}(disabled — all branches held for your review){$r}") . "\n";
@@ -219,6 +220,31 @@ class Crew {
             foreach (($res['audit']['issues'] ?? []) as $iss) echo "      {$y}- " . substr((string)$iss, 0, 100) . "{$r}\n";
         }
         unset($res);
+
+        // ---- Auditor → coder fix-back: ONE bounded repair pass per flagged branch
+        // (a single retry with the auditor's exact issues — NOT a back-and-forth chat).
+        // The coder re-works in its own worktree, we re-audit, and a now-clean diff lands
+        // normally. Fits the deterministic pipeline; off with crew.repairRounds=0. ----
+        $rounds = (int)($opts['repair'] ?? Config::get('crew.repairRounds', 1));
+        if ($doAudit && $rounds > 0 && is_array($ctx)) {
+            $flagged = array_filter($results, fn($x) => empty($x['empty']) && empty($x['audit']['clean']) && !empty($x['wt']) && is_dir($x['wt']));
+            if ($flagged) echo "\n{$b}▸ Fix-back{$r} {$d}auditor returns " . count($flagged) . " flagged branch(es) to the coder (≤{$rounds} round)…{$r}\n";
+            foreach ($results as &$res) {
+                if (!empty($res['empty']) || !empty($res['audit']['clean']) || empty($res['wt']) || !is_dir($res['wt'])) continue;
+                for ($i = 1; $i <= $rounds && empty($res['audit']['clean']); $i++) {
+                    $setState($res['n'], 'doing');
+                    $issues = trim(implode("\n- ", array_map('strval', $res['audit']['issues'] ?? [])));
+                    $fixSt = ['title' => $res['title'], 'role' => 'coder',
+                        'prompt' => "An auditor reviewed your work and FLAGGED it. Fix ONLY these problems in this worktree by CALLING your write/edit tools — do not break unrelated code or just describe the fix.\nAuditor: " . (string)($res['audit']['summary'] ?? '') . ($issues !== '' ? "\nIssues:\n- " . $issues : '')];
+                    self::runCoder($res['wt'], $fixSt, (string)($ctx['coderModel'] ?? ''), (int)($ctx['maxIter'] ?? 10), (string)($ctx['research'] ?? ''), $task, (string)($ctx['focus'] ?? ''), '', ((string)($ctx['logDir'] ?? sys_get_temp_dir())) . '/coder-' . $res['n'] . '.log');
+                    $re = self::collectCoderResult(['n' => $res['n'], 'st' => ['title' => $res['title']], 'branch' => $res['branch'], 'wt' => $res['wt']], $baseCommit);
+                    $res['diff'] = $re['diff']; $res['files'] = $re['files']; $res['empty'] = $re['empty'];
+                    $res['audit'] = !empty($re['empty']) ? ['clean' => false, 'summary' => 'fix produced no changes', 'issues' => []] : self::audit($agent, $res['title'], $res['diff'], $task, $mAuditor, $amplify);
+                    echo "  {$d}↻ #{$res['n']} fix-back: " . ($res['audit']['clean'] ? "{$g}now clean{$r}" : "{$y}still flagged{$r}") . "\n";
+                }
+            }
+            unset($res);
+        }
 
         // Self-modification safeguard: on the OllamaDev source default to review
         // (hold everything) unless --auto-merge was passed. Other repos auto-merge.
@@ -317,7 +343,8 @@ class Crew {
             $results[] = self::collectCoderResult(['n' => $n, 'st' => ['title' => $title], 'branch' => $branch, 'wt' => $wt], $baseCommit);
         }
 
-        self::auditAndLand($agent, $results, $opts, $base, $baseCommit, $mAuditor, $amplify, $task, $setState);
+        self::auditAndLand($agent, $results, $opts, $base, $baseCommit, $mAuditor, $amplify, $task, $setState,
+            ['coderModel' => $mCoder, 'maxIter' => $maxIter, 'research' => $research, 'focus' => $focus, 'logDir' => $logDir]);
         self::offerIdeas($runId, $agent, $task, $research, $results, $mCoder, $opts, $board, $writeBoard);
         self::rememberFacts($task, $research, $results, $mCoder, $opts);
         $board['active'] = false; $writeBoard();

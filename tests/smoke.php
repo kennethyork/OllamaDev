@@ -449,6 +449,7 @@ ok('crew persists a resumable plan (run.json + prompts)', strpos($src, "self::sa
 ok('crew resume + findResumable exist', strpos($src, 'function resume(') !== false && strpos($src, 'function findResumable(') !== false);
 ok('crew run marks status done', strpos($src, "self::setRunStatus(\$runId, 'done')") !== false);
 ok('audit+land shared by run and resume', strpos($src, 'function auditAndLand(') !== false);
+ok('auditor → coder fix-back (one bounded pass, not a chat)', strpos($src, 'Auditor → coder fix-back') !== false && strpos($src, "Config::get('crew.repairRounds', 1)") !== false && strpos($src, 'FLAGGED it. Fix ONLY these problems') !== false);
 ok('crew resume subcommand wired', strpos($src, "\$arg1 === 'resume'") !== false && strpos($src, 'Crew::resume(') !== false);
 ok('interactive crew offers to resume', strpos($src, 'Crew::findResumable()') !== false && strpos($src, 'Resume it?') !== false);
 // Auto-ideas: every crew run surfaces ranked next-step suggestions (not implemented).

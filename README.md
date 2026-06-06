@@ -4,6 +4,8 @@
 
 OllamaDev is a terminal coding agent that runs entirely against your local [Ollama](https://ollama.com) instance. Nothing leaves your machine — no cloud, no API keys, no subscription. It's a single self-contained **vanilla PHP** binary (no Composer, no extensions beyond PHP core + curl), with diff-previewed edits, undo, an interruptible agent loop, real context management, and 60+ tools.
 
+It also ships a **crew** — a deterministic team of agents (a **Director** that plans, **Coders** that each work in an isolated git worktree, and an **Auditor** that reviews every diff and sends flagged work back for one fix before it lands) — plus a desktop app and a browser mode, all sharing one engine. Unlike cloud multi-agent tools, the whole team runs on **your** hardware: no per-seat pricing, no agents phoning home, **air-gappable end to end**. It's the private, free alternative to tools like Plyrium Forge and BridgeSpace — you trade frontier-model horsepower for total control and zero cost.
+
 ```
 > create a Fastify server in server.js with a /health route
 
