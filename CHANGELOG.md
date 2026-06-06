@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.8.34 (2026-06-06)
+
+### Fixed
+- **Several desktop inputs rendered too narrow and clipped their text.** The stylesheet sizes inputs individually by id, and a few were never given a width rule — so they fell back to the browser's ~150px default and truncated their placeholder/value: the Code-search box ("Find code by meaning…"), the crew **Ollama hosts** box, and the role-add modal (name / persona / description / pinned model). They're now full-width.
+
 ## v4.8.33 (2026-06-06)
 
 ### Fixed
