@@ -448,6 +448,7 @@ ok('--amplify flag wired to crew opts', strpos($src, "\$flagOpts['amplify']") !=
 ok('crew persists a resumable plan (run.json + prompts)', strpos($src, "self::saveRun(") !== false && strpos($src, "'prompt' => \$st['prompt']") !== false);
 ok('crew resume + findResumable exist', strpos($src, 'function resume(') !== false && strpos($src, 'function findResumable(') !== false);
 ok('crew run marks status done', strpos($src, "self::setRunStatus(\$runId, 'done')") !== false);
+ok('explicit -m overrides a resumed session model (desktop model change works)', strpos($src, 'function useModel(') !== false && strpos($src, '$session->useModel($flags[') !== false);
 ok('audit+land shared by run and resume', strpos($src, 'function auditAndLand(') !== false);
 ok('auditor → coder fix-back (one bounded pass, not a chat)', strpos($src, 'Auditor → coder fix-back') !== false && strpos($src, "Config::get('crew.repairRounds', 1)") !== false && strpos($src, 'FLAGGED it. Fix ONLY these problems') !== false);
 ok('crew resume subcommand wired', strpos($src, "\$arg1 === 'resume'") !== false && strpos($src, 'Crew::resume(') !== false);

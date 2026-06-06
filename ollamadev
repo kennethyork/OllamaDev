@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '4.8.30');
+define('OLLAMADEV_VERSION', '4.8.31');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -7871,6 +7871,19 @@ class Session {
         $this->agent->setChatMode($this->agent->isSmallModel());
     }
 
+    // Apply an explicit model to this session, overriding whatever a resumed session
+    // loaded. Used when `-m` is passed (the desktop passes one per terminal) so the
+    // chosen model actually takes effect instead of reverting to the saved one.
+    public function useModel(string $m): void {
+        $m = trim($m);
+        if ($m === '') return;
+        $resolved = $this->agent->resolveModel($m) ?: $m;
+        $this->agent->setModel($resolved);
+        $this->model = $resolved;
+        $GLOBALS['currentSessionModel'] = $resolved;
+        $this->agent->setChatMode($this->agent->isSmallModel());
+    }
+
     private function ensureDataDir(): void { $dir = Config::sessionsDir(); if (!is_dir($dir)) mkdir($dir, 0755, true); }
 
     public function createNew(): void { $this->save(); }
@@ -11318,8 +11331,12 @@ if ($cmd === 'chat') {
     if (empty($flags['new']) && Config::get('session.autoResume', true)) {
         $resumeId = Session::latestForCwd($config, getcwd() ?: '.');
     }
-    if ($resumeId) (new Session($config, $resumeId))->start();
-    else (new Session($config))->start();
+    $session = $resumeId ? new Session($config, $resumeId) : new Session($config);
+    // An explicit -m (the desktop passes one with every terminal) OVERRIDES the
+    // resumed session's saved model — otherwise reopening always reverts to the old
+    // model and "changing the model from the desktop" silently does nothing.
+    if (!empty($flags['model'])) $session->useModel($flags['model']);
+    $session->start();
 } else {
     echo "Unknown command: $cmd\n";
     echo "Run 'ollamadev help <topic>' for available topics.\n";

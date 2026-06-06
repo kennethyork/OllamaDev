@@ -2240,8 +2240,12 @@ if ($cmd === 'chat') {
     if (empty($flags['new']) && Config::get('session.autoResume', true)) {
         $resumeId = Session::latestForCwd($config, getcwd() ?: '.');
     }
-    if ($resumeId) (new Session($config, $resumeId))->start();
-    else (new Session($config))->start();
+    $session = $resumeId ? new Session($config, $resumeId) : new Session($config);
+    // An explicit -m (the desktop passes one with every terminal) OVERRIDES the
+    // resumed session's saved model — otherwise reopening always reverts to the old
+    // model and "changing the model from the desktop" silently does nothing.
+    if (!empty($flags['model'])) $session->useModel($flags['model']);
+    $session->start();
 } else {
     echo "Unknown command: $cmd\n";
     echo "Run 'ollamadev help <topic>' for available topics.\n";

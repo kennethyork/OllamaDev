@@ -27,6 +27,19 @@ class Session {
         $this->agent->setChatMode($this->agent->isSmallModel());
     }
 
+    // Apply an explicit model to this session, overriding whatever a resumed session
+    // loaded. Used when `-m` is passed (the desktop passes one per terminal) so the
+    // chosen model actually takes effect instead of reverting to the saved one.
+    public function useModel(string $m): void {
+        $m = trim($m);
+        if ($m === '') return;
+        $resolved = $this->agent->resolveModel($m) ?: $m;
+        $this->agent->setModel($resolved);
+        $this->model = $resolved;
+        $GLOBALS['currentSessionModel'] = $resolved;
+        $this->agent->setChatMode($this->agent->isSmallModel());
+    }
+
     private function ensureDataDir(): void { $dir = Config::sessionsDir(); if (!is_dir($dir)) mkdir($dir, 0755, true); }
 
     public function createNew(): void { $this->save(); }

@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.8.31 (2026-06-06)
+
+### Fixed
+- **Changing a terminal's model from the desktop had no effect.** Bare `ollamadev` auto-resumes the folder's last session, and the resumed session's *saved* model overrode the `-m` flag the desktop passes — so a terminal launched with `-m qwen2.5-coder:14b` would actually run whatever the old session was saved on (e.g. qwen3-coder), and switching the model in the desktop did nothing. An explicit `-m` now overrides the resumed session's model (new `Session::useModel`).
+
 ## v4.8.30 (2026-06-06)
 
 ### Fixed
