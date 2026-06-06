@@ -1301,6 +1301,7 @@ var App = {
         this.initThemes();
         this.startAutosave();   // persist the active workspace so it resumes on reopen
         $('#newTermBtn').onclick = function () { self.newTerminal(); };
+        var nsb = $('#newShellBtn'); if (nsb) nsb.onclick = function () { self.spawnShell(); };
         $('#layoutBtn').onclick = function () { self.cycleLayout(); };
         // Open-folder modal
         var ofb = $('#openFolderBtn'); if (ofb) ofb.onclick = function () { self.openFolderModal(false); };
@@ -1902,6 +1903,20 @@ var App = {
         // Small delay so the pty shell is ready to receive the command.
         setTimeout(function () { try { window.termWrite(id, strToB64(cmd)); } catch (e) {} }, 350);
     },
+    // Plain shell: spawn the pty in the project folder but DON'T launch ollamadev —
+    // just a bare shell prompt. Always available alongside "+ Terminal".
+    spawnShell: function (folder) {
+        if (this.terminals.length >= this.MAX_TERMINALS) { banner('maximum of ' + this.MAX_TERMINALS + ' terminals', 'err'); return; }
+        var dir = this.expandHome(folder) || (this.cwd && this.cwd !== '.' ? this.cwd : '');
+        var id = rid();
+        var t = new Terminal(id, 'shell', dir); t.kind = 'shell';
+        var self = this;
+        Promise.resolve(window.termCreate(id, 'shell', dir)).then(function () {
+            self.live[id] = true;
+            self.terminals.push(t);
+            self.render();   // no launchCli — the pty already starts a shell in `dir`
+        }).catch(function (e) { banner('shell failed: ' + e, 'err'); });
+    },
     // Respawn a terminal in a new working folder (the per-terminal folder chip).
     changeTermFolder: function (id, folder) {
         var t = this.terminals.find(function (x) { return x.id === id; });
@@ -1935,9 +1950,11 @@ var App = {
     },
     // Re-attach the UI to a pty that's still alive from earlier this session
     // (workspace switch). No termCreate, no launchCli — poll resumes its buffer.
-    attachTerminal: function (id, model) {
+    attachTerminal: function (id, model, kind, cwd) {
         if (this.terminals.length >= this.MAX_TERMINALS) return;
-        this.terminals.push(new Terminal(id, model || $('#modelSelect').value || 'llama3.2:latest'));
+        var t = new Terminal(id, model || $('#modelSelect').value || 'llama3.2:latest', cwd || '');
+        if (kind) t.kind = kind;
+        this.terminals.push(t);
     },
     closeTerminal: function (id) {
         var i = this.terminals.findIndex(function (t) { return t.id === id; });
@@ -1974,7 +1991,7 @@ var App = {
     // Snapshot the current window so a workspace can be restored exactly.
     captureState: function () {
         return {
-            terminals: this.terminals.map(function (t) { return { id: t.id, model: t.model }; }),
+            terminals: this.terminals.map(function (t) { return { id: t.id, model: t.model, kind: t.kind || '', cwd: t.cwd || '' }; }),
             editorTabs: Editor.tabs.map(function (t) { return { path: t.path, name: t.name }; }),
             layout: this.layout,
             view: this.view,
@@ -1990,11 +2007,15 @@ var App = {
         (state.editorTabs || []).forEach(function (t) { Editor.open(t.path, t.name); });
         var terms = state.terminals || [];
         var attached = 0;
-        terms.forEach(function (ti) { if (self.live[ti.id]) { self.attachTerminal(ti.id, ti.model); attached++; } });
+        terms.forEach(function (ti) { if (self.live[ti.id]) { self.attachTerminal(ti.id, ti.model, ti.kind, ti.cwd); attached++; } });
         this.zoomed = state.zoomed || null;
         if (attached) this.render();
-        // saved terminals whose pty is gone → respawn (each renders itself)
-        terms.forEach(function (ti) { if (!self.live[ti.id]) self.spawnTerminal(ti.model); });
+        // saved terminals whose pty is gone → respawn (each renders itself). Plain
+        // shells come back as shells (no CLI); the rest relaunch ollamadev.
+        terms.forEach(function (ti) {
+            if (self.live[ti.id]) return;
+            if (ti.kind === 'shell') self.spawnShell(ti.cwd); else self.spawnTerminal(ti.model, ti.cwd);
+        });
         if (!terms.length && !this.terminals.length) this.spawnTerminal();
         if (state.layout) this.setLayout(state.layout);
         if (state.view) this.setView(state.view);
