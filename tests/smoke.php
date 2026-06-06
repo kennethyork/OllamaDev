@@ -724,9 +724,13 @@ ok('build-appimage.sh bundles PHP + Boson into a self-contained AppImage', is_fi
     strpos($appImg, 'appimagetool') !== false && strpos($appImg, 'usr/bin/php') !== false);
 ok('AppImage build is arch-aware (x86_64 + aarch64)', strpos($appImg, 'AIARCH=x86_64') !== false &&
     strpos($appImg, 'AIARCH=aarch64') !== false && strpos($appImg, 'OllamaDev-ADE-$AIARCH.AppImage') !== false);
+// v4.8.32: must NOT bundle libnghttp2 — Boson's WebView loads the host's libcurl-gnutls,
+// and a bundled (build-runner) nghttp2 shadows the host's matched copy → "undefined symbol".
+ok('AppImage does not bundle libnghttp2 (host WebView owns curl+nghttp2)', strpos($appImg, "SHARED='libnghttp2'") !== false &&
+    strpos($appImg, '"$CORE|$SHARED"') !== false);
 $relYml = (string)@file_get_contents($repoRoot . '/.github/workflows/release.yml');
 ok('release builds x86_64 + arm64 AppImages + keeps all desktop archives', strpos($relYml, 'build-appimage.sh') !== false &&
-    strpos($relYml, 'extensions: ffi, curl') !== false && strpos($relYml, 'ubuntu-24.04-arm') !== false &&
+    strpos($relYml, 'extensions: ffi, curl') !== false && strpos($relYml, 'ubuntu-22.04-arm') !== false &&
     strpos($relYml, 'OllamaDev-ADE-aarch64.AppImage') !== false);
 ok('downloads page offers both Linux AppImages (x64 + arm64, no-install)', strpos($dlPage, 'OllamaDev-ADE-x86_64.AppImage') !== false &&
     strpos($dlPage, 'OllamaDev-ADE-aarch64.AppImage') !== false);
