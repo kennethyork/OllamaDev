@@ -65,7 +65,7 @@
             <div id="searchPanel" class="panel" hidden>
                 <div class="side-title">Code search</div>
                 <div class="task-add">
-                    <input id="codeSearchInput" placeholder="Find code by meaning… (Enter)">
+                    <input id="codeSearchInput" class="field" placeholder="Find code by meaning… (Enter)">
                 </div>
                 <div id="codeSearchHint" class="dim">Semantic search over this project (local embeddings).</div>
                 <div id="codeSearchResults"></div>
@@ -73,7 +73,7 @@
             <div id="tasksPanel" class="panel" hidden>
                 <div class="side-title">Tasks</div>
                 <div class="task-add">
-                    <input id="taskInput" placeholder="New task… (Enter)">
+                    <input id="taskInput" class="field" placeholder="New task… (Enter)">
                 </div>
                 <div id="taskHint" class="dim">Tasks live on the Board. Press Run to hand one to an agent terminal.</div>
             </div>
@@ -136,7 +136,7 @@
             <div class="modal-title">📂 Open project folder</div>
             <div class="modal-sub dim">Points the file tree, terminals, and Crew at this folder.</div>
             <label class="modal-label">Path</label>
-            <input id="folderPath" placeholder="/home/you/projects/my-app  (or ~/projects/my-app)">
+            <input id="folderPath" class="field mono" placeholder="/home/you/projects/my-app  (or ~/projects/my-app)">
             <div class="modal-actions">
                 <button id="folderCancel">Cancel</button>
                 <button id="folderOpen" class="primary">Open</button>
@@ -163,7 +163,7 @@
 
             <div id="crewTemplates" class="wiz-templates"></div>
             <div class="task-input-wrap">
-              <textarea id="crewTask" placeholder="Optional — tell the Director what to build, or leave blank to prompt it live (e.g. add input validation + tests to the signup form)"></textarea>
+              <textarea id="crewTask" class="field mono" placeholder="Optional — tell the Director what to build, or leave blank to prompt it live (e.g. add input validation + tests to the signup form)"></textarea>
               <button id="crewMic" class="mic-btn" type="button" title="Dictate (local speech-to-text)" hidden>🎤</button>
             </div>
             <div id="crewProjLine" class="modal-hint dim"></div>
@@ -178,7 +178,7 @@
                     <button id="crewPresetDel" type="button" title="Delete selected preset">🗑</button>
                 </div>
                 <label class="modal-label">Project folder</label>
-                <input id="crewFolder" placeholder="~/projects/my-app">
+                <input id="crewFolder" class="field mono" placeholder="~/projects/my-app">
                 <label class="modal-label">Team — pick a model per role</label>
                 <div class="roster">
                     <div class="rmate locked" title="The Director always plans the work — it can't be turned off">
@@ -194,7 +194,7 @@
                 <div class="roles-line modal-hint dim">The Director assigns each subtask a <strong>role</strong> (coder, tester, docs, security…). <button type="button" id="crewManageRoles" class="linklike">🎭 Manage roles…</button></div>
                 <label class="modal-check"><input type="checkbox" id="crewReview" checked> 🧑 You — review before merge (hold every branch; nothing auto-merges)</label>
                 <label class="modal-label">Ollama hosts <span class="dim">(optional — comma-separated, runs coders in parallel across machines/GPUs)</span></label>
-                <input id="crewHosts" placeholder="http://localhost:11434, http://192.168.1.50:11434">
+                <input id="crewHosts" class="field mono" placeholder="http://localhost:11434, http://192.168.1.50:11434">
             </details>
 
             <div class="modal-actions">
@@ -213,13 +213,13 @@
             <details class="crew-adv" id="roleAddBox">
                 <summary>＋ Add a role</summary>
                 <label class="modal-label">Name</label>
-                <input id="roleName" placeholder="e.g. reviewer">
+                <input id="roleName" class="field" placeholder="e.g. reviewer">
                 <label class="modal-label">Persona <span class="dim">— the system prompt the agent runs with</span></label>
-                <textarea id="rolePersona" placeholder="You are a … agent in an isolated git worktree. …"></textarea>
+                <textarea id="rolePersona" class="field mono" placeholder="You are a … agent in an isolated git worktree. …"></textarea>
                 <label class="modal-label">Description <span class="dim">(what the Director sees when choosing)</span></label>
-                <input id="roleDesc" placeholder="Short summary of what this role does">
+                <input id="roleDesc" class="field" placeholder="Short summary of what this role does">
                 <label class="modal-label">Pinned model <span class="dim">(optional — defaults to the crew's coder model)</span></label>
-                <select id="roleModel"><option value="">— crew coder model —</option></select>
+                <select id="roleModel" class="select"><option value="">— crew coder model —</option></select>
                 <label class="modal-check"><input type="checkbox" id="roleReadonly"> Read-only (survey/advise without editing files)</label>
                 <div class="modal-actions">
                     <div class="spacer"></div>

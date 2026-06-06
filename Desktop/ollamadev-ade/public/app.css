@@ -142,8 +142,21 @@ body {
 .tree-item.active { background: var(--accent-soft); color: var(--accent); border-left-color: var(--accent); }
 .tree-item.up { color: var(--faint); }
 .task-add { padding: 0 12px 8px; }
-#taskInput, #codeSearchInput { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--fg); padding: 7px 9px; font-size: 12px; outline: none; }
-#taskInput:focus, #codeSearchInput:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+/* ---- Form components: put .field (text inputs/textareas) or .select (dropdowns)
+   on any standalone control — add .mono for path/host-style fields. Keeps every
+   field uniform and correct by default, so a new input can't render at the wrong
+   width again. Flex-row inputs (terminal, agent chat, preset-row, browser bar)
+   and layout-embedded selects (topbar, crew roster) keep their own classes. ---- */
+.field { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--fg); padding: 8px 10px; font-size: 13px; outline: none; transition: border-color .15s, box-shadow .15s; }
+.field::placeholder { color: var(--faint); }
+.field:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.field.mono { font-family: var(--mono); }
+textarea.field { min-height: 84px; resize: vertical; line-height: 1.5; }
+.select { width: 100%; -webkit-appearance: none; appearance: none; background-color: var(--bg3); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 8px 28px 8px 10px; font-size: 13px; cursor: pointer; outline: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b949e' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+    background-repeat: no-repeat; background-position: right 9px center; }
+.select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.select option { background: var(--bg2); color: var(--fg); }
 #taskHint { padding: 4px 14px; font-size: 11px; line-height: 1.5; }
 
 /* ===== workspace ===== */
@@ -238,10 +251,6 @@ body {
 .modal-title { font-size: 16px; font-weight: 800; }
 .modal-sub { font-size: 11px; margin-top: 4px; }
 .modal-label { display: block; font-size: 11px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--faint); margin: 14px 0 6px; }
-#crewTask { width: 100%; min-height: 90px; resize: vertical; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--fg); padding: 10px; font-family: var(--mono); font-size: 13px; outline: none; }
-#crewTask:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
-#folderPath { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--fg); padding: 10px; font-family: var(--mono); font-size: 13px; outline: none; }
-#folderPath:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .modal-row { display: flex; align-items: center; gap: 10px; }
 .modal-row .modal-label { margin: 14px 0 0; }
 #crewMax, #crewModel { -webkit-appearance: none; appearance: none; background: var(--bg3); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 6px 28px 6px 10px; font-size: 13px; margin-top: 12px; cursor: pointer;
@@ -268,15 +277,6 @@ body {
 .wiz-dot.done { color: var(--accent); }
 .wiz-step { min-height: 96px; }
 .wiz-step[hidden] { display: none; }
-#crewFolder, #crewHosts { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--fg); padding: 10px; font-family: var(--mono); font-size: 13px; outline: none; }
-#crewHosts:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
-#crewFolder:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
-/* Role-add modal inputs — full width so placeholders/values aren't clipped. */
-#roleName, #roleDesc { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--fg); padding: 8px 9px; font-size: 13px; outline: none; }
-#rolePersona { width: 100%; min-height: 80px; resize: vertical; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--fg); padding: 10px; font-family: var(--mono); font-size: 13px; outline: none; }
-#roleModel { width: 100%; -webkit-appearance: none; appearance: none; background: var(--bg3); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 8px 24px 8px 9px; font-size: 13px; cursor: pointer; }
-#roleModel option { background: var(--bg2); color: var(--fg); }
-#roleName:focus, #roleDesc:focus, #rolePersona:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .wiz-summary { font-size: 13px; line-height: 1.7; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 12px 14px; }
 .wiz-summary b { color: var(--dim); font-weight: 600; display: inline-block; min-width: 84px; }
 .wiz-summary .val { color: var(--fg); }
@@ -448,7 +448,7 @@ button, select, a, .rail-btn, .ws-tab, .ws-tab-item, .tree-item, .etab, .card {
     /* All four selects share rows evenly (≈2 per row) instead of one hogging width. */
     #modelSelect, #tempSelect, #sttSelect, #themeSelect { flex: 1 1 42vw; max-width: 48vw; min-width: 130px; }
     /* Prevent iOS auto-zoom on focus — inputs must be ≥16px. */
-    .agent-input, #taskInput, #folderPath, #crewTask, #searchInput, .term-input { font-size: 16px; }
+    .agent-input, .field, .term-input { font-size: 16px; }
 
     /* Sidebar becomes a slide-in drawer over the workspace; the rail stays as its trigger. */
     #sidebar {
