@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.8.29 (2026-06-06)
+
+### Added
+- **Per-terminal model switcher (desktop/web).** Each terminal header now has a model dropdown — change it and it switches that terminal's **live** CLI session via the `/model` command (the topbar model only ever set the model at creation, with no way to change it after). Each terminal can run a different model, switchable on the fly; the choice persists across save/resume.
+
 ## v4.8.28 (2026-06-06)
 
 ### Fixed

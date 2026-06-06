@@ -132,7 +132,7 @@ Terminal.prototype.mount = function (host) {
     var self = this;
     this.offset = 0; this.line = null; this.fg = null; this.bold = false; this.cr = false;
     host.innerHTML =
-        '<div class="term-head"><span class="nm">' + esc(this.model) + '</span><span class="id">' + this.id.slice(-6) + '</span>' +
+        '<div class="term-head"><select class="term-model" title="Switch this terminal\'s model (live, via /model)"></select><span class="id">' + this.id.slice(-6) + '</span>' +
         '<span class="badge ' + this.status + '"><span class="b-dot"></span><span class="b-label">' + this.status + '</span></span>' +
         '<button class="zoom" title="Focus (make this terminal bigger)">⤢</button>' +
         '<button class="x" title="Close">&times;</button></div>' +
@@ -160,6 +160,14 @@ Terminal.prototype.mount = function (host) {
         b.onclick = function () { sendRaw(KEYS[b.dataset.k] || ''); tin.focus(); };
     });
     this.badgeEl = host.querySelector('.badge');
+    // Per-terminal model switcher — change a terminal's model live (sends /model).
+    var msel = host.querySelector('.term-model');
+    if (msel) {
+        var models = Array.prototype.slice.call(($('#modelSelect') || { options: [] }).options).map(function (o) { return o.value; });
+        if (self.model && models.indexOf(self.model) === -1) models.unshift(self.model);
+        msel.innerHTML = models.map(function (m) { return '<option' + (m === self.model ? ' selected' : '') + '>' + esc(m) + '</option>'; }).join('');
+        msel.onchange = function () { self.changeModel(msel.value); };
+    }
     var head = host.querySelector('.term-head');
     head.title = 'Double-click to focus / restore';
     head.ondblclick = function (e) { if (e.target.classList.contains('x') || e.target.classList.contains('zoom')) return; app.toggleZoom(self.id); };
@@ -183,6 +191,14 @@ Terminal.prototype.mount = function (host) {
     this.screen.onclick = function () { self.screen.focus(); };
     if (!this.polling) this.poll();
     setTimeout(function () { self.screen.focus(); }, 0);
+};
+// Switch this terminal's model live by sending the CLI's /model command into the
+// running session (and update the stored model so it persists across save/resume).
+Terminal.prototype.changeModel = function (m) {
+    if (!m || m === this.model) return;
+    this.model = m;
+    try { window.termWrite(this.id, strToB64('/model ' + m + '\n')); } catch (e) {}
+    if (typeof banner === 'function') banner('terminal → ' + m, 'ok');
 };
 Terminal.prototype.setStatus = function (s) {
     this.status = s;

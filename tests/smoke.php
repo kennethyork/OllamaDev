@@ -634,6 +634,7 @@ ok('Windows installer bundles the engine + sets OLLAMADEV_STT_DIR',
 $ade = (string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/app.js');
 ok('desktop has a local voice dictation module', strpos($ade, 'var Voice') !== false && strpos($ade, 'sttTranscribe') !== false && strpos($ade, 'MediaRecorder') !== false);
 ok('crew terminal uses a real model, not the literal "crew" (resume relaunch bug)', strpos($ade, "new Terminal(id, 'crew')") === false);
+ok('each terminal has a model switcher that sends /model live', strpos($ade, "class=\"term-model\"") !== false && strpos($ade, 'changeModel') !== false && strpos($ade, "'/model ' + m") !== false);
 ok('desktop binds sttEnabled + sttTranscribe to the CLI', strpos((string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/index.php'), 'sttTranscribe') !== false);
 
 echo "\n== Auto-remember (self-populating memory) ==\n";
