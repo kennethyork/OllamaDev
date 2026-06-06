@@ -110,7 +110,16 @@ class OllamaClient {
             $ctx = min($want, max(512, $cap));
         }
         self::$lastCtx = $ctx;
-        return ['num_ctx' => $ctx, 'temperature' => (float)Config::get('ollama.temperature', 0.3)];
+        $opts = ['num_ctx' => $ctx, 'temperature' => (float)Config::get('ollama.temperature', 0.3)];
+        // GPU/RAM split: num_gpu = how many model layers stay on the GPU; the rest
+        // spill to system RAM (CPU). Unset = let Ollama decide (best when the model
+        // fits in VRAM). 0 = all CPU/RAM. A lower number frees VRAM but runs SLOWER.
+        $gl = Config::get('ollama.gpuLayers', null);
+        if ($gl !== null && $gl !== '') $opts['num_gpu'] = max(0, (int)$gl);
+        // Optionally cap CPU threads used for the RAM-offloaded layers.
+        $nt = Config::get('ollama.numThreads', null);
+        if ($nt !== null && $nt !== '') $opts['num_thread'] = max(1, (int)$nt);
+        return $opts;
     }
 
     // The num_ctx most recently sent (so the /status meter shows the real window).
