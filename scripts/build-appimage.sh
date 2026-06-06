@@ -52,10 +52,17 @@ cp "$EXTDIR/curl.so" "$APPDIR/usr/lib/php/" 2>/dev/null || true
 # Bundle the shared libs php + those extensions need — EXCEPT the glibc core,
 # which must come from the host to match its dynamic loader.
 CORE='libc\.so|libm\.so|libpthread|libdl\.so|librt\.so|ld-linux|libresolv|libgcc_s|libstdc\+\+'
+# ALSO never bundle libnghttp2: Boson's WebView (libboson) loads the HOST's
+# libcurl-gnutls at runtime, and that curl<->nghttp2 pair is matched on the host.
+# Bundling our build-runner's (older, ubuntu-22.04) libnghttp2 shadows the host's
+# via LD_LIBRARY_PATH and hides newer symbols the host curl needs — libboson then
+# fails with "undefined symbol: nghttp2_option_set_no_rfc9113...". PHP's bundled
+# libcurl still works fine against the host's (>=) nghttp2. Keep this excluded.
+SHARED='libnghttp2'
 bundle_libs() { # <binary-or-.so>
   ldd "$1" 2>/dev/null | awk '/=>/ {print $3}' | grep -E '^/' | while read -r lib; do
     base="$(basename "$lib")"
-    echo "$base" | grep -Eq "$CORE" && continue
+    echo "$base" | grep -Eq "$CORE|$SHARED" && continue
     [ -f "$APPDIR/usr/lib/$base" ] || cp -L "$lib" "$APPDIR/usr/lib/" 2>/dev/null || true
   done
 }

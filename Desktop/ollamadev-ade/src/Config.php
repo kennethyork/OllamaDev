@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace OllamaDev;
 
-define('OLLAMADEV_VERSION', '4.8.31');
+define('OLLAMADEV_VERSION', '4.8.32');
 
 $GLOBALS['editedFiles'] = [];
 

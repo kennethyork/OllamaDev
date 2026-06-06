@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.8.32 (2026-06-06)
+
+### Fixed
+- **Linux AppImage failed to launch with an nghttp2 symbol error** (`libcurl-gnutls.so.4: undefined symbol: nghttp2_option_set_no_rfc9113_leading_and_trailing_ws_validation`). The AppImage bundled its build-runner's `libnghttp2` and forced it ahead of the host's via `LD_LIBRARY_PATH`. But Boson's WebView loads the **host's** `libcurl-gnutls`, which needs a recent nghttp2 symbol — and after the v4.8.30 glibc fix pinned builds to Ubuntu 22.04, the bundled nghttp2 (1.43) was too old to provide it, *shadowing* the host's matched copy. The build no longer bundles `libnghttp2`, so libboson uses the host's curl+nghttp2 pair (always matched). Keeps the glibc-2.35 / Linux Mint compatibility from v4.8.30.
+
 ## v4.8.31 (2026-06-06)
 
 ### Fixed
