@@ -135,6 +135,24 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y squashfs-tools
       - name: Build desktop archives + Linux AppImage (CLI bundled)
         run: scripts/build-appimage.sh   # runs build-desktop.sh, then packs the AppImage
+      - name: Smoke-test the AppImage (catch glibc + host-lib-shadow regressions)
+        run: |
+          set -eu
+          APP=dist/binaries/OllamaDev-ADE-x86_64.AppImage
+          chmod +x "$APP"; rm -rf squashfs-root; "$APP" --appimage-extract >/dev/null
+          # (1) Never bundle libnghttp2 — it shadows the host WebView's matched copy (v4.8.32).
+          if ls squashfs-root/usr/lib/ | grep -q '^libnghttp2'; then
+            echo "::error::AppImage bundles libnghttp2 — it will break Boson's WebView on the host"; exit 1; fi
+          # (2) Nothing may need glibc newer than 2.35 (Linux Mint 21 / Ubuntu 22.04 floor).
+          TOONEW=$(find squashfs-root/usr/bin squashfs-root/usr/lib -type f \( -name '*.so*' -o -name php \) \
+            -exec objdump -T {} + 2>/dev/null | grep -oE 'GLIBC_2\.(3[6-9]|[4-9][0-9])' | sort -u || true)
+          if [ -n "$TOONEW" ]; then echo "::error::AppImage requires glibc newer than 2.35: $TOONEW"; exit 1; fi
+          # (3) Best-effort launch: fail only on the two regressions we guard (symbol / glibc),
+          #     tolerate a CI runner that simply lacks the GUI/WebKit stack.
+          timeout 20 "$APP" --version >out.txt 2>&1 || true
+          if grep -qE "undefined symbol|GLIBC_[0-9.]+.? not found" out.txt; then
+            echo "::error::libboson failed to load:"; cat out.txt; exit 1; fi
+          echo "✓ no bundled nghttp2 · glibc <= 2.35 · no symbol/glibc load errors"
       - name: Upload desktop archives + AppImage
         env:
           GH_TOKEN: ${{ github.token }}
@@ -158,6 +176,24 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y squashfs-tools
       - name: Build the Linux arm64 AppImage
         run: scripts/build-appimage.sh
+      - name: Smoke-test the AppImage (catch glibc + host-lib-shadow regressions)
+        run: |
+          set -eu
+          APP=dist/binaries/OllamaDev-ADE-aarch64.AppImage
+          chmod +x "$APP"; rm -rf squashfs-root; "$APP" --appimage-extract >/dev/null
+          # (1) Never bundle libnghttp2 — it shadows the host WebView's matched copy (v4.8.32).
+          if ls squashfs-root/usr/lib/ | grep -q '^libnghttp2'; then
+            echo "::error::AppImage bundles libnghttp2 — it will break Boson's WebView on the host"; exit 1; fi
+          # (2) Nothing may need glibc newer than 2.35 (Linux Mint 21 / Ubuntu 22.04 floor).
+          TOONEW=$(find squashfs-root/usr/bin squashfs-root/usr/lib -type f \( -name '*.so*' -o -name php \) \
+            -exec objdump -T {} + 2>/dev/null | grep -oE 'GLIBC_2\.(3[6-9]|[4-9][0-9])' | sort -u || true)
+          if [ -n "$TOONEW" ]; then echo "::error::AppImage requires glibc newer than 2.35: $TOONEW"; exit 1; fi
+          # (3) Best-effort launch: fail only on the two regressions we guard (symbol / glibc),
+          #     tolerate a CI runner that simply lacks the GUI/WebKit stack.
+          timeout 20 "$APP" --version >out.txt 2>&1 || true
+          if grep -qE "undefined symbol|GLIBC_[0-9.]+.? not found" out.txt; then
+            echo "::error::libboson failed to load:"; cat out.txt; exit 1; fi
+          echo "✓ no bundled nghttp2 · glibc <= 2.35 · no symbol/glibc load errors"
       - name: Upload the arm64 AppImage
         env:
           GH_TOKEN: ${{ github.token }}
