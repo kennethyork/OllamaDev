@@ -48,6 +48,12 @@ jobs:
           php-version: '8.4'
           tools: composer
       - name: Build standalone CLI binaries (all platforms)
+        # phpacker downloads prebuilt PHP runtimes from the phpacker/php-bin GitHub
+        # release; without a token those API calls are unauthenticated (60 req/hr) and
+        # get rate-limited. The repo token raises it to 5000/hr.
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: scripts/build-binary.sh all
       - name: Upload CLI binaries
         env:
