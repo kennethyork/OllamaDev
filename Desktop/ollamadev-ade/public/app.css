@@ -142,8 +142,8 @@ body {
 .tree-item.active { background: var(--accent-soft); color: var(--accent); border-left-color: var(--accent); }
 .tree-item.up { color: var(--faint); }
 .task-add { padding: 0 12px 8px; }
-#taskInput { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--fg); padding: 7px 9px; font-size: 12px; outline: none; }
-#taskInput:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+#taskInput, #codeSearchInput { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--fg); padding: 7px 9px; font-size: 12px; outline: none; }
+#taskInput:focus, #codeSearchInput:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 #taskHint { padding: 4px 14px; font-size: 11px; line-height: 1.5; }
 
 /* ===== workspace ===== */
@@ -268,8 +268,15 @@ body {
 .wiz-dot.done { color: var(--accent); }
 .wiz-step { min-height: 96px; }
 .wiz-step[hidden] { display: none; }
-#crewFolder { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--fg); padding: 10px; font-family: var(--mono); font-size: 13px; outline: none; }
+#crewFolder, #crewHosts { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--fg); padding: 10px; font-family: var(--mono); font-size: 13px; outline: none; }
+#crewHosts:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 #crewFolder:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+/* Role-add modal inputs — full width so placeholders/values aren't clipped. */
+#roleName, #roleDesc { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--fg); padding: 8px 9px; font-size: 13px; outline: none; }
+#rolePersona { width: 100%; min-height: 80px; resize: vertical; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--fg); padding: 10px; font-family: var(--mono); font-size: 13px; outline: none; }
+#roleModel { width: 100%; -webkit-appearance: none; appearance: none; background: var(--bg3); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 8px 24px 8px 9px; font-size: 13px; cursor: pointer; }
+#roleModel option { background: var(--bg2); color: var(--fg); }
+#roleName:focus, #roleDesc:focus, #rolePersona:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .wiz-summary { font-size: 13px; line-height: 1.7; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 12px 14px; }
 .wiz-summary b { color: var(--dim); font-weight: 600; display: inline-block; min-width: 84px; }
 .wiz-summary .val { color: var(--fg); }
