@@ -451,6 +451,9 @@ ok('clear_board tool requires confirm + refuses without it', strpos($src, "Tools
     strpos($src, 'FILTER_VALIDATE_BOOLEAN') !== false && strpos($src, 'Board NOT cleared') !== false);
 ok('clear_board schema marks it explicit-only with required confirm', strpos($src, 'ONLY call this when the user EXPLICITLY') !== false &&
     strpos($src, "'confirm'") !== false);
+// Interactive Director: "clear board" is handled directly (not spent on a crew run).
+ok('interactive Director clears the board directly on "clear board"',
+    preg_match('/\^\(clear\|reset\|wipe\|empty\).*board\$/', $src) === 1 && strpos($src, 'Crew::clearBoard()') !== false);
 // Desktop: a cleared sentinel wipes the localStorage-only manual cards (once, watermarked).
 $appjs = (string) @file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/app.js');
 ok('desktop applies the cleared sentinel to manual cards', strpos($appjs, 'ade.boardCleared') !== false &&

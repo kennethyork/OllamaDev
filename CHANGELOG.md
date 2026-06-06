@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.8.36 (2026-06-06)
+
+### Fixed
+- **Typing "clear board" to the interactive Director spun up a whole crew run instead of clearing the board** (Researcher → Director → Coder), and the coder couldn't actually clear it — local models don't reliably set the `clear_board` tool's `confirm` flag, so it was refused and the model reported a bogus "permissions" error. The interactive `Director ▸` prompt now recognizes "clear/reset/wipe/empty (the) board" and clears it directly — no crew run, no model in the loop. Typing it yourself is the explicit signal, so it's both reliable and can't fire unprompted. (`crew clear` and the `clear_board` agent tool remain.)
+
 ## v4.8.35 (2026-06-06)
 
 ### Changed

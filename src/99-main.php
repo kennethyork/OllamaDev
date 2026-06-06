@@ -1780,7 +1780,7 @@ if ($cmd === 'chat') {
     // Director simply waits for you to prompt it (and keeps prompting after each run).
     if ($task === '') {
         if (!posix_isatty(STDIN)) { echo "Usage: ollamadev crew \"<task>\" [options]   (or run with no task in a terminal to prompt the Director live)\n"; exit(1); }
-        $c = "\033[36m"; $d = "\033[2m"; $b = "\033[1m"; $y = "\033[33m"; $r = "\033[0m";
+        $c = "\033[36m"; $d = "\033[2m"; $b = "\033[1m"; $y = "\033[33m"; $g = "\033[32m"; $r = "\033[0m";
         $bits = [];
         if (!empty($copts['focus'])) $bits[] = 'focus set';
         if (($copts['land'] ?? '') === 'review') $bits[] = 'review mode';
@@ -1796,7 +1796,7 @@ if ($cmd === 'chat') {
             $ans = strtolower(trim((string)fgets(STDIN)));
             if ($ans === '' || $ans === 'y' || $ans === 'yes') { Crew::resume((string)$interrupted['runId']); }
         }
-        echo "{$d}Type a task for the Director. Blank line re-prompts; 'exit' or Ctrl-D to leave.{$r}\n";
+        echo "{$d}Type a task for the Director. \"clear board\" wipes the board; blank line re-prompts; 'exit' or Ctrl-D to leave.{$r}\n";
         while (true) {
             echo "\n{$c}Director ▸{$r} ";
             $line = fgets(STDIN);
@@ -1804,6 +1804,13 @@ if ($cmd === 'chat') {
             $line = trim($line);
             if ($line === '') continue;
             if (in_array(strtolower($line), ['exit', 'quit', 'q', ':q'], true)) break;
+            // Board meta-commands are handled directly — typing it here IS the explicit
+            // request, so clear it instead of spending a whole crew run on the phrase.
+            if (preg_match('/^(clear|reset|wipe|empty)\s+(the\s+)?board$/i', $line)) {
+                $cr = Crew::clearBoard();
+                echo !empty($cr['ok']) ? "{$g}✓{$r} board cleared\n" : "{$y}" . ($cr['error'] ?? 'could not clear the board') . "{$r}\n";
+                continue;
+            }
             unset($copts['runId']);                            // fresh run id per task
             Crew::run($line, $copts);
         }
