@@ -1644,7 +1644,9 @@ var App = {
             rmf('--focus', opts.focus) +
             (opts.hosts ? ' --hosts ' + "'" + String(opts.hosts).replace(/\s+/g, '').replace(/'/g, "'\\''") + "'" : '');
         var model = base;
-        var id = rid(); var t = new Terminal(id, 'crew');
+        // Use the REAL model (not the literal 'crew') so a saved/resumed crew terminal
+        // relaunches with -m <model>, not the invalid "-m crew".
+        var id = rid(); var t = new Terminal(id, model); t.kind = 'crew';
         var self = this;
         Promise.resolve(window.termCreate(id, model)).then(function () {
             self.terminals.push(t); self.render();

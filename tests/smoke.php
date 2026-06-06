@@ -633,6 +633,7 @@ ok('Windows installer bundles the engine + sets OLLAMADEV_STT_DIR',
     strpos($winps, 'whisper-windows-x64.exe') !== false && strpos($winps, 'OLLAMADEV_STT_DIR') !== false);
 $ade = (string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/app.js');
 ok('desktop has a local voice dictation module', strpos($ade, 'var Voice') !== false && strpos($ade, 'sttTranscribe') !== false && strpos($ade, 'MediaRecorder') !== false);
+ok('crew terminal uses a real model, not the literal "crew" (resume relaunch bug)', strpos($ade, "new Terminal(id, 'crew')") === false);
 ok('desktop binds sttEnabled + sttTranscribe to the CLI', strpos((string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/index.php'), 'sttTranscribe') !== false);
 
 echo "\n== Auto-remember (self-populating memory) ==\n";

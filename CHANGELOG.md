@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.8.28 (2026-06-06)
+
+### Fixed
+- **Crew terminal relaunched as `-m crew` after resume.** The desktop created the crew terminal with the literal string `'crew'` as its *model* (it was meant as a label). The live run was fine, but when the workspace was saved and reopened, the terminal was recreated with `ollamadev -m crew` → "Model 'crew' is not installed." Crew terminals now use the real model (with a separate `kind: 'crew'` label), so resume relaunches correctly.
+
 ## v4.8.27 (2026-06-06)
 
 ### Added
