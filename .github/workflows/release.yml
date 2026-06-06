@@ -68,7 +68,6 @@ jobs:
           - { runner: ubuntu-latest,    asset: whisper-linux-x64 }
           - { runner: ubuntu-24.04-arm, asset: whisper-linux-arm64 }
           - { runner: macos-14,         asset: whisper-mac-arm64 }
-          - { runner: macos-13,         asset: whisper-mac-x64 }
     runs-on: ${{ matrix.runner }}
     env:
       WHISPER_REF: v1.7.5
