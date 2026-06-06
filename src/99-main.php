@@ -1104,6 +1104,9 @@ if ($argc >= 2 && $argv[1] === 'models') {
         echo json_encode([
             'connected' => $connected,
             'models' => $connected ? $client->listModelsDetailed() : [],
+            // The configured default, so the desktop topbar selects YOUR model (not
+            // whatever Ollama happens to list first) — new terminals then launch with it.
+            'default' => (string)Config::get('ollama.defaultModel', ''),
         ]);
         exit(0);
     }

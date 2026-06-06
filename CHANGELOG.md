@@ -1,5 +1,13 @@
 # Changelog
 
+## v4.8.30 (2026-06-06)
+
+### Fixed
+- **Desktop terminals now use your configured model.** The topbar model selector built its list with no selection, so it defaulted to whatever Ollama listed *first* — meaning new terminals launched with the wrong model regardless of your `ollama.defaultModel`. `models --json` now reports the configured default and the topbar selects it, so terminals start on your chosen model (e.g. qwen3-coder).
+
+### Removed
+- Reverted the per-terminal model dropdown (v4.8.29) — the real fix is the topbar honoring your default, above.
+
 ## v4.8.29 (2026-06-06)
 
 ### Added
