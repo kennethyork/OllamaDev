@@ -808,9 +808,23 @@ if (is_resource($sproc)) {
 // underline/dim/reverse) — was foreground+bold only.
 ok('terminal renders full SGR (bg/256/truecolor + attributes)',
     strpos($ajs, 'function xterm256(') !== false && strpos($ajs, 'var ANSI16') !== false &&
-    strpos($ajs, 'this.reverse') !== false && strpos($ajs, 'this.underline') !== false &&
-    strpos($ajs, "this[target] = xterm256(") !== false &&
+    strpos($ajs, 'function parseSgr(st, p)') !== false &&
+    strpos($ajs, 'st.reverse') !== false && strpos($ajs, 'st.underline') !== false &&
+    strpos($ajs, "st[target] = xterm256(") !== false &&
     strpos($ajs, 'c >= 40 && c <= 47') !== false);
+// Desktop+web polish: real alt-screen grid emulator for full-screen TUIs (vim/htop),
+// with pty-resize so the program's layout matches what we render.
+ok('alt-screen TUI grid emulator present', strpos($ajs, 'function TermGrid(') !== false &&
+    strpos($ajs, 'TermGrid.prototype.csi') !== false && strpos($ajs, 'TermGrid.prototype.renderHtml') !== false &&
+    strpos($ajs, "/^\\?(1049|47|1047)\$/.test(pp)") !== false &&     // alt-screen toggle detection
+    strpos($ajs, 'this.enterAlt()') !== false && strpos($ajs, 'this.grid.csi(pp, fin)') !== false);
+ok('terminal sizes the pty to the screen (termResize)',
+    strpos($ajs, 'window.termResize(this.id, cols, rows)') !== false &&
+    strpos($ajs, 'Terminal.prototype.fit') !== false && strpos($ajs, 'Terminal.prototype.measure') !== false &&
+    strpos($bind, 'function termResize(') !== false && strpos($brg, 'termResize') !== false);
+// The pty daemon honors resize by setting the pts window size → SIGWINCH (backend).
+ok('pty daemon applies resize via stty on the pts', strpos($src, "stty -F ' . escapeshellarg(\$pts)") !== false &&
+    strpos($src, 'pty-size') !== false);
 ok('web mode stays vanilla (no deps in web/)', !is_file($adeDir . '/web/package.json') && strpos($brg, 'import ') === false && strpos($brg, 'require(') === false);
 ok('composer serve script wired', strpos((string)@file_get_contents($adeDir . '/composer.json'), '"serve"') !== false);
 $adeCss = (string)@file_get_contents($adeDir . '/public/app.css');

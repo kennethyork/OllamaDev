@@ -19,7 +19,7 @@ final class Bindings
 
     // Names callable over HTTP (and the arg order the web shim sends).
     public const PUBLIC = [
-        'listModels', 'termCreate', 'termRead', 'termWrite', 'termKill', 'agentRun',
+        'listModels', 'termCreate', 'termRead', 'termWrite', 'termKill', 'termResize', 'agentRun',
         'cliPath', 'sttEnabled', 'sttTranscribe', 'crewBoard', 'homeDir',
         'crewCoderLog', 'memoryGraph', 'getRoot', 'setRoot', 'listFiles', 'readFile', 'writeFile',
         'wsList', 'wsAdd', 'wsRemove', 'wsSetActive', 'wsSaveState',
@@ -64,6 +64,7 @@ final class Bindings
     public function termRead(string $id, int $offset = 0): array { return $this->pty->read($id, $offset); }
     public function termWrite(string $id, string $b64): bool { return $this->pty->write($id, $b64); }
     public function termKill(string $id): bool { $this->pty->delete($id); return true; }
+    public function termResize(string $id, int $cols, int $rows): bool { return $this->pty->resize($id, $cols, $rows); }
     public function agentRun(string $id, string $prompt): bool { return $this->pty->agentRun($id, $prompt); }
 
     public function cliPath(): string { return $this->cli; }

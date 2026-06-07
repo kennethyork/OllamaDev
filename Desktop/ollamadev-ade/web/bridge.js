@@ -8,7 +8,7 @@
   if (typeof window.listModels === 'function') return;
 
   var TOKEN = new URLSearchParams(location.search).get('token') || '';
-  var NAMES = ['listModels', 'termCreate', 'termRead', 'termWrite', 'termKill', 'agentRun',
+  var NAMES = ['listModels', 'termCreate', 'termRead', 'termWrite', 'termKill', 'termResize', 'agentRun',
     'cliPath', 'sttEnabled', 'sttTranscribe', 'crewBoard', 'homeDir',
     'crewCoderLog', 'memoryGraph', 'getRoot', 'setRoot', 'listFiles', 'readFile', 'writeFile',
     'wsList', 'wsAdd', 'wsRemove', 'wsSetActive', 'wsSaveState',

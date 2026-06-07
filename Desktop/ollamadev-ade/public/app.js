@@ -97,6 +97,150 @@ function xterm256(n) {
     var v = 8 + (n - 232) * 10; return 'rgb(' + v + ',' + v + ',' + v + ')';
 }
 
+// Apply an SGR (\x1b[…m) parameter string to a style state object {fg,bg,bold,
+// dim,italic,underline,reverse}. Shared by the line renderer and the grid.
+function parseSgr(st, p) {
+    var codes = p.split(';').filter(function (x) { return x !== ''; }).map(Number);
+    if (!codes.length) codes = [0];
+    for (var i = 0; i < codes.length; i++) {
+        var c = codes[i];
+        if (c === 0) { st.fg = null; st.bg = null; st.bold = false; st.dim = false; st.italic = false; st.underline = false; st.reverse = false; }
+        else if (c === 1) st.bold = true;
+        else if (c === 2) st.dim = true;
+        else if (c === 3) st.italic = true;
+        else if (c === 4) st.underline = true;
+        else if (c === 7) st.reverse = true;
+        else if (c === 22) { st.bold = false; st.dim = false; }
+        else if (c === 23) st.italic = false;
+        else if (c === 24) st.underline = false;
+        else if (c === 27) st.reverse = false;
+        else if (c === 39) st.fg = null;
+        else if (c === 49) st.bg = null;
+        else if (c === 38 || c === 48) {
+            var target = c === 38 ? 'fg' : 'bg';
+            if (codes[i + 1] === 5) { st[target] = xterm256(codes[i + 2]); i += 2; }
+            else if (codes[i + 1] === 2) { st[target] = 'rgb(' + (codes[i + 2] | 0) + ',' + (codes[i + 3] | 0) + ',' + (codes[i + 4] | 0) + ')'; i += 4; }
+        }
+        else if (ANSI_FG[c]) st.fg = ANSI_FG[c];
+        else if (c >= 40 && c <= 47) st.bg = ANSI16[c - 40];
+        else if (c >= 100 && c <= 107) st.bg = ANSI16[c - 100 + 8];
+    }
+}
+
+// ---------- TermGrid: a real cell-grid terminal emulator for the alt screen ----
+// Full-screen TUIs (vim, htop, less, top) switch to the alternate screen buffer
+// and drive an absolute cursor. The line renderer can't model that, so when a
+// program enters the alt screen we hand bytes to this grid: rows×cols of styled
+// cells with a cursor, scroll region, erase, and scroll. Pure vanilla; the pty is
+// told the same cols/rows (termResize) so the program's layout matches.
+function TermGrid(cols, rows) {
+    this.cols = Math.max(2, cols | 0); this.rows = Math.max(2, rows | 0);
+    this.cx = 0; this.cy = 0; this.top = 0; this.bot = this.rows - 1;
+    this.st = { fg: null, bg: null, bold: false, dim: false, italic: false, underline: false, reverse: false };
+    this.saved = null;
+    this.cells = []; for (var r = 0; r < this.rows; r++) this.cells.push(this.blankRow());
+}
+TermGrid.prototype.blankCell = function () { return { ch: ' ', fg: null, bg: null, bold: false, dim: false, italic: false, underline: false, reverse: false }; };
+TermGrid.prototype.blankRow = function () { var a = []; for (var c = 0; c < this.cols; c++) a.push(this.blankCell()); return a; };
+TermGrid.prototype.resize = function (cols, rows) {
+    cols = Math.max(2, cols | 0); rows = Math.max(2, rows | 0);
+    var old = this.cells, oc = this.cols;
+    this.cols = cols; this.rows = rows; this.top = 0; this.bot = rows - 1;
+    this.cells = [];
+    for (var r = 0; r < rows; r++) {
+        var row = this.blankRow();
+        if (old[r]) for (var c = 0; c < cols && c < oc; c++) row[c] = old[r][c];
+        this.cells.push(row);
+    }
+    if (this.cx >= cols) this.cx = cols - 1; if (this.cy >= rows) this.cy = rows - 1;
+};
+TermGrid.prototype.clamp = function () { if (this.cx < 0) this.cx = 0; if (this.cx >= this.cols) this.cx = this.cols - 1; if (this.cy < this.top) this.cy = this.top; if (this.cy > this.bot) this.cy = this.bot; };
+TermGrid.prototype.scrollUp = function () { this.cells.splice(this.top, 1); this.cells.splice(this.bot, 0, this.blankRow()); };
+TermGrid.prototype.scrollDown = function () { this.cells.splice(this.bot, 1); this.cells.splice(this.top, 0, this.blankRow()); };
+TermGrid.prototype.lf = function () { if (this.cy >= this.bot) this.scrollUp(); else this.cy++; };
+TermGrid.prototype.cr = function () { this.cx = 0; };
+TermGrid.prototype.bs = function () { if (this.cx > 0) this.cx--; };
+TermGrid.prototype.putText = function (s) {
+    for (var i = 0; i < s.length; i++) {
+        var ch = s[i];
+        if (ch === '\t') { var n = 8 - (this.cx % 8); for (var k = 0; k < n && this.cx < this.cols; k++) this.putChar(' '); continue; }
+        this.putChar(ch);
+    }
+};
+TermGrid.prototype.putChar = function (ch) {
+    if (this.cx >= this.cols) { this.cx = 0; this.lf(); }
+    var cell = this.cells[this.cy][this.cx];
+    cell.ch = ch; cell.fg = this.st.fg; cell.bg = this.st.bg; cell.bold = this.st.bold;
+    cell.dim = this.st.dim; cell.italic = this.st.italic; cell.underline = this.st.underline; cell.reverse = this.st.reverse;
+    this.cx++;
+};
+TermGrid.prototype.eraseLine = function (m, row) {
+    var r = this.cells[row == null ? this.cy : row]; if (!r) return;
+    var a = 0, b = this.cols - 1;
+    if (m === 0) a = this.cx; else if (m === 1) b = this.cx;
+    for (var c = a; c <= b; c++) r[c] = this.blankCell();
+};
+TermGrid.prototype.eraseDisplay = function (m) {
+    if (m === 2 || m === 3) { for (var r = 0; r < this.rows; r++) this.cells[r] = this.blankRow(); return; }
+    if (m === 0) { this.eraseLine(0); for (var r2 = this.cy + 1; r2 < this.rows; r2++) this.cells[r2] = this.blankRow(); }
+    else if (m === 1) { this.eraseLine(1); for (var r3 = 0; r3 < this.cy; r3++) this.cells[r3] = this.blankRow(); }
+};
+// Handle one CSI sequence (params string + final letter). Covers the set TUIs use.
+TermGrid.prototype.csi = function (params, fin) {
+    var ps = params.replace(/^\?/, '').split(';').map(function (x) { return x === '' ? 0 : parseInt(x, 10); });
+    var n = ps[0] || 0, n1 = ps[0] === 0 || isNaN(ps[0]) ? 1 : ps[0];
+    switch (fin) {
+        case 'm': parseSgr(this.st, params); break;
+        case 'H': case 'f': this.cy = (this.top) + ((ps[0] || 1) - 1); this.cx = (ps[1] || 1) - 1; this.clamp(); break;
+        case 'A': this.cy -= n1; this.clamp(); break;
+        case 'B': this.cy += n1; this.clamp(); break;
+        case 'C': this.cx += n1; this.clamp(); break;
+        case 'D': this.cx -= n1; this.clamp(); break;
+        case 'G': this.cx = (ps[0] || 1) - 1; this.clamp(); break;
+        case 'd': this.cy = (ps[0] || 1) - 1; this.clamp(); break;
+        case 'E': this.cx = 0; this.cy += n1; this.clamp(); break;
+        case 'F': this.cx = 0; this.cy -= n1; this.clamp(); break;
+        case 'J': this.eraseDisplay(n); break;
+        case 'K': this.eraseLine(n); break;
+        case 'L': for (var i = 0; i < n1; i++) { this.cells.splice(this.bot, 1); this.cells.splice(this.cy, 0, this.blankRow()); } break; // insert lines
+        case 'M': for (var j = 0; j < n1; j++) { this.cells.splice(this.cy, 1); this.cells.splice(this.bot, 0, this.blankRow()); } break; // delete lines
+        case 'P': { var r = this.cells[this.cy]; for (var d = 0; d < n1; d++) { r.splice(this.cx, 1); r.push(this.blankCell()); } break; } // delete chars
+        case '@': { var r2 = this.cells[this.cy]; for (var e = 0; e < n1; e++) { r2.splice(this.cx, 0, this.blankCell()); r2.pop(); } break; } // insert chars
+        case 'S': for (var s = 0; s < n1; s++) this.scrollUp(); break;
+        case 'T': for (var t = 0; t < n1; t++) this.scrollDown(); break;
+        case 'r': this.top = (ps[0] || 1) - 1; this.bot = (ps[1] || this.rows) - 1; this.cx = 0; this.cy = this.top; break; // scroll region
+        case 's': this.saved = { cx: this.cx, cy: this.cy }; break;
+        case 'u': if (this.saved) { this.cx = this.saved.cx; this.cy = this.saved.cy; } break;
+        case 'X': { var r3 = this.cells[this.cy]; for (var x = 0; x < n1 && this.cx + x < this.cols; x++) r3[this.cx + x] = this.blankCell(); break; } // erase chars
+    }
+};
+// Build the grid as styled HTML (one div per row, run-length spans by attributes).
+TermGrid.prototype.renderHtml = function () {
+    var out = [];
+    for (var r = 0; r < this.rows; r++) {
+        var row = this.cells[r], line = '', run = '', cur = null;
+        var flush = function () {
+            if (run === '') return;
+            var sp = '<span', s = cur;
+            var fg = s.fg, bg = s.bg;
+            if (s.reverse) { var tmp = fg; fg = bg || '#0d1117'; bg = tmp || '#c9d1d9'; }
+            var st = '';
+            if (fg) st += 'color:' + fg + ';'; if (bg) st += 'background:' + bg + ';';
+            if (s.bold) st += 'font-weight:700;'; if (s.dim) st += 'opacity:.6;';
+            if (s.italic) st += 'font-style:italic;'; if (s.underline) st += 'text-decoration:underline;';
+            line += (st ? '<span style="' + st + '">' : '<span>') + esc(run) + '</span>'; run = '';
+        };
+        for (var c = 0; c < this.cols; c++) {
+            var cell = row[c];
+            if (!cur || cell.fg !== cur.fg || cell.bg !== cur.bg || cell.bold !== cur.bold || cell.dim !== cur.dim || cell.italic !== cur.italic || cell.underline !== cur.underline || cell.reverse !== cur.reverse) { flush(); cur = cell; }
+            run += cell.ch;
+        }
+        flush();
+        out.push('<div class="term-line">' + (line || '&nbsp;') + '</div>');
+    }
+    return out.join('');
+};
+
 // Map a browser keydown to the byte sequence a real terminal would send, so the
 // pty (and the raw-mode ollamadev CLI inside it) gets live keystrokes.
 function keyToBytes(e) {
@@ -142,6 +286,7 @@ function Terminal(id, model, cwd) {
     this.screen = null; this.line = null; this.fg = null; this.bg = null; this.bold = false;
     this.dim = false; this.italic = false; this.underline = false; this.reverse = false;
     this.status = 'idle'; this.lastData = 0; this.badgeEl = null; this.cr = false;
+    this.alt = false; this.grid = null; this.gridEl = null; this._cols = 0; this._rows = 0;
 }
 Terminal.prototype.mount = function (host) {
     var self = this;
@@ -217,8 +362,9 @@ Terminal.prototype.mount = function (host) {
         if (t) { e.preventDefault(); try { window.termWrite(self.id, strToB64(t)); } catch (err) {} }
     });
     this.screen.onclick = function () { self.screen.focus(); };
+    this.alt = false; this.grid = null; this.gridEl = null;   // alt screen never survives a remount
     if (!this.polling) this.poll();
-    setTimeout(function () { self.screen.focus(); }, 0);
+    setTimeout(function () { self.screen.focus(); self.fit(); }, 0);   // size the pty once laid out
 };
 Terminal.prototype.setStatus = function (s) {
     this.status = s;
@@ -260,34 +406,32 @@ Terminal.prototype.emit = function (s) {
     if (this.underline) sp.style.textDecoration = 'underline';
     sp.textContent = s; this.line.appendChild(sp);
 };
-Terminal.prototype.sgr = function (p) {
-    var codes = p.split(';').filter(function (x) { return x !== ''; }).map(Number);
-    if (!codes.length) codes = [0];
-    for (var i = 0; i < codes.length; i++) {
-        var c = codes[i];
-        if (c === 0) { this.fg = null; this.bg = null; this.bold = false; this.dim = false; this.italic = false; this.underline = false; this.reverse = false; }
-        else if (c === 1) this.bold = true;
-        else if (c === 2) this.dim = true;
-        else if (c === 3) this.italic = true;
-        else if (c === 4) this.underline = true;
-        else if (c === 7) this.reverse = true;
-        else if (c === 22) { this.bold = false; this.dim = false; }
-        else if (c === 23) this.italic = false;
-        else if (c === 24) this.underline = false;
-        else if (c === 27) this.reverse = false;
-        else if (c === 39) this.fg = null;
-        else if (c === 49) this.bg = null;
-        // 256-color / truecolor: 38;5;n or 38;2;r;g;b (fg), 48;… (bg). Consume the
-        // extended args inline so they aren't misread as separate SGR codes.
-        else if (c === 38 || c === 48) {
-            var target = c === 38 ? 'fg' : 'bg';
-            if (codes[i + 1] === 5) { this[target] = xterm256(codes[i + 2]); i += 2; }
-            else if (codes[i + 1] === 2) { this[target] = 'rgb(' + (codes[i + 2] | 0) + ',' + (codes[i + 3] | 0) + ',' + (codes[i + 4] | 0) + ')'; i += 4; }
-        }
-        else if (ANSI_FG[c]) this.fg = ANSI_FG[c];                       // 30-37, 90-97
-        else if (c >= 40 && c <= 47) this.bg = ANSI16[c - 40];           // standard bg
-        else if (c >= 100 && c <= 107) this.bg = ANSI16[c - 100 + 8];    // bright bg
-    }
+Terminal.prototype.sgr = function (p) { parseSgr(this, p); };
+// Enter/leave the alternate screen: build/tear down the cell grid for full-screen
+// TUIs. The line scrollback is hidden (not destroyed) while the grid is shown.
+Terminal.prototype.enterAlt = function () {
+    if (this.alt) return;
+    this.alt = true;
+    this.grid = new TermGrid(this._cols || 80, this._rows || 24);
+    this.gridEl = document.createElement('div');
+    this.gridEl.className = 'term-grid';
+    this.screen.appendChild(this.gridEl);
+};
+Terminal.prototype.leaveAlt = function () {
+    if (!this.alt) return;
+    this.alt = false; this.grid = null;
+    if (this.gridEl && this.gridEl.parentNode) this.gridEl.parentNode.removeChild(this.gridEl);
+    this.gridEl = null;
+    if (this.screen) this.screen.scrollTop = this.screen.scrollHeight;
+};
+Terminal.prototype.renderGrid = function () {
+    if (!this.alt || !this.gridEl || !this.grid) return;
+    var self = this;
+    if (this._gridRaf) return;   // batch to one repaint per frame
+    this._gridRaf = (window.requestAnimationFrame || function (f) { return setTimeout(f, 16); })(function () {
+        self._gridRaf = 0;
+        if (self.gridEl && self.grid) self.gridEl.innerHTML = self.grid.renderHtml();
+    });
 };
 Terminal.prototype.write = function (text) {
     if (!this.screen) return;
@@ -296,11 +440,31 @@ Terminal.prototype.write = function (text) {
     while (i < text.length) {
         var ch = text[i];
         if (ch === '\x1b') {
-            var csi = /^\x1b\[([0-9;?]*)([A-Za-z])/.exec(text.slice(i));
-            if (csi) { if (csi[2] === 'm') this.sgr(csi[1]); else if ((csi[2] === 'K' || csi[2] === 'J') && this.line) this.line.innerHTML = ''; i += csi[0].length; continue; }
+            var csi = /^\x1b\[([0-9;?]*)([A-Za-z@])/.exec(text.slice(i));
+            if (csi) {
+                var pp = csi[1], fin = csi[2];
+                // Alt-screen toggle (?1049/?47/?1047 h|l) — switch between the line
+                // scrollback and the cell grid.
+                if (/^\?(1049|47|1047)$/.test(pp) && (fin === 'h' || fin === 'l')) {
+                    if (fin === 'h') this.enterAlt(); else this.leaveAlt();
+                } else if (this.alt && this.grid) {
+                    if (fin !== 'h' && fin !== 'l') this.grid.csi(pp, fin);   // ignore other private mode sets
+                } else if (fin === 'm') this.sgr(pp);
+                else if ((fin === 'K' || fin === 'J') && this.line) this.line.innerHTML = '';
+                i += csi[0].length; continue;
+            }
             var osc = /^\x1b\][^\x07]*(?:\x07|\x1b\\)/.exec(text.slice(i));
             if (osc) { i += osc[0].length; continue; }
-            i++; continue;
+            // Bare ESC sequences (RI, etc.) in alt mode: skip the next byte.
+            i++; if (this.alt && text[i] && /[A-Za-z=>]/.test(text[i])) i++; continue;
+        }
+        if (this.alt && this.grid) {
+            if (ch === '\r') { this.grid.cr(); i++; continue; }
+            if (ch === '\n') { this.grid.lf(); i++; continue; }
+            if (ch === '\x08') { this.grid.bs(); i++; continue; }
+            var aj = i;
+            while (aj < text.length && text[aj] !== '\x1b' && text[aj] !== '\n' && text[aj] !== '\r' && text[aj] !== '\x08') aj++;
+            this.grid.putText(text.slice(i, aj).replace(/[\x00-\x07\x0b-\x1f\x7f]/g, '')); i = aj; continue;
         }
         if (ch === '\r') { this.cr = true; i++; continue; }
         if (ch === '\n') { this.cr = false; this.newLine(); i++; continue; }
@@ -314,7 +478,29 @@ Terminal.prototype.write = function (text) {
                && text[j] !== '\x08' && text[j] !== '\x7f') j++;
         this.emit(text.slice(i, j)); i = j;
     }
-    if (bottom) this.screen.scrollTop = this.screen.scrollHeight;
+    if (this.alt) this.renderGrid();
+    else if (bottom) this.screen.scrollTop = this.screen.scrollHeight;
+};
+// Measure one monospace cell, compute cols×rows from the screen size, and tell the
+// pty (termResize) so a TUI's layout matches what we render. Re-fits on resize/zoom.
+Terminal.prototype.measure = function () {
+    var probe = document.createElement('span');
+    probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font:inherit;';
+    probe.textContent = '0000000000000000000000000000000000000000';   // 40 chars
+    this.screen.appendChild(probe);
+    var rect = probe.getBoundingClientRect();
+    this.screen.removeChild(probe);
+    return { cw: (rect.width / 40) || 8, ch: rect.height || 16 };
+};
+Terminal.prototype.fit = function () {
+    if (!this.screen || !this.screen.clientWidth) return;
+    var m = this.measure();
+    var cols = Math.max(20, Math.floor((this.screen.clientWidth - 6) / m.cw));
+    var rows = Math.max(6, Math.floor((this.screen.clientHeight - 4) / m.ch));
+    if (cols === this._cols && rows === this._rows) return;
+    this._cols = cols; this._rows = rows;
+    try { window.termResize(this.id, cols, rows); } catch (e) {}
+    if (this.alt && this.grid) { this.grid.resize(cols, rows); this.renderGrid(); }
 };
 Terminal.prototype.poll = function () {
     var self = this; this.polling = true;
@@ -1474,6 +1660,13 @@ var App = {
         Roles.bind();
         SkillMgr.bind();
         HookMgr.bind();
+        // Re-fit every mounted terminal to its new pixel size (debounced), so the
+        // pty's cols/rows track window resizes and TUIs reflow correctly.
+        var self = this, fitTimer = null;
+        window.addEventListener('resize', function () {
+            clearTimeout(fitTimer);
+            fitTimer = setTimeout(function () { (self.terminals || []).forEach(function (t) { if (t.screen) t.fit(); }); }, 120);
+        });
         Net.bind(); Net.load();
         Browser.bind();
         CodeSearch.bind();

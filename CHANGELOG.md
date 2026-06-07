@@ -1,5 +1,13 @@
 # Changelog
 
+## v4.8.56 (2026-06-07) — full-screen TUI support (vim/htop) in the terminal
+
+### Added
+- **Real alt-screen terminal emulator** (desktop + web). Full-screen TUIs — **vim, htop, less, top, lazygit** — now render correctly. When a program enters the alternate screen, the terminal switches from the line renderer to a **cell grid** with an absolute cursor, scroll region, insert/delete line & char, erase, and full styling; on exit it restores your scrollback. Pure vanilla JS (a hand-written `TermGrid`), no xterm.js.
+- **PTY auto-sizing.** The terminal measures its character cell, computes cols×rows, and tells the PTY (`termResize` → the daemon sets the pts window size, delivering SIGWINCH) — so a TUI's layout matches the pane and **reflows on window resize**. The backend resize path already existed; this wires the frontend to it.
+
+_The grid emulator is unit-tested headlessly (cursor positioning, erase, scroll, color, resize) via node; final visual polish is best spot-checked in a real terminal. 100% vanilla php/js/css/html._
+
 ## v4.8.55 (2026-06-07) — desktop & web terminal polish
 
 ### Added
