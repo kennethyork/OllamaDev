@@ -1,5 +1,14 @@
 # Changelog
 
+## v4.8.41 (2026-06-06)
+
+### Added
+- **Free-floating window layout (desktop).** A new **⊞ Tiled / ⮻ Free** toggle in the top bar. In Free mode, terminals become draggable, resizable windows that can overlap — drag a header to move, drag the bottom-right corner to resize, click to bring to front. Positions and sizes are saved per workspace; Tiled (the auto-grid) is still there.
+- **Director answer mode.** In the interactive crew, type `ask` (or a one-off `?<question>`) and the Director just *answers* — a bounded read-only run that may read the codebase but never writes or starts a task. Type `task` to go back to building.
+
+### Fixed
+- **Crew and Director terminals didn't come back after closing the app.** Restore was respawning them as an invalid `-m Director` / a plain agent. Restore is now terminal-kind-aware: the Director terminal returns running `crew director`, and the crew terminal returns as the interactive `crew` prompt. (Per-terminal kind and working folder are now persisted too.)
+
 ## v4.8.40 (2026-06-06)
 
 ### Changed

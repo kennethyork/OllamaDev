@@ -1292,7 +1292,7 @@ var Stt = {
 };
 
 var App = {
-    terminals: [], cwd: '.', layout: 'split', zoomed: null, view: 'code', panel: 'files', crewBoard: null, crewPoll: null,
+    terminals: [], cwd: '.', layout: 'split', termLayout: 'tiled', zoomed: null, view: 'code', panel: 'files', crewBoard: null, crewPoll: null,
     // PTYs spawned this session, by id. Survives detach (workspace switch) so we
     // can RE-attach a still-running terminal; gone after a restart → respawn fresh.
     live: {},
@@ -1301,6 +1301,7 @@ var App = {
         this.initThemes();
         this.startAutosave();   // persist the active workspace so it resumes on reopen
         $('#newTermBtn').onclick = function () { self.newTerminal(); };
+        var ta = $('#termArrange'); if (ta) ta.onclick = function () { self.setTermLayout(self.termLayout === 'free' ? 'tiled' : 'free'); };
         $('#layoutBtn').onclick = function () { self.cycleLayout(); };
         // Open-folder modal
         var ofb = $('#openFolderBtn'); if (ofb) ofb.onclick = function () { self.openFolderModal(false); };
@@ -2001,7 +2002,8 @@ var App = {
     // Snapshot the current window so a workspace can be restored exactly.
     captureState: function () {
         return {
-            terminals: this.terminals.map(function (t) { return { id: t.id, model: t.model, kind: t.kind || '', cwd: t.cwd || '' }; }),
+            terminals: this.terminals.map(function (t) { return { id: t.id, model: t.model, kind: t.kind || '', cwd: t.cwd || '', x: t.x, y: t.y, w: t.w, h: t.h, z: t.z }; }),
+            termLayout: this.termLayout,
             editorTabs: Editor.tabs.map(function (t) { return { path: t.path, name: t.name }; }),
             layout: this.layout,
             view: this.view,
@@ -2016,6 +2018,13 @@ var App = {
         Editor.closeAll();
         (state.editorTabs || []).forEach(function (t) { Editor.open(t.path, t.name); });
         var terms = state.terminals || [];
+        // Free-layout: restore the mode + saved geometry (by id for re-attached panes,
+        // by index for respawned ones). applyGeom consumes these on the first free render.
+        this.termLayout = state.termLayout === 'free' ? 'free' : 'tiled';
+        var arr = $('#termArrange'); if (arr) arr.textContent = this.termLayout === 'free' ? '⮻ Free' : '⊞ Tiled';
+        this._geomQueue = terms.map(function (g) { return { x: g.x, y: g.y, w: g.w, h: g.h, z: g.z }; });
+        this._geomById = {};
+        terms.forEach(function (g) { if (g.id) self._geomById[g.id] = { x: g.x, y: g.y, w: g.w, h: g.h, z: g.z }; if (g.z > self._zTop) self._zTop = g.z; });
         var attached = 0;
         terms.forEach(function (ti) { if (self.live[ti.id]) { self.attachTerminal(ti.id, ti.model, ti.kind, ti.cwd); attached++; } });
         this.zoomed = state.zoomed || null;
@@ -2036,6 +2045,7 @@ var App = {
     },
     render: function () {
         var wrap = $('#terminals');
+        if (this.termLayout === 'free') return this.renderFree(wrap);
         // A zoomed terminal takes the whole area; otherwise the CSS responsive
         // grid fits as many readable-width panes as possible and scrolls for more.
         // Hoist zoomed into a local: the callbacks below must not read `this`
@@ -2059,6 +2069,68 @@ var App = {
             pane.className = 'term-pane';
             wrap.appendChild(pane);
             t.mount(pane);
+        });
+    },
+    // ---- Free-floating layout: drag the header, resize the corner, overlap freely ----
+    setTermLayout: function (mode) {
+        this.termLayout = (mode === 'free') ? 'free' : 'tiled';
+        var btn = $('#termArrange'); if (btn) btn.textContent = this.termLayout === 'free' ? '⮻ Free' : '⊞ Tiled';
+        if (this.termLayout === 'free') this.zoomed = null;   // zoom is a tiled-only concept
+        this.render();
+        if (Workspaces && Workspaces.saveCurrentState) Workspaces.saveCurrentState();
+    },
+    renderFree: function (wrap) {
+        var self = this;
+        wrap.className = 'free';
+        wrap.style.gridTemplateColumns = '';
+        wrap.style.setProperty('--tfs', '13px');
+        var cv = $('#codeView'); if (cv) cv.classList.remove('term-zoom');
+        wrap.innerHTML = '';
+        this.terminals.forEach(function (t, i) {
+            if (typeof t.x !== 'number') self.applyGeom(t, i);
+            var pane = document.createElement('div');
+            pane.className = 'term-pane';
+            pane.style.left = t.x + 'px'; pane.style.top = t.y + 'px';
+            pane.style.width = t.w + 'px'; pane.style.height = t.h + 'px';
+            pane.style.zIndex = t.z || 1;
+            wrap.appendChild(pane);
+            t.mount(pane);
+            var rh = document.createElement('div'); rh.className = 'term-resize'; pane.appendChild(rh);
+            self.wireFree(t, pane, rh);
+        });
+    },
+    // Pick a starting geometry: a saved one (by index, from restore) or a cascade.
+    applyGeom: function (t, i) {
+        var g = (this._geomById && this._geomById[t.id]) || (this._geomQueue && this._geomQueue[i]) || null;
+        if (g && typeof g.x === 'number') { t.x = g.x; t.y = g.y; t.w = g.w; t.h = g.h; t.z = g.z || ++this._zTop; }
+        else { t.x = 24 + (i * 30) % 240; t.y = 24 + (i * 30) % 170; t.w = 540; t.h = 340; t.z = ++this._zTop; }
+    },
+    _zTop: 1,
+    bringFront: function (t, pane) { t.z = ++this._zTop; pane.style.zIndex = t.z; },
+    saveGeomSoon: function () {
+        var self = this; clearTimeout(this._geomSave);
+        this._geomSave = setTimeout(function () { if (Workspaces && Workspaces.saveCurrentState) Workspaces.saveCurrentState(); }, 400);
+    },
+    wireFree: function (t, pane, rh) {
+        var self = this;
+        pane.addEventListener('mousedown', function () { self.bringFront(t, pane); });
+        var head = pane.querySelector('.term-head');
+        if (head) head.addEventListener('mousedown', function (e) {
+            if (e.target.closest('.zoom, .x, .term-cd, .term-cd-edit, .badge')) return;   // let buttons work
+            e.preventDefault();
+            var sx = e.clientX, sy = e.clientY, ox = t.x, oy = t.y;
+            function mv(ev) { t.x = Math.max(0, ox + ev.clientX - sx); t.y = Math.max(0, oy + ev.clientY - sy); pane.style.left = t.x + 'px'; pane.style.top = t.y + 'px'; }
+            function up() { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); document.body.style.userSelect = ''; self.saveGeomSoon(); }
+            document.body.style.userSelect = 'none';
+            document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
+        });
+        rh.addEventListener('mousedown', function (e) {
+            e.preventDefault(); e.stopPropagation();
+            var sx = e.clientX, sy = e.clientY, ow = t.w, oh = t.h;
+            function mv(ev) { t.w = Math.max(240, ow + ev.clientX - sx); t.h = Math.max(130, oh + ev.clientY - sy); pane.style.width = t.w + 'px'; pane.style.height = t.h + 'px'; }
+            function up() { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); document.body.style.userSelect = ''; self.saveGeomSoon(); }
+            document.body.style.userSelect = 'none';
+            document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
         });
     }
 };

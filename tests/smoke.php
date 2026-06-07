@@ -936,6 +936,11 @@ ok('Director has an answer mode (read-only Q&A, no tasking)', strpos($src, 'publ
 ok('desktop restores crew/director terminals to their real command', strpos($ajs, 'spawnCmd: function') !== false &&
     strpos($ajs, "ti.kind === 'director'") !== false && strpos($ajs, "cli + ' crew director'") !== false &&
     strpos($ajs, "cli + ' crew'") !== false);
+// Free-floating window layout: tiled↔free toggle, drag/resize, geometry persisted.
+$ihtml = (string) @file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/index.html');
+ok('desktop has a free-floating (drag/resize) terminal layout', strpos($ajs, 'renderFree: function') !== false &&
+    strpos($ajs, 'setTermLayout: function') !== false && strpos($ajs, 'wireFree: function') !== false &&
+    strpos($ajs, 'termLayout: this.termLayout') !== false && strpos($ihtml, 'id="termArrange"') !== false);
 ok('interactive crew loops Crew::run per prompt', strpos($src, "in_array(strtolower(\$line), ['exit', 'quit', 'q', ':q']") !== false);
 
 echo "\n== LM Studio provider ==\n";

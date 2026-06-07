@@ -206,6 +206,13 @@ textarea.field { min-height: 84px; resize: vertical; line-height: 1.5; }
 #terminals { flex: 1 1 40%; display: grid; gap: 6px; padding: 6px; min-height: 0; overflow: hidden;
     grid-auto-rows: minmax(0, 1fr); grid-template-columns: 1fr; --tfs: 13px; }
 #terminals.zoomed { grid-template-columns: 1fr !important; grid-auto-rows: 1fr; --tfs: 13px; }
+/* Free-floating layout: panes are draggable/resizable windows that can overlap. */
+#terminals.free { display: block; position: relative; overflow: hidden; padding: 0; }
+#terminals.free .term-pane { position: absolute; box-shadow: var(--shadow); }
+#terminals.free .term-head { cursor: move; }
+#terminals.free .term-resize { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; z-index: 6;
+    background: linear-gradient(135deg, transparent 50%, var(--border) 50%, var(--border) 60%, transparent 60%, transparent 70%, var(--border) 70%, var(--border) 80%, transparent 80%); }
+#terminals.free .term-resize:hover { filter: brightness(1.6); }
 /* dense mode (>6 panes): slim the chrome so more of each cell is the terminal */
 #terminals.dense .term-head { padding: 3px 8px; font-size: 11px; }
 #terminals.dense .term-head .badge { padding: 0 6px; font-size: 10px; }
