@@ -1386,6 +1386,35 @@ ok('Eval loads user task JSON from ./evals and ~/.ollamadev/evals', strpos($eval
 ok('CLI exposes eval (suite + pass rate)', strpos($mainSrc, "\$argv[1] === 'eval'") !== false &&
     strpos($mainSrc, 'Pass rate:') !== false && strpos($mainSrc, 'Evals::suite(') !== false);
 
+// ── Auto-escalate on failure: a weak model hands off to a bigger installed one ──
+if (preg_match('/class Models \{.*?\n\}/s', $src, $mEsc)) {
+    if (!class_exists('Config')) { if (preg_match('/class Config \{.*?\n\}/s', $src, $cfgE)) eval($cfgE[0]); }
+    if (!class_exists('Models')) eval($mEsc[0]);
+    ok('Models::paramSize parses the tag size (not the family version)',
+        Models::paramSize('qwen2.5-coder:14b') === 14.0 && Models::paramSize('llama3.2:3b') === 3.0 &&
+        Models::paramSize('qwen3.6:latest') === null);
+    $inst = ['qwen2.5-coder:7b', 'qwen2.5-coder:14b', 'qwen2.5-coder:32b'];
+    ok('Models::escalate climbs to the next-bigger installed model',
+        Models::escalate('qwen2.5-coder:7b', $inst) === 'qwen2.5-coder:14b' &&
+        Models::escalate('qwen2.5-coder:32b', $inst) === null);   // nothing bigger
+    ok('Models::escalate honors a configured ladder', (function () {
+        Config::set('models.escalation', ['a:1b', 'b:2b', 'c:3b']);
+        $r = Models::escalate('a:1b', ['a:1b', 'c:3b']);   // b not installed → skip to c
+        Config::set('models.escalation', null);
+        return $r === 'c:3b';
+    })());
+}
+// Crew auto-escalates a coder on an empty/failed retry; opt out with --no-escalate.
+ok('crew auto-escalates a stalled coder', strpos($src, 'Models::escalate($mCoder, $installedModels)') !== false &&
+    strpos($src, "Config::get('crew.escalate', true)") !== false && strpos($src, "'--no-escalate'") !== false);
+// eval --escalate retries a failed task on a bigger model; --min gates the exit code.
+ok('eval supports --escalate and --min threshold', strpos($mainSrc, "in_array('--escalate', \$args, true)") !== false &&
+    strpos($mainSrc, "\$a === '--min'") !== false && strpos($mainSrc, '$min >= 0 ? ($rate >= $min)') !== false &&
+    strpos($mainSrc, 'Models::escalate($cur, $client->listModels())') !== false);
+// CI: the scheduled model-backed eval gates on the --min threshold.
+$evalYml = (string)@file_get_contents(dirname(__DIR__) . '/.github/workflows/eval.yml');
+ok('CI eval workflow gates on --min', strpos($evalYml, 'eval --model qwen2.5-coder --min 25') !== false);
+
 // 2) Model presets + graceful fallback chain.
 ok('Models class has presets + a fallback chain', strpos($modelsSrc, 'class Models') !== false &&
     strpos($modelsSrc, 'function presets(') !== false && strpos($modelsSrc, 'function chain(') !== false &&
@@ -1535,7 +1564,7 @@ $evalYml = (string)@file_get_contents($repoRoot . '/.github/workflows/eval.yml')
 ok('CI runs smoke on push/PR and checks the binary is rebuilt', strpos($ciYml, 'tests/smoke.php') !== false &&
     strpos($ciYml, 'pull_request') !== false && strpos($ciYml, 'git diff --exit-code ollamadev') !== false);
 ok('eval workflow gates catastrophic regressions', strpos($evalYml, 'ollamadev eval') !== false &&
-    strpos($evalYml, 'ollama pull') !== false && strpos($evalYml, '-lt 2') !== false);
+    strpos($evalYml, 'ollama pull') !== false && strpos($evalYml, '--min 25') !== false);
 // Direct tool-invoke command + the tool-layer functional test wired into CI.
 ok('tool invoke command exists (ollamadev tool <name>)', strpos($mainSrc, "\$argv[1] === 'tool'") !== false &&
     strpos($mainSrc, 'Tools::run($name, $params)') !== false);

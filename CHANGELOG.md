@@ -1,5 +1,13 @@
 # Changelog
 
+## v4.8.52 (2026-06-07)
+
+### Added
+- **Auto-escalate on failure.** When a crew coder stalls (produces no changes on a retry), it now **automatically hands off to the next-bigger installed model** instead of just re-nudging the same one — so a weak coder that can't finish a task is replaced by a stronger one mid-run. On by default; disable with `crew --no-escalate` or `crew.escalate: false`. Backed by `Models::escalate()`, which climbs a configured ladder (`models.escalation`) or infers the next size up from the tag (`:7b` → `:14b` → `:32b`).
+- **Behavioral eval gains escalation + a CI threshold.** `ollamadev eval --escalate` retries a failed task on bigger models until one passes (reporting "via <model>"), and `eval --min <pct>` sets the exit code to gate on a pass-rate floor. The scheduled model-backed CI eval now gates via `--min 25` (cleaner than the old shell parse) — catching catastrophic regressions (e.g. tool-calling broken) while tolerating a small model's normal task variance.
+
+_Verified live: `llama3.2:latest` failed the fizzbuzz eval, auto-escalated to `qwen2.5-coder:14b`, and passed._
+
 ## v4.8.51 (2026-06-07)
 
 ### Added

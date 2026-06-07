@@ -41,6 +41,10 @@ class Crew {
         // Weak local models sometimes "describe" a change without calling the write
         // tool, producing an empty diff. Retry such coders a few times before giving up.
         $coderRetries = max(0, (int)($opts['retries'] ?? Config::get('crew.coderRetries', 1)));
+        // Auto-escalation: on a failed/empty retry, hand off to a bigger installed
+        // model (on by default; disable with --no-escalate or crew.escalate:false).
+        $escalate = ($opts['escalate'] ?? Config::get('crew.escalate', true)) !== false;
+        $installedModels = $escalate ? $agent->listModels() : [];
         $focus = trim((string)($opts['focus'] ?? '')); // domain/stack steer from a specialized team
         // Amplify: trade abundant free local compute for quality — N-sample plan
         // self-consistency + an N-pass adversarial audit panel. 0/1 = off.
@@ -190,12 +194,17 @@ class Crew {
                 echo "\n{$b}▸ Coder {$job['n']}{$r} {$d}[" . ($job['st']['role'] ?? 'coder') . "] {$job['branch']}" . ($host !== '' ? " · {$host}" : '') . "{$r}\n";
                 self::runCoder($job['wt'], $job['st'], $mCoder, $maxIter, $research, $task, $focus, $host, $job['log']);
                 $res = self::collectCoderResult($job, $baseCommit);
-                // Empty diff = the model didn't actually edit. Retry with a firm nudge.
+                // Empty diff = the model didn't actually edit. Retry with a firm nudge,
+                // and AUTO-ESCALATE to a bigger installed model when one exists — so a
+                // weak coder that can't complete the task hands off to a stronger one.
                 for ($try = 1; $res['empty'] && $try <= $coderRetries; $try++) {
-                    echo "  {$y}no changes — retry {$try}/{$coderRetries} (model didn't edit the files)…{$r}\n";
+                    $retryModel = $mCoder;
+                    if ($escalate) { $bigger = Models::escalate($mCoder, $installedModels); if ($bigger !== null) $retryModel = $bigger; }
+                    $esc = $retryModel !== $mCoder ? " {$c}↑ escalating to {$retryModel}{$r}" : '';
+                    echo "  {$y}no changes — retry {$try}/{$coderRetries} (model didn't edit the files){$r}{$esc}\n";
                     $retry = $job['st'];
                     $retry['prompt'] = (string)($job['st']['prompt'] ?? '') . "\n\nIMPORTANT: Your previous attempt made NO file changes. You MUST actually create/edit the files by CALLING your write/edit/bash tools now — do not merely describe the change in text.";
-                    self::runCoder($job['wt'], $retry, $mCoder, $maxIter, $research, $task, $focus, $host, $job['log']);
+                    self::runCoder($job['wt'], $retry, $retryModel, $maxIter, $research, $task, $focus, $host, $job['log']);
                     $res = self::collectCoderResult($job, $baseCommit);
                 }
                 echo "  " . ($res['empty'] ? "{$d}no changes{$r}" : count($res['files']) . " file(s) changed") . "\n";

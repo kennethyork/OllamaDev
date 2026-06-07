@@ -74,6 +74,43 @@ class Models {
         return '';
     }
 
+    // Parameter size (in billions) parsed from a tag, e.g. qwen2.5-coder:14b → 14.0.
+    // Used to climb the escalation ladder. Returns null when no "<n>b" size is present.
+    public static function paramSize(string $tag): ?float {
+        // Match the size token after the ':' (…:7b, :14b, :70b, :30b-q5) — not the
+        // family version (qwen2.5 / llama3.2). Fall back to any "<n>b" if no colon.
+        $cand = strpos($tag, ':') !== false ? substr($tag, strpos($tag, ':') + 1) : $tag;
+        if (preg_match('/(\d+(?:\.\d+)?)\s*b\b/i', $cand, $m)) return (float)$m[1];
+        return null;
+    }
+
+    // The next-bigger INSTALLED model to retry a failed task on, or null if none.
+    // A configured ladder (models.escalation: ordered small→large tags) wins; else
+    // it picks the smallest installed model strictly larger than $current by size.
+    public static function escalate(string $current, array $installed): ?string {
+        $current = trim($current);
+        $ladder = Config::get('models.escalation', null);
+        if (is_array($ladder) && $ladder) {
+            $pos = array_search($current, $ladder, true);
+            if ($pos !== false) {
+                for ($i = $pos + 1; $i < count($ladder); $i++) {
+                    if (in_array($ladder[$i], $installed, true)) return $ladder[$i];
+                }
+                return null;   // current is on the ladder but nothing bigger is installed
+            }
+        }
+        $cur = self::paramSize($current);
+        if ($cur === null) return null;
+        $best = null; $bestSize = INF;
+        foreach ($installed as $tag) {
+            if ($tag === $current) continue;
+            $s = self::paramSize($tag);
+            if ($s === null || $s <= $cur) continue;
+            if ($s < $bestSize) { $bestSize = $s; $best = $tag; }
+        }
+        return $best;
+    }
+
     // Catalogued vision-model tags (for `models presets` and "pull a vision
     // model" hints when someone attaches an image with no multimodal model).
     public static function visionPresets(): array {

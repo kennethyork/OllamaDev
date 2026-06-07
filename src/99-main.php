@@ -841,10 +841,12 @@ if ($argc >= 2 && $argv[1] === 'eval') {
     $args = array_slice($argv, 2);
     $sub = (!empty($args) && !str_starts_with($args[0], '-')) ? $args[0] : 'run';
     $only = ''; $model = ''; $asJson = in_array('--json', $args, true); $keep = in_array('--keep', $args, true);
+    $escalate = in_array('--escalate', $args, true); $min = -1;
     for ($i = 0; $i < count($args); $i++) {
         $a = $args[$i];
         if ($a === '--only') $only = (string)($args[++$i] ?? '');
         elseif ($a === '--model' || $a === '-m') $model = (string)($args[++$i] ?? '');
+        elseif ($a === '--min') $min = (int)($args[++$i] ?? 0);   // CI threshold: pass if rate >= min%
     }
     $tasks = Evals::suite($only);
     if ($sub === 'list') {
@@ -872,14 +874,30 @@ if ($argc >= 2 && $argv[1] === 'eval') {
     foreach ($tasks as $idx => $t) {
         if (!$asJson) { echo sprintf("  %-16s ", $t['name']); if (function_exists('fflush')) @fflush(STDOUT); }
         $r = Evals::runOne($t, $config, (string)$idx);
+        // Auto-escalate: a failed task retries on the next-bigger installed model,
+        // demonstrating (and measuring) the same handoff the crew does on failure.
+        if (!$r['pass'] && $escalate) {
+            $cur = $usedModel; $seen = [$cur => true];
+            while (($next = Models::escalate($cur, $client->listModels())) !== null && empty($seen[$next])) {
+                $seen[$next] = true; $cur = $next;
+                Config::set('ollama.defaultModel', $next);
+                $r2 = Evals::runOne($t, $config, $idx . '_esc');
+                if (!$asJson) echo ($r2['pass'] ? "\033[32m✓\033[0m" : "\033[31m✗\033[0m") . "\033[2m↑{$next}\033[0m ";
+                if ($r2['pass']) { $r = $r2 + ['escalatedTo' => $next]; break; }
+                $r = $r2 + ['escalatedTo' => $next];
+            }
+            Config::set('ollama.defaultModel', $usedModel);   // restore the base model
+        }
         $results[] = $r; if ($r['pass']) $pass++;
-        if (!$asJson) echo ($r['pass'] ? "\033[32m✓ pass\033[0m" : "\033[31m✗ fail\033[0m") . "  \033[2m{$r['ms']}ms — {$r['detail']}\033[0m\n";
+        if (!$asJson) echo ($r['pass'] ? "\033[32m✓ pass\033[0m" : "\033[31m✗ fail\033[0m") . (isset($r['escalatedTo']) ? " \033[2m(via {$r['escalatedTo']})\033[0m" : '') . "  \033[2m{$r['ms']}ms — {$r['detail']}\033[0m\n";
     }
     $total = count($tasks); $rate = $total ? (int)round($pass * 100 / $total) : 0;
-    if ($asJson) { echo json_encode(['model' => $usedModel, 'pass' => $pass, 'total' => $total, 'rate' => $rate, 'results' => $results]) . "\n"; exit($pass === $total ? 0 : 1); }
+    // Exit policy: with --min, pass if rate ≥ min%; otherwise require a clean sweep.
+    $okExit = $min >= 0 ? ($rate >= $min) : ($pass === $total);
+    if ($asJson) { echo json_encode(['model' => $usedModel, 'pass' => $pass, 'total' => $total, 'rate' => $rate, 'min' => $min, 'results' => $results]) . "\n"; exit($okExit ? 0 : 1); }
     $color = $rate >= 75 ? "\033[32m" : ($rate >= 40 ? "\033[33m" : "\033[31m");
-    echo "\n{$color}Pass rate: \033[1m$pass/$total\033[0m{$color} ($rate%)\033[0m  \033[2mmodel: " . ($usedModel !== '' ? $usedModel : '(auto)') . "\033[0m\n";
-    exit($pass === $total ? 0 : 1);
+    echo "\n{$color}Pass rate: \033[1m$pass/$total\033[0m{$color} ($rate%)\033[0m  \033[2mmodel: " . ($usedModel !== '' ? $usedModel : '(auto)') . ($min >= 0 ? " · threshold {$min}%" : '') . "\033[0m\n";
+    exit($okExit ? 0 : 1);
 }
 
 // Completion Command
@@ -1749,6 +1767,7 @@ if ($cmd === 'chat') {
     if (in_array('--no-research', $argv, true)) $flagOpts['research'] = false;
     if (in_array('--no-audit', $argv, true)) $flagOpts['audit'] = false;
     if (in_array('--no-skills', $argv, true)) $flagOpts['skills'] = false;
+    if (in_array('--no-escalate', $argv, true)) $flagOpts['escalate'] = false;
     // --skill <name> (repeatable): force a built-in team-skill in regardless of
     // focus. Lets a crew template guarantee its matching skill (e.g. tests →
     // testing-discipline). Also accepts --skills a,b,c.

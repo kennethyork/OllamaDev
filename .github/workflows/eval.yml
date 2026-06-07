@@ -38,19 +38,15 @@ jobs:
           done
       - name: Pull a tool-capable model
         run: ollama pull qwen2.5-coder:7b
-      - name: Run the eval (text protocol)
+      - name: Run the eval (text protocol) and capture the JSON
         run: |
           php ollamadev config set tools.mode text
           php ollamadev eval --model qwen2.5-coder --json | tee /tmp/eval.json
-      - name: Gate on catastrophic regression (pass rate >= 25%)
-        run: |
-          read pass total rate < <(php -r '$j=json_decode(file_get_contents("/tmp/eval.json"),true); echo (int)($j["pass"]??0)." ".(int)($j["total"]??0)." ".(int)($j["rate"]??0);')
-          echo "eval: $pass/$total passed ($rate%)"
-          if [ "$rate" -lt 25 ]; then
-            echo "::error::Pass rate $rate% (<25%) — likely a real regression (e.g. tool-calling broken). See the log."
-            cat /tmp/ollama.log | tail -40
-            exit 1
-          fi
+      - name: Gate on catastrophic regression (--min 25)
+        # The exit code IS the gate now: `eval --min 25` exits non-zero only when the
+        # pass rate falls below 25% — the catastrophic-regression class (e.g. tool
+        # calling fully broken), while tolerating a small model's normal task variance.
+        run: php ollamadev eval --model qwen2.5-coder --min 25 || (tail -40 /tmp/ollama.log; exit 1)
       - uses: actions/upload-artifact@v4
         if: always()
         with:
