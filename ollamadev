@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '4.8.42');
+define('OLLAMADEV_VERSION', '4.8.43');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -10571,6 +10571,36 @@ $arg2 = $positional[2] ?? '';
 // Built-in single-word commands
 if ($cmd === 'help' || $flags['help']) {
     $topic = $arg1 ?: 'topics';
+    // Build the `tools` topic from the live registry so the count and the listing
+    // can never drift from what's actually registered. Tools have no category
+    // metadata, so we keep a curated grouping for the well-known ones and sweep
+    // everything else into "Other" — a tool can be missed from a group, but never
+    // omitted from the page entirely.
+    $allToolNames = Tools::all();
+    sort($allToolNames);
+    $toolCats = [
+        'File'   => ['view', 'cat', 'head', 'tail', 'read', 'write', 'edit', 'multi_edit', 'patch', 'touch', 'mkdir', 'rm', 'cp', 'mv', 'ls'],
+        'Search' => ['grep', 'find', 'tree', 'glob', 'wc', 'stat', 'diff', 'sort', 'uniq'],
+        'Git'    => ['git_status', 'git_diff', 'git_log', 'git_branch', 'git_checkout', 'git_commit'],
+        'Code'   => ['goto', 'goto_definition', 'find_refs', 'symbols', 'hover', 'diagnostics', 'format', 'lsp'],
+        'System' => ['bash', 'execute_command', 'editor', 'watch', 'fetch', 'bg', 'wait_bg', 'agent'],
+    ];
+    $catLines = ''; $covered = [];
+    foreach ($toolCats as $cat => $names) {
+        $present = array_values(array_intersect($names, $allToolNames));
+        foreach ($present as $p) $covered[$p] = true;
+        if ($present) $catLines .= "  $cat: " . implode(', ', $present) . "\n";
+    }
+    $other = array_values(array_diff($allToolNames, array_keys($covered)));
+    if ($other) $catLines .= "  Other: " . implode(', ', $other) . "\n";
+    $toolCount = count($allToolNames);
+    $toolsText = "Tools - Use in chat or directly:\n" . $catLines . "\n"
+        . "Examples:\n"
+        . "  view file_path=src/main.php\n"
+        . "  write file_path=src/test.php content=\"<php code>\"\n"
+        . "  grep pattern=\"function foo\" path=src/\n"
+        . "  bash command=\"ls -la\"\n\n"
+        . "Invoke one directly:  ollamadev tool <name> '{\"file_path\":\"x\"}'  (full list: ollamadev tool list)";
     $topics = [
         'topics' => [
             'description' => 'Available help topics',
@@ -10651,23 +10681,8 @@ See 'ollamadev help <topic>' for detailed help.
 COMMANDS
         ],
         'tools' => [
-            'description' => 'Available AI tools (66 total)',
-            'text' => <<<'TOOLS'
-Tools - Use in chat or directly:
-  File: view, cat, head, tail, read, write, edit, patch, touch, mkdir, rm, cp, mv
-  Search: grep, find, tree, glob, wc, stat, diff, sort, uniq
-  Git: git_status, git_diff, git_log, git_branch, git_checkout, git_commit
-  Code: goto, goto_definition, find_refs, symbols, hover, diagnostics, format, lsp
-  System: bash, execute_command, editor, watch, fetch, bg, wait_bg, agent
-
-Examples:
-  view file_path=src/main.php
-  write file_path=src/test.php content="<php code>"
-  grep pattern="function foo" path=src/
-  bash command="ls -la"
-
-Use without parameters to see tool-specific help.
-TOOLS
+            'description' => "Available AI tools ($toolCount total)",
+            'text' => $toolsText,
         ],
         'git' => [
             'description' => 'Git commands',
@@ -11088,7 +11103,18 @@ if ($cmd === 'chat') {
     // No task given: drop into an interactive crew — the team is configured and the
     // Director simply waits for you to prompt it (and keeps prompting after each run).
     if ($task === '') {
-        if (!posix_isatty(STDIN)) { echo "Usage: ollamadev crew \"<task>\" [options]   (or run with no task in a terminal to prompt the Director live)\n"; exit(1); }
+        if (!posix_isatty(STDIN)) {
+            echo "Usage: ollamadev crew \"<task>\" [options]   (or run with no task in a terminal to prompt the Director live)\n";
+            echo "Subcommands:\n";
+            echo "  crew steer <coder#|all> \"<msg>\"   redirect a running coder (or the whole crew)\n";
+            echo "  crew director                      live steering console in its own terminal\n";
+            echo "  crew clear                         clear the kanban board (idle only)\n";
+            echo "  crew resume [runId]                resume an interrupted run\n";
+            echo "  crew pack save|list|rm             saved team configs\n";
+            echo "  crew role list|add|remove|show     roles the Director assigns per subtask\n";
+            echo "In the live Director: \"ask\"/\"task\" toggles answer mode, \"?<q>\" answers once, \"clear board\".\n";
+            exit(1);
+        }
         $c = "\033[36m"; $d = "\033[2m"; $b = "\033[1m"; $y = "\033[33m"; $g = "\033[32m"; $r = "\033[0m";
         $bits = [];
         if (!empty($copts['focus'])) $bits[] = 'focus set';

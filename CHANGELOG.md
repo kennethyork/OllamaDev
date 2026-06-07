@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.8.43 (2026-06-07)
+
+### Fixed
+- **Help text had drifted from the code.** `help` advertised "66 tools" while 95 were registered; the `help tools` page omitted ~30 tools (including `clear_board`); and `ollamadev crew` didn't mention the `steer` / `director` / `clear` subcommands. The tools page is now generated from the live registry — accurate count, with an "Other" catch-all so a new tool can never be silently undocumented — and the crew usage block lists every subcommand. A new guard test fails the build if either ever drifts again.
+
 ## v4.8.42 (2026-06-06)
 
 ### Fixed

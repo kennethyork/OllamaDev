@@ -1447,6 +1447,32 @@ if (isset($bin) && is_file($bin)) {
     ok('tools.mode is a settable config key', stripos($tc, 'tools.mode') !== false);
 }
 
+// ── Help docs can't drift from the registry (guard test) ─────────────────────
+// The 66-vs-95 drift happened because the tool count and category list in help
+// were hand-maintained. They're now generated from Tools::all(); these assertions
+// fail the build if that generation ever stops covering the real registry, or if
+// a new crew subcommand lands without being advertised in the usage block.
+[$toolJson] = run_bin(['tool', 'list', '--json']);
+$registered = json_decode(trim($toolJson), true);
+ok('tool list --json returns the registry', is_array($registered) && count($registered) > 0);
+if (is_array($registered) && $registered) {
+    [$helpTopics] = run_bin(['help']);
+    ok('help advertises the live tool count (no hardcoded drift)',
+        strpos($helpTopics, '(' . count($registered) . ' total)') !== false,
+        'expected (' . count($registered) . ' total) in help topics');
+    [$helpTools] = run_bin(['help', 'tools']);
+    // Word-boundary match so e.g. "git" can't false-pass on "git_status".
+    $missing = array_values(array_filter($registered,
+        fn($t) => !preg_match('/(?<![\w])' . preg_quote($t, '/') . '(?![\w])/', $helpTools)));
+    ok('help tools lists every registered tool (Other catch-all)',
+        count($missing) === 0, 'missing from help tools: ' . implode(', ', array_slice($missing, 0, 10)));
+}
+// crew usage (non-TTY) must advertise its subcommands so they're discoverable.
+[$crewUsage] = run_bin(['crew']);
+ok('crew usage lists steer/director/clear subcommands',
+    strpos($crewUsage, 'crew steer') !== false && strpos($crewUsage, 'crew director') !== false
+    && strpos($crewUsage, 'crew clear') !== false, 'crew usage missing a subcommand');
+
 echo "\n========================\n";
 echo "Results: $pass passed, $fail failed\n";
 if ($fail > 0) { echo "FAILED: " . implode(', ', $fails) . "\n"; exit(1); }
