@@ -1679,7 +1679,9 @@ if (isset($BIN) && is_file($BIN)) {
 // 6. MCP server.
 ok('McpServer speaks JSON-RPC over stdio', strpos($src, 'class McpServer') !== false &&
     strpos($src, "'tools/list'") !== false && strpos($src, "'tools/call'") !== false && strpos($src, "'initialize'") !== false);
-ok('mcp serve dispatched', strpos($src, "(\$argv[2] ?? '') === 'serve') { exit(McpServer::serve())") !== false);
+ok('mcp serve dispatched (read-only by default, --allow-writes to opt in)',
+    strpos($src, "=== 'serve') { exit(McpServer::serve(in_array('--allow-writes'") !== false &&
+    strpos($src, "Permission::setMode(\$allowWrites ? 'auto' : 'readonly')") !== false);
 // Functional: drive the server end-to-end through the real binary.
 if (isset($BIN) && is_file($BIN)) {
     $rpc = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' . "\n" . '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' . "\n";
@@ -1714,10 +1716,55 @@ ok('crew model hot-swap verifies the model is installed',
     strpos($src, "in_array(\$resolved, \$installed, true)") !== false &&
     strpos($src, 'model switch skipped (unverified') !== false);
 // 5. A fresh coder attempt clears its steering watermark so retries see the Director.
-ok('retry coder clears its steering watermark', strpos($src, 'unset(self::$steerSeen[$steerN]);') !== false);
+// Watermark PERSISTS across retries (the earlier reset clobbered auto-escalation by
+// re-applying a stale model-swap; only post-attempt steering reaches a new attempt).
+ok('steering watermark persists across retries (no stale re-apply)',
+    strpos($src, 'unset(self::$steerSeen[$steerN]);') === false &&
+    strpos($src, 'the watermark deliberately PERSISTS across retry') !== false);
 // 6. MoE tags size correctly (experts × per-expert), and resume whitelists override keys.
 ok('MoE param sizes + resume key whitelist', strpos($src, ')\s*x\s*(') !== false &&
     strpos($src, 'array_intersect_key($overrides, $allowed)') !== false);
+
+// ── Ultrareview regressions (found by the multi-agent cloud review, now guarded) ──
+// R1. Executable config (statusline/hooks) reads ONLY trusted home/global config —
+//     a cloned repo's project-local .ollamadev.json can't run shell commands (RCE).
+ok('statusline + hooks read trusted (home-only) config',
+    strpos($src, 'function trustedGet(') !== false &&
+    strpos($src, "Config::trustedGet('statusline'") !== false &&
+    strpos($src, "Config::trustedGet('hooks.' . \$event") !== false);
+if (preg_match('/class Config \{.*?\n\}/s', $src, $cfgT)) {
+    if (!class_exists('Config')) eval($cfgT[0]);
+    $th = sys_get_temp_dir() . '/odv_trust_' . getmypid(); @mkdir($th . '/proj', 0777, true);
+    file_put_contents($th . '/proj/.ollamadev.json', '{"statusline":"echo PWNED"}');
+    $oldHome = getenv('HOME'); $oldCwd = getcwd();
+    putenv("HOME=$th"); chdir($th . '/proj');   // home has NO config; only the project file
+    $r = Config::trustedGet('statusline', '');
+    putenv($oldHome !== false ? "HOME=$oldHome" : 'HOME'); chdir($oldCwd);
+    @exec('rm -rf ' . escapeshellarg($th));
+    ok('project-local config cannot supply an executable statusline', $r === '');
+}
+// R2. Tool allowlist confines only MUTATING tools (read-only + exit_plan_mode pass).
+ok('tool allowlist exempts read-only + control tools',
+    strpos($src, '!in_array($tool, self::$toolAllow, true) && !self::isReadonly($tool)) return false') !== false);
+// R3. Plan-mode prompt re-syncs when the mode flips mid-session (no stale PLAN MODE).
+ok('agent re-syncs the system prompt on plan-mode change',
+    strpos($src, '$this->builtPlanMode') !== false &&
+    strpos($src, 'Permission::inPlanMode() !== $this->builtPlanMode) $this->systemPrompt = $this->buildSystemPrompt()') !== false);
+// R4. /plan off restores the prior mode (not a hardcoded 'ask').
+ok('/plan off restores the pre-plan mode', strpos($src, 'elseif ($wasPlan) Permission::exitPlan();') !== false &&
+    strpos($src, "\$a === 'off' ? 'ask'") === false);
+// R5. Escalation ladder selects the next rung alias-aware (base-name ladders work).
+ok('escalation ladder is alias-aware on both ends', strpos($src, '$hit = self::match($ladder[$i], $installed)') !== false);
+// R6. paramSize infers :latest/untagged sizes from the preset catalog.
+ok('paramSize falls back to preset sizes for :latest tags', strpos($src, "explode(':', (string)(\$p['tag'] ?? ''))[0] === \$base") !== false);
+// R7. MCP server defaults read-only; mutations need --allow-writes / mcp.allowWrites.
+ok('mcp serve is read-only by default', strpos($src, "Permission::setMode(\$allowWrites ? 'auto' : 'readonly')") !== false &&
+    strpos($src, "Config::get('mcp.allowWrites', false)") !== false);
+// R8. MCP tools/call marks failures isError:true.
+ok('mcp tools/call surfaces tool errors', strpos($src, 'CmdError::isError($text)') !== false &&
+    strpos($src, 'function isError(string $result)') !== false);
+// R9. Plan mode propagates into delegated subagents (they can't mutate either).
+ok('plan mode propagates into subagents', strpos($src, "\$parentMode === 'plan') \$subMode = 'readonly'") !== false);
 
 echo "\n========================\n";
 echo "Results: $pass passed, $fail failed\n";

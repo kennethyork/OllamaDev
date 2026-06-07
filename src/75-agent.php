@@ -2,6 +2,7 @@ class Agent {
     private $client; // OllamaClient or LMStudioClient (see ModelClient factory)
     private string $model;
     private array $systemPrompt;
+    private bool $builtPlanMode = false;   // plan-mode state captured when the prompt was built
     private bool $chatMode = false; // when true: pure conversation, no tools
     private bool $triedFallback = false; // switched to a tool-capable model once?
 
@@ -33,7 +34,8 @@ class Agent {
         $prompt = !empty($manualPrompt) ? $manualPrompt : SystemPrompts::detectForModel($this->model);
         // Output style (tone/verbosity) shapes every reply; plan mode gates editing.
         if (class_exists('OutputStyles')) $prompt .= OutputStyles::promptSuffix();
-        if (class_exists('Permission') && Permission::inPlanMode()) {
+        $this->builtPlanMode = class_exists('Permission') && Permission::inPlanMode();
+        if ($this->builtPlanMode) {
             $prompt .= "\n\nPLAN MODE: Investigate with READ-ONLY tools only — do NOT create/edit files or run mutating commands yet. When you have a concrete plan, call exit_plan_mode(plan: \"…\") and wait for the user's approval before implementing.";
         }
 
@@ -194,6 +196,11 @@ User: run the tests
     // supports it (structured tool_calls, no parsing); otherwise falls back to
     // text-format parsing. Returns ['content'=>string, 'calls'=>[...]].
     public function chatTurn(array $messages): array {
+        // Keep the prompt in sync with plan mode: when a tool (exit_plan_mode) or
+        // command flips plan mode mid-session, rebuild so the "PLAN MODE: read-only"
+        // directive is added/dropped on the very next turn — otherwise an approved
+        // plan still reads as plan mode and the model keeps refusing to edit.
+        if (class_exists('Permission') && Permission::inPlanMode() !== $this->builtPlanMode) $this->systemPrompt = $this->buildSystemPrompt();
         $allMessages = array_merge([$this->systemPrompt], $this->wire($messages));
 
         // Chat mode: pure conversation, no tools offered or parsed.

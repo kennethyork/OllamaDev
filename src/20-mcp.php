@@ -198,10 +198,14 @@ class MCP {
 // tools/list, tools/call, ping. Lets editors/agents that speak MCP drive
 // OllamaDev's tools. `ollamadev mcp serve`. Vanilla PHP, no dependencies.
 class McpServer {
-    public static function serve(): int {
-        // Non-interactive auto so calls never block on an approval prompt; the
-        // air-gap (offline) flag, if set in config, still hard-blocks network tools.
-        Permission::setMode('auto');
+    public static function serve(bool $allowWrites = false): int {
+        // SECURITY: an MCP client is a remote caller. Default to READ-ONLY so a
+        // connected client can't run bash/write/rm on the user's machine; mutations
+        // require an explicit opt-in (`mcp serve --allow-writes` or mcp.allowWrites).
+        // Non-interactive either way (calls can't block on an approval prompt); the
+        // air-gap (offline) flag still hard-blocks network tools.
+        $allowWrites = $allowWrites || (Config::get('mcp.allowWrites', false) === true);
+        Permission::setMode($allowWrites ? 'auto' : 'readonly');
         Permission::setInteractive(false);
         if (Config::get('network.offline', false)) Permission::setOffline(true);
         $in = fopen('php://stdin', 'r');
@@ -243,7 +247,10 @@ class McpServer {
                 $echoed = trim((string) ob_get_clean());
                 $text = trim((string) $result);
                 if ($echoed !== '') $text = trim($echoed . ($text !== '' ? "\n" . $text : ''));
-                return self::ok($id, ['content' => [['type' => 'text', 'text' => $text]], 'isError' => false]);
+                // Surface tool failures as isError:true so a client can tell a blocked/
+                // failed tool from a real answer (permission denied, tool failed, etc.).
+                $isErr = class_exists('CmdError') && CmdError::isError($text);
+                return self::ok($id, ['content' => [['type' => 'text', 'text' => $text]], 'isError' => $isErr]);
             default:
                 return $id !== null ? self::err($id, -32601, "Method not found: $method") : null;
         }

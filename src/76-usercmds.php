@@ -105,7 +105,9 @@ class UserCmds {
 class Hooks {
     // Resolve the configured commands for an event, filtered by $subject matcher.
     private static function forEvent(string $event, string $subject = ''): array {
-        $cfg = Config::get('hooks.' . $event, null);
+        // Hooks run shell commands, so they're read ONLY from trusted home/global
+        // config — a cloned repo's .ollamadev.json cannot register a hook.
+        $cfg = Config::trustedGet('hooks.' . $event, null);
         $out = [];
         if (is_string($cfg)) { if (trim($cfg) !== '') $out[] = $cfg; return $out; }
         if (!is_array($cfg)) return $out;
@@ -196,7 +198,7 @@ class Hooks {
     }
     // Configured hooks for an event, normalized to [{command, matcher}].
     public static function listFor(string $event): array {
-        $cfg = Config::get('hooks.' . $event, null);
+        $cfg = Config::trustedGet('hooks.' . $event, null);   // matches what forEvent fires
         $out = [];
         if (is_string($cfg)) { if (trim($cfg) !== '') $out[] = ['command' => $cfg, 'matcher' => '']; return $out; }
         if (is_array($cfg)) foreach ($cfg as $h) {

@@ -64,9 +64,12 @@ class Permission {
     public static function check(string $tool, array $params = []): bool {
         if (isset(self::$denied[$tool])) return false;
         if (self::$offline && self::isNetwork($tool)) return false; // air-gap: nothing leaves the machine
-        // Hard allowlist (custom agent's tools:): anything off the list is blocked
-        // outright — the agent is confined to exactly the tools it declared.
-        if (!empty(self::$toolAllow) && !in_array($tool, self::$toolAllow, true)) return false;
+        // Hard allowlist (custom agent's tools:): a MUTATING tool off the list is
+        // blocked. Always-safe read-only tools (view/grep/ls…) and control tools
+        // (exit_plan_mode) stay available — confinement limits what the agent can
+        // CHANGE, not what it can read, so a `tools: edit` agent can still inspect
+        // files and leave plan mode.
+        if (!empty(self::$toolAllow) && !in_array($tool, self::$toolAllow, true) && !self::isReadonly($tool)) return false;
         // Plan mode: research only. Read-only tools run; everything that mutates is
         // blocked (even a prior allow()) until the user approves via exit_plan_mode.
         if (self::$mode === 'plan') return $tool === 'exit_plan_mode' || self::isReadonly($tool);

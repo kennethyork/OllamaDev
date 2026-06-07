@@ -49,11 +49,11 @@ class OutputStyles {
 // tokens, OR a shell command whose first stdout line is shown. Empty → nothing.
 class StatusLine {
     public static function configured(): bool {
-        $cfg = Config::get('statusline', '');
+        $cfg = Config::trustedGet('statusline', '');
         return is_string($cfg) && trim($cfg) !== '';
     }
     public static function render(string $model = '', string $mode = ''): string {
-        $cfg = Config::get('statusline', '');
+        $cfg = Config::trustedGet('statusline', '');
         if (!is_string($cfg) || trim($cfg) === '') return '';
         $cfg = trim($cfg);
         $branch = trim((string)@shell_exec('git rev-parse --abbrev-ref HEAD 2>/dev/null'));

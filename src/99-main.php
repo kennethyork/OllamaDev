@@ -317,7 +317,8 @@ if ($argc >= 2 && $argv[1] === 'agents') {
 // MCP CLI Command
 if ($argc >= 2 && $argv[1] === 'mcp') {
     // Server mode: expose THIS CLI's tool registry to any MCP client over stdio.
-    if (($argv[2] ?? '') === 'serve') { exit(McpServer::serve()); }
+    // Read-only by default; `--allow-writes` opts into mutating tools (bash/write/…).
+    if (($argv[2] ?? '') === 'serve') { exit(McpServer::serve(in_array('--allow-writes', $argv, true))); }
     $config = Config::load();
     $mcpConfig = $config['mcp'] ?? [];
     $action = $argv[2] ?? '';

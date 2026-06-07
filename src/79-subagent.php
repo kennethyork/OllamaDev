@@ -51,6 +51,7 @@ class SubAgent {
         if (!empty($p['allow_writes']) || $req === 'auto') $subMode = 'auto';
         elseif (in_array($req, ['ask', 'readonly', 'auto'], true)) $subMode = $req;
         if ($parentMode === 'readonly') $subMode = 'readonly';            // can't escalate past parent
+        if ($parentMode === 'plan') $subMode = 'readonly';               // plan mode propagates: a delegated agent can't mutate either
         if ($parentMode === 'ask' && $subMode === 'auto') $subMode = 'ask';
 
         // The agent def's persona becomes a system message; a tools allowlist is both

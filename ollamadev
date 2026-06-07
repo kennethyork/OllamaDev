@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '4.8.53');
+define('OLLAMADEV_VERSION', '4.8.54');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -134,6 +134,24 @@ class Config {
         $value = $config;
         foreach ($keys as $k) { if (!isset($value[$k])) return $default; $value = $value[$k]; }
         return $value;
+    }
+
+    // Read a key ONLY from the user's trusted home/global config — never the
+    // project-local `.ollamadev.json`, which a cloned/untrusted repo could plant.
+    // Used for settings that EXECUTE shell commands (statusline, hooks) so a
+    // checked-out repo can't run code just by being opened. Returns $default if the
+    // key is absent from every trusted file.
+    public static function trustedGet(string $key, $default = null) {
+        $home = getenv('HOME') ?: '/tmp';
+        foreach ([$home . '/.ollamadev/config.json', $home . '/.config/ollamadev/config.json'] as $path) {
+            if (!is_file($path)) continue;
+            $json = json_decode((string) @file_get_contents($path), true);
+            if (!is_array($json)) continue;
+            $value = $json; $found = true;
+            foreach (explode('.', $key) as $k) { if (!is_array($value) || !array_key_exists($k, $value)) { $found = false; break; } $value = $value[$k]; }
+            if ($found) return $value;
+        }
+        return $default;
     }
 
     // Set a dotted key on the cached config so Config::get() reflects it.
@@ -387,10 +405,14 @@ class MCP {
 // tools/list, tools/call, ping. Lets editors/agents that speak MCP drive
 // OllamaDev's tools. `ollamadev mcp serve`. Vanilla PHP, no dependencies.
 class McpServer {
-    public static function serve(): int {
-        // Non-interactive auto so calls never block on an approval prompt; the
-        // air-gap (offline) flag, if set in config, still hard-blocks network tools.
-        Permission::setMode('auto');
+    public static function serve(bool $allowWrites = false): int {
+        // SECURITY: an MCP client is a remote caller. Default to READ-ONLY so a
+        // connected client can't run bash/write/rm on the user's machine; mutations
+        // require an explicit opt-in (`mcp serve --allow-writes` or mcp.allowWrites).
+        // Non-interactive either way (calls can't block on an approval prompt); the
+        // air-gap (offline) flag still hard-blocks network tools.
+        $allowWrites = $allowWrites || (Config::get('mcp.allowWrites', false) === true);
+        Permission::setMode($allowWrites ? 'auto' : 'readonly');
         Permission::setInteractive(false);
         if (Config::get('network.offline', false)) Permission::setOffline(true);
         $in = fopen('php://stdin', 'r');
@@ -432,7 +454,10 @@ class McpServer {
                 $echoed = trim((string) ob_get_clean());
                 $text = trim((string) $result);
                 if ($echoed !== '') $text = trim($echoed . ($text !== '' ? "\n" . $text : ''));
-                return self::ok($id, ['content' => [['type' => 'text', 'text' => $text]], 'isError' => false]);
+                // Surface tool failures as isError:true so a client can tell a blocked/
+                // failed tool from a real answer (permission denied, tool failed, etc.).
+                $isErr = class_exists('CmdError') && CmdError::isError($text);
+                return self::ok($id, ['content' => [['type' => 'text', 'text' => $text]], 'isError' => $isErr]);
             default:
                 return $id !== null ? self::err($id, -32601, "Method not found: $method") : null;
         }
@@ -520,9 +545,12 @@ class Permission {
     public static function check(string $tool, array $params = []): bool {
         if (isset(self::$denied[$tool])) return false;
         if (self::$offline && self::isNetwork($tool)) return false; // air-gap: nothing leaves the machine
-        // Hard allowlist (custom agent's tools:): anything off the list is blocked
-        // outright — the agent is confined to exactly the tools it declared.
-        if (!empty(self::$toolAllow) && !in_array($tool, self::$toolAllow, true)) return false;
+        // Hard allowlist (custom agent's tools:): a MUTATING tool off the list is
+        // blocked. Always-safe read-only tools (view/grep/ls…) and control tools
+        // (exit_plan_mode) stay available — confinement limits what the agent can
+        // CHANGE, not what it can read, so a `tools: edit` agent can still inspect
+        // files and leave plan mode.
+        if (!empty(self::$toolAllow) && !in_array($tool, self::$toolAllow, true) && !self::isReadonly($tool)) return false;
         // Plan mode: research only. Read-only tools run; everything that mutates is
         // blocked (even a prior allow()) until the user approves via exit_plan_mode.
         if (self::$mode === 'plan') return $tool === 'exit_plan_mode' || self::isReadonly($tool);
@@ -1335,6 +1363,14 @@ class Models {
         // per-expert number — match these FIRST so e.g. 8x7b ≈ 56, not 7.
         if (preg_match('/(\d+)\s*x\s*(\d+(?:\.\d+)?)\s*b\b/i', $cand, $x)) return (float)$x[1] * (float)$x[2];
         if (preg_match('/(\d+(?:\.\d+)?)\s*b\b/i', $cand, $m)) return (float)$m[1];
+        // No size in the tag (e.g. `qwen2.5-coder:latest`, plain `mistral`) — infer
+        // from the catalogued preset for this family, whose tag carries a size. This
+        // lets escalation rank the very common `:latest` pulls instead of giving up.
+        $base = explode(':', $tag)[0];
+        foreach (self::presets() as $p) {
+            if (explode(':', (string)($p['tag'] ?? ''))[0] === $base
+                && preg_match('/(\d+(?:\.\d+)?)\s*b\b/i', (string)$p['tag'], $pm)) return (float)$pm[1];
+        }
         return null;
     }
 
@@ -1356,7 +1392,11 @@ class Models {
             }
             if ($pos !== false) {
                 for ($i = $pos + 1; $i < count($ladder); $i++) {
-                    if (in_array($ladder[$i], $installed, true)) return $ladder[$i];
+                    // Alias-aware (same as the position lookup): a ladder entry like
+                    // `llama3.1` resolves to an installed `llama3.1:70b`. Strict
+                    // in_array here would never match a base-name ladder.
+                    $hit = self::match($ladder[$i], $installed);
+                    if ($hit !== '') return $hit;
                 }
                 return null;   // current is on the ladder but nothing bigger is installed
             }
@@ -2882,6 +2922,13 @@ class Tools {
 }
 
 class CmdError {
+    // Does a tool result string look like one of our error envelopes (permission
+    // denied, tool failed/not-found, hook block)? Used by the MCP server to set
+    // isError on the response so a client distinguishes failures from real output.
+    public static function isError(string $result): bool {
+        return str_starts_with($result, 'ollamadev: ') || str_starts_with($result, 'Blocked by PreToolUse hook:');
+    }
+
     public static function toolNotFound(string $tool): string {
         $suggestions = self::suggestSimilar($tool, Tools::all());
         $suggest = $suggestions ? " Did you mean: $suggestions?" : "";
@@ -4822,6 +4869,7 @@ class Agent {
     private $client; // OllamaClient or LMStudioClient (see ModelClient factory)
     private string $model;
     private array $systemPrompt;
+    private bool $builtPlanMode = false;   // plan-mode state captured when the prompt was built
     private bool $chatMode = false; // when true: pure conversation, no tools
     private bool $triedFallback = false; // switched to a tool-capable model once?
 
@@ -4853,7 +4901,8 @@ class Agent {
         $prompt = !empty($manualPrompt) ? $manualPrompt : SystemPrompts::detectForModel($this->model);
         // Output style (tone/verbosity) shapes every reply; plan mode gates editing.
         if (class_exists('OutputStyles')) $prompt .= OutputStyles::promptSuffix();
-        if (class_exists('Permission') && Permission::inPlanMode()) {
+        $this->builtPlanMode = class_exists('Permission') && Permission::inPlanMode();
+        if ($this->builtPlanMode) {
             $prompt .= "\n\nPLAN MODE: Investigate with READ-ONLY tools only — do NOT create/edit files or run mutating commands yet. When you have a concrete plan, call exit_plan_mode(plan: \"…\") and wait for the user's approval before implementing.";
         }
 
@@ -5014,6 +5063,11 @@ User: run the tests
     // supports it (structured tool_calls, no parsing); otherwise falls back to
     // text-format parsing. Returns ['content'=>string, 'calls'=>[...]].
     public function chatTurn(array $messages): array {
+        // Keep the prompt in sync with plan mode: when a tool (exit_plan_mode) or
+        // command flips plan mode mid-session, rebuild so the "PLAN MODE: read-only"
+        // directive is added/dropped on the very next turn — otherwise an approved
+        // plan still reads as plan mode and the model keeps refusing to edit.
+        if (class_exists('Permission') && Permission::inPlanMode() !== $this->builtPlanMode) $this->systemPrompt = $this->buildSystemPrompt();
         $allMessages = array_merge([$this->systemPrompt], $this->wire($messages));
 
         // Chat mode: pure conversation, no tools offered or parsed.
@@ -5489,7 +5543,9 @@ class UserCmds {
 class Hooks {
     // Resolve the configured commands for an event, filtered by $subject matcher.
     private static function forEvent(string $event, string $subject = ''): array {
-        $cfg = Config::get('hooks.' . $event, null);
+        // Hooks run shell commands, so they're read ONLY from trusted home/global
+        // config — a cloned repo's .ollamadev.json cannot register a hook.
+        $cfg = Config::trustedGet('hooks.' . $event, null);
         $out = [];
         if (is_string($cfg)) { if (trim($cfg) !== '') $out[] = $cfg; return $out; }
         if (!is_array($cfg)) return $out;
@@ -5580,7 +5636,7 @@ class Hooks {
     }
     // Configured hooks for an event, normalized to [{command, matcher}].
     public static function listFor(string $event): array {
-        $cfg = Config::get('hooks.' . $event, null);
+        $cfg = Config::trustedGet('hooks.' . $event, null);   // matches what forEvent fires
         $out = [];
         if (is_string($cfg)) { if (trim($cfg) !== '') $out[] = ['command' => $cfg, 'matcher' => '']; return $out; }
         if (is_array($cfg)) foreach ($cfg as $h) {
@@ -5717,11 +5773,11 @@ class OutputStyles {
 // tokens, OR a shell command whose first stdout line is shown. Empty → nothing.
 class StatusLine {
     public static function configured(): bool {
-        $cfg = Config::get('statusline', '');
+        $cfg = Config::trustedGet('statusline', '');
         return is_string($cfg) && trim($cfg) !== '';
     }
     public static function render(string $model = '', string $mode = ''): string {
-        $cfg = Config::get('statusline', '');
+        $cfg = Config::trustedGet('statusline', '');
         if (!is_string($cfg) || trim($cfg) === '') return '';
         $cfg = trim($cfg);
         $branch = trim((string)@shell_exec('git rev-parse --abbrev-ref HEAD 2>/dev/null'));
@@ -5968,6 +6024,7 @@ class SubAgent {
         if (!empty($p['allow_writes']) || $req === 'auto') $subMode = 'auto';
         elseif (in_array($req, ['ask', 'readonly', 'auto'], true)) $subMode = $req;
         if ($parentMode === 'readonly') $subMode = 'readonly';            // can't escalate past parent
+        if ($parentMode === 'plan') $subMode = 'readonly';               // plan mode propagates: a delegated agent can't mutate either
         if ($parentMode === 'ask' && $subMode === 'auto') $subMode = 'ask';
 
         // The agent def's persona becomes a system message; a tools allowlist is both
@@ -7093,11 +7150,11 @@ class Crew {
         $steerN = 0; $steerFile = '';
         if ($logFile !== '' && preg_match('/coder-(\d+)\.log$/', $logFile, $sm)) {
             $steerN = (int)$sm[1]; $steerFile = dirname($logFile) . '/steer.jsonl';
-            // Fresh attempt = fresh message history, so clear this coder's steering
-            // watermark — otherwise a retry/fix-back coder (same number, new Agent)
-            // would skip steering the Director sent during the earlier attempt,
-            // including a "model <name>" rescue swap.
-            if ($steerN > 0) unset(self::$steerSeen[$steerN]);
+            // NB: the watermark deliberately PERSISTS across retry/fix-back attempts
+            // for the same coder number. Re-reading already-consumed steering into a
+            // fresh attempt would re-apply a stale "model <name>" swap and clobber the
+            // auto-escalation the retry loop just chose. Only steering the Director
+            // sends AFTER the prior attempt (ts > watermark) reaches the new attempt.
         }
 
         $prevCwd = getcwd();
@@ -8839,8 +8896,10 @@ class Session {
     // rebuilds its system prompt so the gate + the directive take effect at once.
     private function togglePlan(string $args): string {
         $a = strtolower(trim($args));
-        $on = $a === 'on' || (Permission::getMode() !== 'plan' && $a !== 'off');
-        Permission::setMode($on ? 'plan' : ($a === 'off' ? 'ask' : Permission::getMode()));
+        $wasPlan = Permission::inPlanMode();
+        $on = $a === 'on' || (!$wasPlan && $a !== 'off');
+        if ($on) Permission::setMode('plan');
+        elseif ($wasPlan) Permission::exitPlan();   // restore the mode that preceded plan (auto/ask/readonly), not a hardcoded 'ask'
         $this->agent->setModel($this->model); // rebuild system prompt with/without the plan note
         return $on
             ? "\033[36m📋 Plan mode ON\033[0m — I'll research read-only and propose a plan; edits are blocked until you approve it.\n"
@@ -10232,7 +10291,8 @@ if ($argc >= 2 && $argv[1] === 'agents') {
 // MCP CLI Command
 if ($argc >= 2 && $argv[1] === 'mcp') {
     // Server mode: expose THIS CLI's tool registry to any MCP client over stdio.
-    if (($argv[2] ?? '') === 'serve') { exit(McpServer::serve()); }
+    // Read-only by default; `--allow-writes` opts into mutating tools (bash/write/…).
+    if (($argv[2] ?? '') === 'serve') { exit(McpServer::serve(in_array('--allow-writes', $argv, true))); }
     $config = Config::load();
     $mcpConfig = $config['mcp'] ?? [];
     $action = $argv[2] ?? '';

@@ -197,6 +197,13 @@ class Tools {
 }
 
 class CmdError {
+    // Does a tool result string look like one of our error envelopes (permission
+    // denied, tool failed/not-found, hook block)? Used by the MCP server to set
+    // isError on the response so a client distinguishes failures from real output.
+    public static function isError(string $result): bool {
+        return str_starts_with($result, 'ollamadev: ') || str_starts_with($result, 'Blocked by PreToolUse hook:');
+    }
+
     public static function toolNotFound(string $tool): string {
         $suggestions = self::suggestSimilar($tool, Tools::all());
         $suggest = $suggestions ? " Did you mean: $suggestions?" : "";

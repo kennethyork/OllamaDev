@@ -226,8 +226,10 @@ class Session {
     // rebuilds its system prompt so the gate + the directive take effect at once.
     private function togglePlan(string $args): string {
         $a = strtolower(trim($args));
-        $on = $a === 'on' || (Permission::getMode() !== 'plan' && $a !== 'off');
-        Permission::setMode($on ? 'plan' : ($a === 'off' ? 'ask' : Permission::getMode()));
+        $wasPlan = Permission::inPlanMode();
+        $on = $a === 'on' || (!$wasPlan && $a !== 'off');
+        if ($on) Permission::setMode('plan');
+        elseif ($wasPlan) Permission::exitPlan();   // restore the mode that preceded plan (auto/ask/readonly), not a hardcoded 'ask'
         $this->agent->setModel($this->model); // rebuild system prompt with/without the plan note
         return $on
             ? "\033[36m📋 Plan mode ON\033[0m — I'll research read-only and propose a plan; edits are blocked until you approve it.\n"

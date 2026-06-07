@@ -1,5 +1,22 @@
 # Changelog
 
+## v4.8.54 (2026-06-07) — fixes from the multi-agent cloud review
+
+A `/code-review ultra` pass (7 finder angles) over v4.8.43→v4.8.53 found real issues — including three regressions the previous "hardening" commit (v4.8.53) had introduced. All fixed and regression-tested (555 tests):
+
+### Fixed (security)
+- **RCE from a cloned repo's config.** `Config::load()` reads a project-local `.ollamadev.json`, and the `statusline` command-form + hooks ran via `shell_exec` — so a checked-out repo could execute code just by being opened. Executable config (statusline, hooks) now reads **only** from trusted home/global config (`Config::trustedGet`).
+- **MCP server was wide open.** `mcp serve` set `auto` + auto-allow, letting any connected client run `bash`/`write`/`rm`. It now defaults to **read-only**; mutations require `mcp serve --allow-writes` (or `mcp.allowWrites: true`). Tool failures are now reported as `isError: true`.
+- **Plan mode now propagates into delegated subagents** (a custom agent with `permission: auto` can no longer mutate while you're still planning).
+
+### Fixed (correctness — incl. v4.8.53 regressions)
+- **Tool allowlist** no longer blocks the read-only/`exit_plan_mode` tools an agent needs — it confines only *mutating* tools, so a `tools: edit` agent can still inspect files and leave plan mode. *(v4.8.53 regression.)*
+- **Steering watermark** no longer reset per coder attempt — the reset re-applied a stale `model <name>` swap and clobbered auto-escalation. *(v4.8.53 regression.)*
+- **Escalation ladder** selects the next rung alias-aware, so a ladder written with base names (`qwen2.5-coder`) actually finds the bigger installed tag. *(v4.8.53 regression.)*
+- **Approving a plan** (`exit_plan_mode`) now re-syncs the system prompt, so the model stops being told it's still in plan mode and will actually implement.
+- **`paramSize`** infers `:latest`/untagged model sizes from the preset catalog, so escalation works on the common `:latest` pulls.
+- **`/plan off`** restores the mode that preceded plan (auto/ask/readonly) instead of hardcoding `ask`.
+
 ## v4.8.53 (2026-06-07) — security & correctness hardening
 
 An adversarial review of the permission/hooks/steering/escalation code surfaced several real issues, now fixed and regression-tested:

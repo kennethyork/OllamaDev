@@ -84,6 +84,14 @@ class Models {
         // per-expert number — match these FIRST so e.g. 8x7b ≈ 56, not 7.
         if (preg_match('/(\d+)\s*x\s*(\d+(?:\.\d+)?)\s*b\b/i', $cand, $x)) return (float)$x[1] * (float)$x[2];
         if (preg_match('/(\d+(?:\.\d+)?)\s*b\b/i', $cand, $m)) return (float)$m[1];
+        // No size in the tag (e.g. `qwen2.5-coder:latest`, plain `mistral`) — infer
+        // from the catalogued preset for this family, whose tag carries a size. This
+        // lets escalation rank the very common `:latest` pulls instead of giving up.
+        $base = explode(':', $tag)[0];
+        foreach (self::presets() as $p) {
+            if (explode(':', (string)($p['tag'] ?? ''))[0] === $base
+                && preg_match('/(\d+(?:\.\d+)?)\s*b\b/i', (string)$p['tag'], $pm)) return (float)$pm[1];
+        }
         return null;
     }
 
@@ -105,7 +113,11 @@ class Models {
             }
             if ($pos !== false) {
                 for ($i = $pos + 1; $i < count($ladder); $i++) {
-                    if (in_array($ladder[$i], $installed, true)) return $ladder[$i];
+                    // Alias-aware (same as the position lookup): a ladder entry like
+                    // `llama3.1` resolves to an installed `llama3.1:70b`. Strict
+                    // in_array here would never match a base-name ladder.
+                    $hit = self::match($ladder[$i], $installed);
+                    if ($hit !== '') return $hit;
                 }
                 return null;   // current is on the ladder but nothing bigger is installed
             }

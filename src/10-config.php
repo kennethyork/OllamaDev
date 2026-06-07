@@ -42,6 +42,24 @@ class Config {
         return $value;
     }
 
+    // Read a key ONLY from the user's trusted home/global config — never the
+    // project-local `.ollamadev.json`, which a cloned/untrusted repo could plant.
+    // Used for settings that EXECUTE shell commands (statusline, hooks) so a
+    // checked-out repo can't run code just by being opened. Returns $default if the
+    // key is absent from every trusted file.
+    public static function trustedGet(string $key, $default = null) {
+        $home = getenv('HOME') ?: '/tmp';
+        foreach ([$home . '/.ollamadev/config.json', $home . '/.config/ollamadev/config.json'] as $path) {
+            if (!is_file($path)) continue;
+            $json = json_decode((string) @file_get_contents($path), true);
+            if (!is_array($json)) continue;
+            $value = $json; $found = true;
+            foreach (explode('.', $key) as $k) { if (!is_array($value) || !array_key_exists($k, $value)) { $found = false; break; } $value = $value[$k]; }
+            if ($found) return $value;
+        }
+        return $default;
+    }
+
     // Set a dotted key on the cached config so Config::get() reflects it.
     public static function set(string $key, $value): void {
         self::load();

@@ -535,11 +535,11 @@ class Crew {
         $steerN = 0; $steerFile = '';
         if ($logFile !== '' && preg_match('/coder-(\d+)\.log$/', $logFile, $sm)) {
             $steerN = (int)$sm[1]; $steerFile = dirname($logFile) . '/steer.jsonl';
-            // Fresh attempt = fresh message history, so clear this coder's steering
-            // watermark — otherwise a retry/fix-back coder (same number, new Agent)
-            // would skip steering the Director sent during the earlier attempt,
-            // including a "model <name>" rescue swap.
-            if ($steerN > 0) unset(self::$steerSeen[$steerN]);
+            // NB: the watermark deliberately PERSISTS across retry/fix-back attempts
+            // for the same coder number. Re-reading already-consumed steering into a
+            // fresh attempt would re-apply a stale "model <name>" swap and clobber the
+            // auto-escalation the retry loop just chose. Only steering the Director
+            // sends AFTER the prior attempt (ts > watermark) reaches the new attempt.
         }
 
         $prevCwd = getcwd();
