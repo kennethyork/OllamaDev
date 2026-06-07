@@ -15,7 +15,8 @@
     'crewRoleList', 'crewRoleAdd', 'crewRoleRemove',
     'webAccess', 'setWebAccess', 'searchEnabled', 'setSearchEnabled',
     'codeSearch', 'codeIndexStatus', 'codeIndexBuild', 'reviewDiff', 'temperature', 'setTemperature',
-    'sttModel', 'setSttModel', 'sttHistory', 'sttClearHistory', 'openExternal', 'proxyFetch', 'crewModels'];
+    'sttModel', 'setSttModel', 'sttHistory', 'sttClearHistory', 'openExternal', 'proxyFetch', 'crewModels',
+    'crewSteer', 'skillsList', 'skillsGet', 'skillsSave', 'skillsRemove'];
 
   function rpc(name, args) {
     var headers = { 'Content-Type': 'application/json' };

@@ -1302,6 +1302,9 @@ var App = {
         this.startAutosave();   // persist the active workspace so it resumes on reopen
         $('#newTermBtn').onclick = function () { self.newTerminal(); };
         var ta = $('#termArrange'); if (ta) ta.onclick = function () { self.setTermLayout(self.termLayout === 'free' ? 'tiled' : 'free'); };
+        // Layout mode is a global preference — reopen in whichever mode you last used.
+        try { self.termLayout = localStorage.getItem('ade.termLayout') === 'free' ? 'free' : 'tiled'; } catch (e) {}
+        if (ta) ta.textContent = self.termLayout === 'free' ? '⮻ Free' : '⊞ Tiled';
         $('#layoutBtn').onclick = function () { self.cycleLayout(); };
         // Open-folder modal
         var ofb = $('#openFolderBtn'); if (ofb) ofb.onclick = function () { self.openFolderModal(false); };
@@ -2003,7 +2006,6 @@ var App = {
     captureState: function () {
         return {
             terminals: this.terminals.map(function (t) { return { id: t.id, model: t.model, kind: t.kind || '', cwd: t.cwd || '', x: t.x, y: t.y, w: t.w, h: t.h, z: t.z }; }),
-            termLayout: this.termLayout,
             editorTabs: Editor.tabs.map(function (t) { return { path: t.path, name: t.name }; }),
             layout: this.layout,
             view: this.view,
@@ -2018,10 +2020,9 @@ var App = {
         Editor.closeAll();
         (state.editorTabs || []).forEach(function (t) { Editor.open(t.path, t.name); });
         var terms = state.terminals || [];
-        // Free-layout: restore the mode + saved geometry (by id for re-attached panes,
-        // by index for respawned ones). applyGeom consumes these on the first free render.
-        this.termLayout = state.termLayout === 'free' ? 'free' : 'tiled';
-        var arr = $('#termArrange'); if (arr) arr.textContent = this.termLayout === 'free' ? '⮻ Free' : '⊞ Tiled';
+        // Free-layout: the MODE is global (set in init from localStorage); here we only
+        // restore each pane's saved geometry (by id for re-attached, by index for
+        // respawned). applyGeom consumes these on the first free render.
         this._geomQueue = terms.map(function (g) { return { x: g.x, y: g.y, w: g.w, h: g.h, z: g.z }; });
         this._geomById = {};
         terms.forEach(function (g) { if (g.id) self._geomById[g.id] = { x: g.x, y: g.y, w: g.w, h: g.h, z: g.z }; if (g.z > self._zTop) self._zTop = g.z; });
@@ -2074,6 +2075,7 @@ var App = {
     // ---- Free-floating layout: drag the header, resize the corner, overlap freely ----
     setTermLayout: function (mode) {
         this.termLayout = (mode === 'free') ? 'free' : 'tiled';
+        try { localStorage.setItem('ade.termLayout', this.termLayout); } catch (e) {}   // reopen here next time
         var btn = $('#termArrange'); if (btn) btn.textContent = this.termLayout === 'free' ? '⮻ Free' : '⊞ Tiled';
         if (this.termLayout === 'free') this.zoomed = null;   // zoom is a tiled-only concept
         this.render();

@@ -1,5 +1,13 @@
 # Changelog
 
+## v4.8.42 (2026-06-06)
+
+### Fixed
+- **Web mode was missing the Director box and Skills manager.** The web bridge wraps desktop bindings from a name list that hadn't been updated for `crewSteer` + `skillsList/Get/Save/Remove`, so those panels were inert in a browser (CLI/desktop were fine). Added them — web is back at full parity — plus a test that checks every `Bindings::PUBLIC` entry is exposed by the bridge so it can't drift again.
+
+### Changed
+- **Free/Tiled layout now reopens in whichever mode you last used** (remembered globally), so if you work in Free mode it comes back in Free.
+
 ## v4.8.41 (2026-06-06)
 
 ### Added
