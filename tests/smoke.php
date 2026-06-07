@@ -944,6 +944,11 @@ ok('desktop has a free-floating (drag/resize) terminal layout', strpos($ajs, 're
 // Layout mode is a global preference → the app reopens in whichever mode you last used.
 ok('desktop reopens in the last-used layout mode (free/tiled)', strpos($ajs, "localStorage.setItem('ade.termLayout'") !== false &&
     strpos($ajs, "localStorage.getItem('ade.termLayout')") !== false);
+// Free is the default: a fresh user (no stored pref) lands in Free; only an
+// explicit 'tiled' choice opts back into the grid.
+ok('free layout is the default (only explicit tiled opts out)',
+    strpos($ajs, "localStorage.getItem('ade.termLayout') === 'tiled' ? 'tiled' : 'free'") !== false &&
+    strpos($ajs, "termLayout: 'free'") !== false);
 // Surface parity: every desktop binding (Bindings::PUBLIC) must be wrapped by the web
 // bridge too, or that feature is dead in web mode (how crewSteer/skills* drifted).
 $bridge = (string) @file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/web/bridge.js');

@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.8.44 (2026-06-07)
+
+### Changed
+- **Free is now the default terminal layout.** New users (and anyone who hasn't picked a mode) open in Free — draggable, resizable, overlapping windows. Tiled is still one click away via the **⊞ Tiled / ⮻ Free** toggle, and an explicit Tiled choice is remembered as before.
+
 ## v4.8.43 (2026-06-07)
 
 ### Fixed

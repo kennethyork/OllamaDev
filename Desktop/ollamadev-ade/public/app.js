@@ -1292,7 +1292,7 @@ var Stt = {
 };
 
 var App = {
-    terminals: [], cwd: '.', layout: 'split', termLayout: 'tiled', zoomed: null, view: 'code', panel: 'files', crewBoard: null, crewPoll: null,
+    terminals: [], cwd: '.', layout: 'split', termLayout: 'free', zoomed: null, view: 'code', panel: 'files', crewBoard: null, crewPoll: null,
     // PTYs spawned this session, by id. Survives detach (workspace switch) so we
     // can RE-attach a still-running terminal; gone after a restart → respawn fresh.
     live: {},
@@ -1303,7 +1303,8 @@ var App = {
         $('#newTermBtn').onclick = function () { self.newTerminal(); };
         var ta = $('#termArrange'); if (ta) ta.onclick = function () { self.setTermLayout(self.termLayout === 'free' ? 'tiled' : 'free'); };
         // Layout mode is a global preference — reopen in whichever mode you last used.
-        try { self.termLayout = localStorage.getItem('ade.termLayout') === 'free' ? 'free' : 'tiled'; } catch (e) {}
+        // Free is the default; only an explicit 'tiled' choice opts back into the grid.
+        try { self.termLayout = localStorage.getItem('ade.termLayout') === 'tiled' ? 'tiled' : 'free'; } catch (e) {}
         if (ta) ta.textContent = self.termLayout === 'free' ? '⮻ Free' : '⊞ Tiled';
         $('#layoutBtn').onclick = function () { self.cycleLayout(); };
         // Open-folder modal
