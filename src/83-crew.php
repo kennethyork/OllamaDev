@@ -293,17 +293,28 @@ class Crew {
     // Resume an interrupted run from disk: finish the coders that didn't complete,
     // keep branches that already have work, then audit + land. Idempotent — safe to
     // run repeatedly until everything has landed or been held.
-    public static function resume(string $runId = ''): int {
+    public static function resume(string $runId = '', array $overrides = []): int {
         if (!self::isGitRepo()) { echo "\033[31mcrew needs a git repository.\033[0m\n"; return 1; }
         $run = $runId !== '' ? self::loadRun($runId) : self::findResumable();
         if (!$run) { echo "No resumable crew run found for this repo.\n"; return 1; }
         $runId = (string)$run['runId'];
+        $opts = is_array($run['opts'] ?? null) ? $run['opts'] : [];
+        // Flag overrides (e.g. --coder-model, -m) win over the models the run was
+        // started with — so an interrupted run can continue on a different model.
+        // Recorded BEFORE the connection check so the intent persists regardless.
+        if (!empty($overrides)) {
+            $opts = array_merge($opts, array_filter($overrides, fn($v) => $v !== null && $v !== ''));
+            $run['opts'] = $opts;
+            self::saveRunOpts($runId, $opts);   // a second resume keeps it, not the original
+        }
         $agent = new Agent();
         if (!$agent->checkConnection()) { echo "\033[31mCannot reach Ollama.\033[0m Start it with: ollama serve\n"; return 1; }
 
         $c = "\033[36m"; $d = "\033[2m"; $b = "\033[1m"; $g = "\033[32m"; $y = "\033[33m"; $r = "\033[0m";
-        $opts = is_array($run['opts'] ?? null) ? $run['opts'] : [];
+        $base = trim((string)($opts['model'] ?? ''));   // -m base model override
+        if ($base !== '') { $rb = $agent->resolveModel($base); if ($rb) $agent->setModel($rb); }
         $model = $agent->getModel();
+        if (!empty($overrides)) echo "{$d}resuming on models — coder {$c}" . (trim((string)($opts['coderModel'] ?? '')) ?: $model) . "{$r}{$d} · auditor {$c}" . (trim((string)($opts['auditorModel'] ?? '')) ?: $model) . "{$r}\n";
         $rm = function ($key) use ($agent, $opts, $model) {
             $m = trim((string)($opts[$key] ?? ''));
             if ($m === '') $m = trim((string)Config::get('crew.' . $key, ''));
@@ -796,6 +807,12 @@ class Crew {
     private static function loadRun(string $runId): ?array {
         $d = is_file(self::runFile($runId)) ? json_decode((string)@file_get_contents(self::runFile($runId)), true) : null;
         return is_array($d) ? $d : null;
+    }
+    // Persist updated opts (e.g. a model override applied on resume) back to the run.
+    private static function saveRunOpts(string $runId, array $opts): void {
+        $d = self::loadRun($runId); if (!$d) return;
+        $d['opts'] = $opts;
+        self::saveRun($runId, $d);
     }
     private static function setRunStatus(string $runId, string $status): void {
         $d = self::loadRun($runId); if (!$d) return;

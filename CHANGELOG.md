@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.8.51 (2026-06-07)
+
+### Added
+- **Resume an interrupted crew on different models.** `crew resume [runId] --coder-model <m>` (also `--director-model`, `--auditor-model`, `--researcher-model`, or `-m` for the base) continues the *same plan and progress* on the model(s) you pick — flag overrides win over the models the run started with, and the choice persists so a second resume keeps it. The interactive "resume this run?" offer honors any model flags you launched `crew` with too. This completes model-switching across the board: mid-chat, on session resume, live mid-crew (via the Director), and now on crew resume.
+
 ## v4.8.50 (2026-06-07)
 
 ### Added

@@ -1838,8 +1838,13 @@ if ($cmd === 'chat') {
         exit(0);
     }
 
-    // Resume an interrupted run from disk: `crew resume [runId]`.
-    if ($arg1 === 'resume') { exit(Crew::resume($positional[2] ?? '')); }
+    // Resume an interrupted run from disk: `crew resume [runId]`. Flag overrides
+    // (-m / --coder-model / --director-model …) continue the run on new models.
+    if ($arg1 === 'resume') {
+        $ov = $flagOpts;
+        if (!empty($flags['model'])) $ov['model'] = $flags['model'];
+        exit(Crew::resume($positional[2] ?? '', $ov));
+    }
     if ($arg1 === 'clear') {
         $cr = Crew::clearBoard();
         if (!empty($cr['ok'])) { echo "\033[32m✓\033[0m crew board cleared\n"; exit(0); }
@@ -1930,7 +1935,7 @@ if ($cmd === 'chat') {
             echo "  crew steer <coder#|all> \"<msg>\"   redirect a running coder (or the whole crew)\n";
             echo "  crew director                      live steering console in its own terminal\n";
             echo "  crew clear                         clear the kanban board (idle only)\n";
-            echo "  crew resume [runId]                resume an interrupted run\n";
+            echo "  crew resume [runId] [-m/--coder-model …]  resume an interrupted run (optionally on new models)\n";
             echo "  crew pack save|list|rm             saved team configs\n";
             echo "  crew role list|add|remove|show     roles the Director assigns per subtask\n";
             echo "In the live Director: \"ask\"/\"task\" toggles answer mode, \"?<q>\" answers once, \"clear board\".\n";
@@ -1950,7 +1955,12 @@ if ($cmd === 'chat') {
             echo "{$y}  ⚠ an unfinished crew run is here:{$r} {$d}\"" . substr((string)($interrupted['task'] ?? ''), 0, 60) . "\"{$r}\n";
             echo "{$c}Resume it? [Y/n]{$r} ";
             $ans = strtolower(trim((string)fgets(STDIN)));
-            if ($ans === '' || $ans === 'y' || $ans === 'yes') { Crew::resume((string)$interrupted['runId']); }
+            if ($ans === '' || $ans === 'y' || $ans === 'yes') {
+                // Honor any model flags the user launched `crew` with on the resume.
+                $rov = array_intersect_key($copts, array_flip(['directorModel', 'coderModel', 'auditorModel', 'researcherModel']));
+                if (!empty($flags['model'])) $rov['model'] = $flags['model'];
+                Crew::resume((string)$interrupted['runId'], $rov);
+            }
         }
         echo "{$d}Type a task for the Director. \"ask\" = answer mode (just answers, no tasking) · \"task\" = build · \"?<question>\" answers once · \"clear board\" · 'exit'.{$r}\n";
         $answerMode = false;

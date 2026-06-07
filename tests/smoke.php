@@ -479,6 +479,27 @@ ok('live model swap is discoverable (console + desktop box)',
     strpos($src, "Swap a coder's model live") !== false &&
     strpos((string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/index.html'), '2: model llama3.3:70b') !== false);
 shell_exec('rm -rf ' . escapeshellarg($shome));
+// Resume an interrupted run on a DIFFERENT model: --coder-model wins over saved.
+ok('crew resume accepts model overrides (flags win over saved)',
+    strpos($src, 'function resume(string $runId = \'\', array $overrides = [])') !== false &&
+    strpos($src, "exit(Crew::resume(\$positional[2] ?? '', \$ov))") !== false &&
+    strpos($src, 'function saveRunOpts(') !== false);
+// Functional: fabricate an interrupted run, resume with a new coder model, assert
+// it merges + persists (recorded before the Ollama check, so it works offline).
+$rh = sys_get_temp_dir() . '/odv_resume_' . getmypid();
+$rrepo = $rh . '/repo'; @mkdir($rrepo, 0777, true);
+shell_exec('cd ' . escapeshellarg($rrepo) . ' && git init -q && git config user.email t@t && git config user.name t && echo x > a.txt && git add -A && git commit -qm init 2>/dev/null');
+$commit = trim((string) shell_exec('cd ' . escapeshellarg($rrepo) . ' && git rev-parse HEAD 2>/dev/null'));
+@mkdir($rh . '/.ollamadev/crew/crew_r', 0777, true);
+$runjson = json_encode(['runId' => 'crew_r', 'base' => 'main', 'baseCommit' => $commit, 'task' => 'demo',
+    'status' => 'running', 'opts' => ['coderModel' => 'qwen2.5-coder:7b', 'audit' => false, 'research' => false], 'subtasks' => []]);
+file_put_contents($rh . '/.ollamadev/crew/crew_r/run.json', $runjson);
+file_put_contents($rh . '/.ollamadev/crew/current.json', $runjson);
+run_bin(['crew', 'resume', 'crew_r', '--coder-model', 'llama3.3:70b'], '', ['HOME' => $rh], $rrepo);
+$rafter = (string) @file_get_contents($rh . '/.ollamadev/crew/crew_r/run.json');
+ok('crew resume --coder-model persists the new model to the run', strpos($rafter, 'llama3.3:70b') !== false &&
+    strpos($rafter, 'qwen2.5-coder:7b') === false, substr($rafter, 0, 200));
+shell_exec('rm -rf ' . escapeshellarg($rh));
 $bind = (string) @file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/src/Bindings.php');
 ok('desktop exposes crewSteer for the Director box', strpos($bind, 'function crewSteer') !== false && strpos($bind, "'crewSteer'") !== false);
 // The Director in its own terminal: live auto-refreshing console + whole-crew broadcast.
