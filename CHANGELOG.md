@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.8.40 (2026-06-06)
+
+### Changed
+- **Plain shell is now the top entry of the model dropdown** ("🐚 shell — plain terminal") instead of a separate button. Pick it and hit **+ Terminal** for a bare shell (no ollamadev) in the project folder; pick any model for the agent as usual. Agent-only paths (run-task, crew) ignore the shell entry.
+
 ## v4.8.39 (2026-06-06)
 
 ### Added

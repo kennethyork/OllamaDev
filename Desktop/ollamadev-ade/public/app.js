@@ -796,7 +796,7 @@ var Roles = {
         // Fill the optional pinned-model dropdown from the loaded models.
         var sel = $('#roleModel'), ms = $('#modelSelect');
         if (sel && ms) {
-            var opts = Array.prototype.slice.call(ms.options).map(function (o) { return o.value; });
+            var opts = Array.prototype.slice.call(ms.options).map(function (o) { return o.value; }).filter(function (m) { return m !== 'shell'; });
             sel.innerHTML = '<option value="">— crew coder model —</option>' + opts.map(function (m) { return '<option>' + esc(m) + '</option>'; }).join('');
         }
         ov.hidden = false;
@@ -1301,7 +1301,6 @@ var App = {
         this.initThemes();
         this.startAutosave();   // persist the active workspace so it resumes on reopen
         $('#newTermBtn').onclick = function () { self.newTerminal(); };
-        var nsb = $('#newShellBtn'); if (nsb) nsb.onclick = function () { self.spawnShell(); };
         $('#layoutBtn').onclick = function () { self.cycleLayout(); };
         // Open-folder modal
         var ofb = $('#openFolderBtn'); if (ofb) ofb.onclick = function () { self.openFolderModal(false); };
@@ -1497,7 +1496,7 @@ var App = {
         };
         if (this.terminals.length) { type(this.terminals[0], 0); }
         else {
-            var model = $('#modelSelect').value || 'llama3.2:latest';
+            var model = this.realModel();   // a task needs an agent, never the shell entry
             var id = rid(); var t = new Terminal(id, model);
             Promise.resolve(window.termCreate(id, model)).then(function () {
                 self.terminals.push(t); self.render(); self.launchCli(id, model);
@@ -1553,7 +1552,7 @@ var App = {
         var cf = $('#crewFolder'); if (cf) cf.value = (this.cwd && this.cwd !== '.') ? this.cwd : '';
         // Per-role model pickers default to your CONFIG (crew.coderModel etc.) so
         // whatever you set sticks; falls back to a recommended model if unset.
-        var opts = Array.prototype.slice.call($('#modelSelect').options).map(function (o) { return o.value; });
+        var opts = Array.prototype.slice.call($('#modelSelect').options).map(function (o) { return o.value; }).filter(function (m) { return m !== 'shell'; });
         var fallback = opts[0] || '';
         for (var i = 0; i < this.CREW_PREFERRED.length; i++) {
             var hit = opts.find(function (m) { return m.indexOf(this.CREW_PREFERRED[i]) !== -1; }, this);
@@ -1598,7 +1597,7 @@ var App = {
             };
         });
     },
-    mval: function (id) { var s = $('#' + id); return (s && s.value) || $('#modelSelect').value || 'llama3.2:latest'; },
+    mval: function (id) { var s = $('#' + id); return (s && s.value) || this.realModel(); },
     setMval: function (id, v) { var s = $('#' + id); if (!s || !v) return; if (![].some.call(s.options, function (o) { return o.value === v; })) s.innerHTML += '<option>' + esc(v) + '</option>'; s.value = v; },
     // Built-in specialized teams — by software domain (with a focus the agents
     // follow) and by task type. Each sets the crew composition.
@@ -1746,7 +1745,7 @@ var App = {
     runCrew: function (task, opts) {
         opts = opts || {};
         if (this.terminals.length >= this.MAX_TERMINALS) { banner('close a terminal first (max ' + this.MAX_TERMINALS + ')', 'err'); return; }
-        var base = opts.coderModel || opts.model || $('#modelSelect').value || 'llama3.2:latest';
+        var base = opts.coderModel || opts.model || this.realModel();   // never the shell entry
         var cli = this.cli || 'ollamadev';
         var interactive = !String(task || '').trim();
         // With a task: run it. Without: launch interactive — the Director waits for
@@ -1855,10 +1854,13 @@ var App = {
             if (sel) {
                 var models = (s && s.models) || [];
                 var def = (s && s.default) || '';   // your configured ollama.defaultModel
-                sel.innerHTML = models.map(function (m) {
+                // "shell" sits at the top of the model list: pick it + "+ Terminal" for a
+                // plain shell (no ollamadev). It's never the default selection.
+                var shellOpt = '<option value="shell">🐚 shell — plain terminal</option>';
+                sel.innerHTML = shellOpt + (models.map(function (m) {
                     var name = m.name || m;
                     return '<option' + (name === def ? ' selected' : '') + '>' + esc(name) + '</option>';
-                }).join('') || '<option>llama3.2:latest</option>';
+                }).join('') || '<option>llama3.2:latest</option>');
                 // If the default isn't in the list (e.g. not pulled), still select it.
                 if (def && sel.value !== def && [].some.call(sel.options, function (o) { return o.value === def; })) sel.value = def;
             }
@@ -1903,19 +1905,13 @@ var App = {
         // Small delay so the pty shell is ready to receive the command.
         setTimeout(function () { try { window.termWrite(id, strToB64(cmd)); } catch (e) {} }, 350);
     },
-    // Plain shell: spawn the pty in the project folder but DON'T launch ollamadev —
-    // just a bare shell prompt. Always available alongside "+ Terminal".
-    spawnShell: function (folder) {
-        if (this.terminals.length >= this.MAX_TERMINALS) { banner('maximum of ' + this.MAX_TERMINALS + ' terminals', 'err'); return; }
-        var dir = this.expandHome(folder) || (this.cwd && this.cwd !== '.' ? this.cwd : '');
-        var id = rid();
-        var t = new Terminal(id, 'shell', dir); t.kind = 'shell';
-        var self = this;
-        Promise.resolve(window.termCreate(id, 'shell', dir)).then(function () {
-            self.live[id] = true;
-            self.terminals.push(t);
-            self.render();   // no launchCli — the pty already starts a shell in `dir`
-        }).catch(function (e) { banner('shell failed: ' + e, 'err'); });
+    // A real (non-shell) model for paths that must launch an agent (run-task, crew).
+    realModel: function () {
+        var sel = $('#modelSelect');
+        var v = sel && sel.value;
+        if (v && v !== 'shell') return v;
+        var opts = sel ? Array.prototype.slice.call(sel.options).map(function (o) { return o.value; }).filter(function (m) { return m !== 'shell'; }) : [];
+        return opts[0] || 'llama3.2:latest';
     },
     // Respawn a terminal in a new working folder (the per-terminal folder chip).
     changeTermFolder: function (id, folder) {
@@ -1939,13 +1935,14 @@ var App = {
         model = model || $('#modelSelect').value || 'llama3.2:latest';
         var dir = this.expandHome(folder) || (this.cwd && this.cwd !== '.' ? this.cwd : '');
         var id = rid();
-        var t = new Terminal(id, model, dir);
+        var isShell = (model === 'shell');   // the "shell" entry at the top of the model list
+        var t = new Terminal(id, model, dir); if (isShell) t.kind = 'shell';
         var self = this;
         Promise.resolve(window.termCreate(id, model, dir)).then(function () {
             self.live[id] = true;
             self.terminals.push(t);
             self.render();
-            self.launchCli(id, model, dir);
+            if (!isShell) self.launchCli(id, model, dir);   // shell: bare prompt, no ollamadev
         }).catch(function (e) { banner('termCreate failed: ' + e, 'err'); });
     },
     // Re-attach the UI to a pty that's still alive from earlier this session
@@ -2010,12 +2007,9 @@ var App = {
         terms.forEach(function (ti) { if (self.live[ti.id]) { self.attachTerminal(ti.id, ti.model, ti.kind, ti.cwd); attached++; } });
         this.zoomed = state.zoomed || null;
         if (attached) this.render();
-        // saved terminals whose pty is gone → respawn (each renders itself). Plain
-        // shells come back as shells (no CLI); the rest relaunch ollamadev.
-        terms.forEach(function (ti) {
-            if (self.live[ti.id]) return;
-            if (ti.kind === 'shell') self.spawnShell(ti.cwd); else self.spawnTerminal(ti.model, ti.cwd);
-        });
+        // saved terminals whose pty is gone → respawn (each renders itself). A saved
+        // model of "shell" comes back as a plain shell; the rest relaunch ollamadev.
+        terms.forEach(function (ti) { if (!self.live[ti.id]) self.spawnTerminal(ti.model, ti.cwd); });
         if (!terms.length && !this.terminals.length) this.spawnTerminal();
         if (state.layout) this.setLayout(state.layout);
         if (state.view) this.setView(state.view);

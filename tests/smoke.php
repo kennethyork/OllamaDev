@@ -491,11 +491,10 @@ shell_exec('rm -rf ' . escapeshellarg($shk));
 ok('desktop exposes skill bindings + a Skills manager UI', strpos($bind, 'function skillsList') !== false &&
     strpos($bind, 'function skillsSave') !== false && strpos($bind, "'skillsList'") !== false &&
     strpos($ajs, 'var SkillMgr') !== false && strpos($ajs, 'SkillMgr.bind()') !== false);
-// Always-available plain shell terminal (no ollamadev), persisted across restore.
-$ihtml = (string) @file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/index.html');
-ok('desktop offers an always-available plain shell terminal', strpos($ihtml, 'id="newShellBtn"') !== false &&
-    strpos($ajs, 'spawnShell: function') !== false && strpos($ajs, "ti.kind === 'shell'") !== false &&
-    strpos($ajs, 'kind: t.kind') !== false);
+// Plain shell as the top entry of the model dropdown (no ollamadev when chosen).
+ok('desktop offers a plain shell via the model list', strpos($ajs, 'value="shell"') !== false &&
+    strpos($ajs, "isShell = (model === 'shell')") !== false && strpos($ajs, 'if (!isShell) self.launchCli') !== false &&
+    strpos($ajs, 'realModel: function') !== false && strpos($ajs, 'kind: t.kind') !== false);
 // Desktop: a cleared sentinel wipes the localStorage-only manual cards (once, watermarked).
 $appjs = (string) @file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/app.js');
 ok('desktop applies the cleared sentinel to manual cards', strpos($appjs, 'ade.boardCleared') !== false &&
