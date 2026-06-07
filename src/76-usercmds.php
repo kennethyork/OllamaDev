@@ -171,4 +171,91 @@ class Hooks {
             self::exec($cmd, (string) json_encode($payload), ['OLLAMADEV_EVENT' => $event]);
         }
     }
+
+    // ---- Editor: view/add/remove hooks, persisted to ~/.ollamadev/config.json ----
+    public static function knownEvents(): array {
+        return ['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'SessionStart', 'Stop',
+            'PreCompact', 'SubagentStop', 'Notification', 'beforePrompt', 'afterEdit'];
+    }
+    // Canonical event name for case-insensitive input, or null if unknown.
+    public static function normalizeEvent(string $e): ?string {
+        foreach (self::knownEvents() as $k) if (strcasecmp($k, $e) === 0) return $k;
+        return null;
+    }
+    // Configured hooks for an event, normalized to [{command, matcher}].
+    public static function listFor(string $event): array {
+        $cfg = Config::get('hooks.' . $event, null);
+        $out = [];
+        if (is_string($cfg)) { if (trim($cfg) !== '') $out[] = ['command' => $cfg, 'matcher' => '']; return $out; }
+        if (is_array($cfg)) foreach ($cfg as $h) {
+            if (is_string($h)) { if (trim($h) !== '') $out[] = ['command' => $h, 'matcher' => '']; }
+            elseif (is_array($h)) {
+                $c = (string)($h['command'] ?? $h['cmd'] ?? '');
+                if (trim($c) !== '') $out[] = ['command' => $c, 'matcher' => (string)($h['matcher'] ?? $h['match'] ?? '')];
+            }
+        }
+        return $out;
+    }
+    // Append a hook (persisted). Normalizes a prior string config into a list.
+    public static function add(string $event, string $command, string $matcher = ''): bool {
+        $ev = self::normalizeEvent($event);
+        if ($ev === null || trim($command) === '') return false;
+        $list = self::listFor($ev);
+        $entry = ['command' => trim($command)];
+        if (trim($matcher) !== '') $entry['matcher'] = trim($matcher);
+        $list[] = $entry;
+        Config::persist('hooks.' . $ev, $list);
+        return true;
+    }
+    // Remove the hook at $index for an event (persisted). True if removed.
+    public static function removeAt(string $event, int $index): bool {
+        $ev = self::normalizeEvent($event);
+        if ($ev === null) return false;
+        $list = self::listFor($ev);
+        if ($index < 0 || $index >= count($list)) return false;
+        array_splice($list, $index, 1);
+        Config::persist('hooks.' . $ev, array_values($list));
+        return true;
+    }
+    // Human-readable listing of every configured hook, grouped by event.
+    public static function renderConfigured(): string {
+        $c = "\033[36m"; $d = "\033[2m"; $r = "\033[0m";
+        $out = "\n  Hooks:\n"; $any = false;
+        foreach (self::knownEvents() as $ev) {
+            $list = self::listFor($ev);
+            if (empty($list)) continue;
+            $any = true;
+            $out .= "  {$c}$ev{$r}\n";
+            foreach ($list as $i => $h) {
+                $mx = ($h['matcher'] ?? '') !== '' ? " {$d}[match: {$h['matcher']}]{$r}" : '';
+                $out .= "    {$d}$i:{$r} {$h['command']}$mx\n";
+            }
+        }
+        if (!$any) $out .= "  {$d}(none configured){$r}\n";
+        $out .= "  {$d}add: /hooks add <event> <command> [--match <regex>]  ·  remove: /hooks remove <event> <index>{$r}\n";
+        $out .= "  {$d}events: " . implode(', ', self::knownEvents()) . "{$r}\n";
+        return $out;
+    }
+    // Parse + apply a `/hooks ...` (or `ollamadev hooks ...`) editor command. Returns
+    // the text to show. $argv is the words after "hooks".
+    public static function editorCommand(array $words): string {
+        $sub = strtolower($words[0] ?? '');
+        if ($sub === '' || $sub === 'list') return self::renderConfigured();
+        if ($sub === 'add') {
+            $ev = self::normalizeEvent($words[1] ?? '');
+            if ($ev === null) return "Unknown event. Known: " . implode(', ', self::knownEvents()) . "\n";
+            $rest = trim(implode(' ', array_slice($words, 2)));
+            $matcher = '';
+            if (preg_match('/(^|\s)--match\s+(\S+)/', $rest, $m)) { $matcher = $m[2]; $rest = trim(str_replace($m[0], ' ', $rest)); }
+            if ($rest === '') return "Usage: hooks add <event> <command> [--match <regex>]\n";
+            return self::add($ev, $rest, $matcher) ? "✓ added $ev hook\n" . self::renderConfigured() : "could not add hook\n";
+        }
+        if ($sub === 'remove' || $sub === 'rm' || $sub === 'delete') {
+            $ev = self::normalizeEvent($words[1] ?? '');
+            if ($ev === null) return "Usage: hooks remove <event> <index>\n";
+            $idx = (int)($words[2] ?? -1);
+            return self::removeAt($ev, $idx) ? "✓ removed $ev hook #$idx\n" . self::renderConfigured() : "no hook at that index (see: hooks list)\n";
+        }
+        return "Usage: hooks [list | add <event> <command> [--match <regex>] | remove <event> <index>]\n";
+    }
 }

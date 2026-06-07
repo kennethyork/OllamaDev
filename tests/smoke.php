@@ -1565,6 +1565,35 @@ ok('AgentDefs class reads .ollamadev/agents/*.md', strpos($src, 'class AgentDefs
 ok('SubAgent honors agent_type (model/permission/persona)', strpos($src, 'AgentDefs::get($at)') !== false &&
     strpos($src, "\$p['agent_type']") !== false);
 ok('agents CLI command + --json', strpos($src, "\$argv[1] === 'agents'") !== false && strpos($src, 'AgentDefs::all()') !== false);
+// 5b. The agent's tools: list is a HARD gate (not just a prompt-level nudge).
+if (preg_match('/class Permission \{.*?\n\}/s', $src, $pah)) {
+    if (!class_exists('Permission')) eval($pah[0]);
+    Permission::setMode('auto'); Permission::setToolAllowlist(['view', 'grep']);
+    ok('tool allowlist hard-blocks unlisted tools', Permission::check('view', []) === true &&
+        Permission::check('bash', []) === false && Permission::check('write', []) === false);
+    Permission::clearToolAllowlist();
+    ok('clearing the allowlist restores access', Permission::check('bash', []) === true);
+}
+ok('SubAgent enforces + restores the tool allowlist', strpos($src, 'Permission::setToolAllowlist($def[\'tools\'])') !== false &&
+    strpos($src, 'Permission::setToolAllowlist($parentAllow)') !== false);
+
+// 5c. /hooks + `ollamadev hooks` editor (add/list/remove, persisted as JSON).
+ok('Hooks editor methods present', strpos($src, 'function editorCommand(') !== false &&
+    strpos($src, 'function add(string $event') !== false && strpos($src, 'function removeAt(') !== false);
+ok('/hooks + hooks CLI wired', strpos($src, "'hooks' => Hooks::editorCommand(") !== false &&
+    strpos($src, "\$argv[1] === 'hooks'") !== false);
+if (isset($BIN) && is_file($BIN)) {
+    $hh = sys_get_temp_dir() . '/odv_hooks_' . getmypid(); @mkdir($hh . '/.ollamadev', 0777, true);
+    run_bin(['hooks', 'add', 'PreToolUse', 'echo nope; exit 1', '--match', 'bash'], '', ['HOME' => $hh]);
+    [$hl] = run_bin(['hooks', 'list'], '', ['HOME' => $hh]);
+    ok('hooks add persists with matcher', strpos($hl, 'PreToolUse') !== false && strpos($hl, 'match: bash') !== false);
+    [$hb] = run_bin(['tool', 'bash', '{"command":"echo hi"}'], '', ['HOME' => $hh]);
+    ok('an added PreToolUse hook actually blocks', strpos($hb, 'Blocked by PreToolUse hook') !== false);
+    run_bin(['hooks', 'remove', 'PreToolUse', '0'], '', ['HOME' => $hh]);
+    [$hb2] = run_bin(['tool', 'bash', '{"command":"echo back"}'], '', ['HOME' => $hh]);
+    ok('hooks remove un-blocks the tool', strpos($hb2, 'Blocked') === false);
+    @exec('rm -rf ' . escapeshellarg($hh));
+}
 
 // 6. MCP server.
 ok('McpServer speaks JSON-RPC over stdio', strpos($src, 'class McpServer') !== false &&

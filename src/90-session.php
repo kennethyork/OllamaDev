@@ -217,6 +217,7 @@ class Session {
             'output-style', 'outputstyle', 'style' => $this->setOutputStyle($args),
             'statusline' => $this->setStatusLine($args),
             'agents' => AgentDefs::render(),
+            'hooks' => Hooks::editorCommand(preg_split('/\s+/', trim($args), -1, PREG_SPLIT_NO_EMPTY) ?: []),
             default => UserCmds::exists($cmd) ? ('PROMPT:' . UserCmds::expand($cmd, $args)) : false
         };
     }
@@ -412,6 +413,7 @@ class Session {
         $out .= $row('/output-style [name]', 'tone/verbosity preset (default·concise·explanatory·formal·bullets)');
         $out .= $row('/statusline [tpl]', 'set the prompt status line ({model} {cwd} {branch} {mode}, or a command)');
         $out .= $row('/agents', 'list file-defined custom agent types (.ollamadev/agents/*.md)');
+        $out .= $row('/hooks', 'view/add/remove shell hooks (PreToolUse can block a tool)');
         $out .= "\n  {$d}Session{$r}\n";
         $out .= $row('/cd · /ls · /pwd', 'navigate the working directory');
         $out .= $row('/git <cmd>', 'run a git command');

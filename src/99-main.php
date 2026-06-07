@@ -288,6 +288,12 @@ if ($argc >= 2 && $argv[1] === 'github') {
     exit(0);
 }
 
+// Hooks editor CLI Command — view/add/remove shell hooks (persisted to config.json).
+if ($argc >= 2 && $argv[1] === 'hooks') {
+    echo rtrim(Hooks::editorCommand(array_slice($argv, 2))) . "\n";
+    exit(0);
+}
+
 // Custom agent types CLI Command — list/show file-defined subagent personas.
 if ($argc >= 2 && $argv[1] === 'agents') {
     $sub = $argv[2] ?? 'list';
@@ -1467,6 +1473,7 @@ Commands:
   ollamadev config get|set <key> [value]   Inspect/persist ~/.ollamadev/config.json
   ollamadev skills      Manage skills (list/search/browse/add/install/export)
   ollamadev agents      List file-defined custom agent types (.ollamadev/agents/*.md)
+  ollamadev hooks       View/add/remove shell hooks (list|add <event> <cmd>|remove <event> <i>)
   ollamadev mcp serve   Expose this CLI's tools to any MCP client over stdio
   ollamadev attest      Audit + prove the air-gap posture (--offline to lock down)
   ollamadev git        Git commands (status, diff, commit, etc.)

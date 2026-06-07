@@ -3,6 +3,7 @@ class Permission {
     private static array $denied = [];    // tools blocked for this session
     private static string $mode = 'ask';  // auto | ask | readonly | plan
     private static string $planReturn = 'ask'; // mode restored when plan mode is approved
+    private static array $toolAllow = []; // when non-empty, ONLY these tools may run (hard gate)
     private static bool $interactive = false;
     private static bool $offline = false; // air-gapped: hard-block all network tools
 
@@ -33,6 +34,11 @@ class Permission {
         }
     }
     public static function getMode(): string { return self::$mode; }
+    // Hard tool allowlist (a custom agent type's `tools:` field). When set, any tool
+    // outside the list is blocked at the gate — not just discouraged in the prompt.
+    public static function setToolAllowlist(array $tools): void { self::$toolAllow = array_values(array_filter(array_map('strval', $tools), fn($t) => $t !== '')); }
+    public static function toolAllowlist(): array { return self::$toolAllow; }
+    public static function clearToolAllowlist(): void { self::$toolAllow = []; }
     public static function inPlanMode(): bool { return self::$mode === 'plan'; }
     // Approve the plan: leave plan mode, restoring whatever mode preceded it.
     public static function exitPlan(): string { self::$mode = self::$planReturn; return self::$mode; }
@@ -58,6 +64,9 @@ class Permission {
     public static function check(string $tool, array $params = []): bool {
         if (isset(self::$denied[$tool])) return false;
         if (self::$offline && self::isNetwork($tool)) return false; // air-gap: nothing leaves the machine
+        // Hard allowlist (custom agent's tools:): anything off the list is blocked
+        // outright — the agent is confined to exactly the tools it declared.
+        if (!empty(self::$toolAllow) && !in_array($tool, self::$toolAllow, true)) return false;
         // Plan mode: research only. Read-only tools run; everything that mutates is
         // blocked (even a prior allow()) until the user approves via exit_plan_mode.
         if (self::$mode === 'plan') return $tool === 'exit_plan_mode' || self::isReadonly($tool);

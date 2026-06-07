@@ -53,11 +53,11 @@ class SubAgent {
         if ($parentMode === 'readonly') $subMode = 'readonly';            // can't escalate past parent
         if ($parentMode === 'ask' && $subMode === 'auto') $subMode = 'ask';
 
-        // The agent def's persona becomes a system message; a tools allowlist is
-        // advertised to the model (it's a soft constraint at the prompt level).
+        // The agent def's persona becomes a system message; a tools allowlist is both
+        // advertised to the model AND enforced as a hard gate (see Permission below).
         if ($def && ($def['prompt'] ?? '') !== '') {
             $persona = $def['prompt'];
-            if (!empty($def['tools'])) $persona .= "\n\nUse ONLY these tools: " . implode(', ', $def['tools']) . ".";
+            if (!empty($def['tools'])) $persona .= "\n\nYou may use ONLY these tools (any other is blocked): " . implode(', ', $def['tools']) . ".";
             $messages = [['role' => 'system', 'content' => $persona]];
         } else {
             $messages = [];
@@ -75,6 +75,9 @@ class SubAgent {
         // the chosen (cautious) mode, then restore the parent's policy.
         Permission::setMode($subMode);
         Permission::setInteractive(false);
+        // Hard-confine the agent to its declared tools (restored in finally).
+        $parentAllow = Permission::toolAllowlist();
+        if ($def && !empty($def['tools'])) Permission::setToolAllowlist($def['tools']);
         try {
             for ($i = 0; $i < $maxIterations; $i++) {
                 $turn = $sub->chatTurn($messages);
@@ -102,6 +105,7 @@ class SubAgent {
             self::$depth--;
             Permission::setMode($parentMode);          // restore parent policy
             Permission::setInteractive($parentInteractive);
+            Permission::setToolAllowlist($parentAllow); // restore parent's tool confinement (if any)
             if (class_exists('Hooks')) Hooks::event('SubagentStop', ['_subject' => $at, 'agent_type' => $at, 'prompt' => substr($prompt, 0, 500)]);
         }
 

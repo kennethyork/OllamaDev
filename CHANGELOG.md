@@ -1,5 +1,13 @@
 # Changelog
 
+## v4.8.48 (2026-06-07)
+
+### Changed
+- **A custom agent's `tools:` list is now a HARD gate.** Previously it was advertised to the model as a soft constraint; now `Permission` enforces it — when a subagent runs with a `tools:` allowlist, any tool outside the list is blocked at the gate (and the parent's confinement is restored when it returns). The air-gap and plan-mode gates still compose on top.
+
+### Added
+- **Hooks editor — `/hooks` (and `ollamadev hooks`).** View, add, and remove shell hooks without hand-editing JSON: `/hooks add PreToolUse "command" --match bash`, `/hooks list`, `/hooks remove PreToolUse 0`. Changes persist to `~/.ollamadev/config.json` (normalizing into the `{command, matcher}` list form), and an added PreToolUse hook takes effect immediately.
+
 ## v4.8.47 (2026-06-07)
 
 ### Added — Claude-Code-parity harness (six features)
