@@ -30,6 +30,7 @@ final class Bindings
         'sttModel', 'setSttModel', 'sttHistory', 'sttClearHistory',
         'openExternal', 'proxyFetch', 'crewModels', 'crewSteer',
         'skillsList', 'skillsGet', 'skillsSave', 'skillsRemove',
+        'hooksList', 'hooksAdd', 'hooksRemove',
     ];
 
     // Dispatch an allow-listed call with positional args (used by server.php).
@@ -144,6 +145,28 @@ final class Bindings
         if (trim($name) === '') return ['error' => 'no name'];
         @shell_exec('php ' . escapeshellarg($this->cli) . ' skills remove ' . escapeshellarg($name) . ' 2>/dev/null');
         return $this->skillsList();
+    }
+
+    // Hooks panel — view/add/remove shell hooks via the CLI (shared config.json).
+    public function hooksList(): array
+    {
+        $out = shell_exec('php ' . escapeshellarg($this->cli) . ' hooks list --json 2>/dev/null');
+        $d = json_decode((string) $out, true);
+        return is_array($d) && isset($d['hooks']) ? $d : ['hooks' => [], 'events' => []];
+    }
+    public function hooksAdd(string $event, string $command, string $matcher = ''): array
+    {
+        if (trim($event) === '' || trim($command) === '') return ['error' => 'event and command required'] + $this->hooksList();
+        $cmd = 'php ' . escapeshellarg($this->cli) . ' hooks add ' . escapeshellarg($event) . ' ' . escapeshellarg($command);
+        if (trim($matcher) !== '') $cmd .= ' --match ' . escapeshellarg($matcher);
+        @shell_exec($cmd . ' 2>/dev/null');
+        return $this->hooksList();
+    }
+    public function hooksRemove(string $event, $index): array
+    {
+        if (trim($event) === '') return ['error' => 'no event'] + $this->hooksList();
+        @shell_exec('php ' . escapeshellarg($this->cli) . ' hooks remove ' . escapeshellarg($event) . ' ' . escapeshellarg((string) (int) $index) . ' 2>/dev/null');
+        return $this->hooksList();
     }
 
     // Configured per-role crew models, so the desktop Crew modal can default to them

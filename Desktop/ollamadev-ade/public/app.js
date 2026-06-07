@@ -929,6 +929,67 @@ var SkillMgr = {
     clearForm: function () { ['#skillName', '#skillDesc', '#skillBody'].forEach(function (id) { var el = $(id); if (el) el.value = ''; }); }
 };
 
+// ---------- Hooks: shell commands fired at lifecycle points (PreToolUse can block) ----------
+// Backed by the CLI (window.hooks*) → ~/.ollamadev/config.json, shared by all surfaces.
+var HookMgr = {
+    bind: function () {
+        var self = this;
+        var open = $('#manageHooks'); if (open) open.onclick = function (e) { e.preventDefault(); self.open(); };
+        var close = $('#hooksClose'); if (close) close.onclick = function () { self.close(); };
+        var ov = $('#hooksOverlay'); if (ov) ov.onclick = function (e) { if (e.target === ov) self.close(); };
+        var add = $('#hookSave'); if (add) add.onclick = function () { self.add(); };
+    },
+    open: function () { var ov = $('#hooksOverlay'); if (!ov) return; ov.hidden = false; this.load(); },
+    close: function () { var ov = $('#hooksOverlay'); if (ov) ov.hidden = true; },
+    load: function () {
+        var self = this;
+        if (!window.hooksList) { this.render({ hooks: [], events: [] }); return Promise.resolve(); }
+        return Promise.resolve(window.hooksList()).then(function (d) { self.render(d); }).catch(function () { self.render({ hooks: [], events: [] }); });
+    },
+    render: function (d) {
+        var box = $('#hooksList'); if (!box) return;
+        var self = this;
+        var hooks = (d && Array.isArray(d.hooks)) ? d.hooks : [];
+        var events = (d && Array.isArray(d.events)) ? d.events : [];
+        // Populate the event dropdown (once we know the canonical list).
+        var sel = $('#hookEvent');
+        if (sel && events.length && sel.options.length !== events.length) {
+            sel.innerHTML = events.map(function (e) { return '<option>' + esc(e) + '</option>'; }).join('');
+        }
+        if (!hooks.length) { box.innerHTML = '<div class="board-empty">No hooks yet — add one below.</div>'; return; }
+        box.innerHTML = hooks.map(function (h) {
+            var mx = h.matcher ? '<span class="skill-tag" title="regex on the tool name">match: ' + esc(h.matcher) + '</span>' : '';
+            return '<div class="role-row"><div class="role-main"><span class="role-name">' + esc(h.event) + '</span>' + mx +
+                '<div class="role-desc dim mono">' + esc(h.command) + '</div></div>' +
+                '<button class="role-del" data-event="' + esc(h.event) + '" data-index="' + h.index + '" title="Remove this hook">✕</button></div>';
+        }).join('');
+        box.querySelectorAll('.role-del').forEach(function (b) {
+            b.onclick = function () { self.remove(b.dataset.event, b.dataset.index); };
+        });
+    },
+    add: function () {
+        var self = this;
+        var ev = (($('#hookEvent') || {}).value || '').trim();
+        var cmd = (($('#hookCommand') || {}).value || '').trim();
+        var matcher = (($('#hookMatcher') || {}).value || '').trim();
+        if (!ev) { banner('pick an event', 'err'); return; }
+        if (!cmd) { banner('a hook needs a command', 'err'); return; }
+        if (!window.hooksAdd) { banner('hooks unavailable here', 'err'); return; }
+        Promise.resolve(window.hooksAdd(ev, cmd, matcher)).then(function (d) {
+            if (d && d.error) { banner(d.error, 'err'); return; }
+            self.render(d);
+            $('#hookCommand').value = ''; $('#hookMatcher').value = '';
+            var box = $('#hookAddBox'); if (box) box.open = false;
+            banner(ev + ' hook added', 'ok');
+        }).catch(function () { banner('could not add hook', 'err'); });
+    },
+    remove: function (event, index) {
+        var self = this;
+        if (!event || !window.hooksRemove) return;
+        Promise.resolve(window.hooksRemove(event, index)).then(function (d) { self.render(d); banner('hook removed', 'ok'); }).catch(function () { banner('could not remove hook', 'err'); });
+    }
+};
+
 // ---------- Network toggles, shared with the CLI via config ----------
 // 🌐 Web = the air-gap (offline) flag: all network tools (search/fetch/remote git).
 // 🔍 Search = a finer switch for web search only (fetch/git unaffected).
@@ -1354,6 +1415,7 @@ var App = {
         Workspaces.bind();
         Roles.bind();
         SkillMgr.bind();
+        HookMgr.bind();
         Net.bind(); Net.load();
         Browser.bind();
         CodeSearch.bind();

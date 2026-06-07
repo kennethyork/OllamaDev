@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.8.49 (2026-06-07)
+
+### Added
+- **Desktop Hooks panel.** A new **🪝 Manage hooks…** button opens a panel (desktop + web) to view, add, and remove shell hooks without touching JSON — pick an event, type a command, optionally add a tool-name matcher. Backed by a new `ollamadev hooks list --json` surface and the `hooksList/hooksAdd/hooksRemove` bindings (wired into the web bridge too, with a parity test). Same `~/.ollamadev/config.json` the CLI's `/hooks` editor uses, so hooks added anywhere apply everywhere.
+
 ## v4.8.48 (2026-06-07)
 
 ### Changed

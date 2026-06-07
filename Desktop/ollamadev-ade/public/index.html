@@ -199,6 +199,7 @@
                 </div>
                 <div class="roles-line modal-hint dim">The Director assigns each subtask a <strong>role</strong> (coder, tester, docs, security…). <button type="button" id="crewManageRoles" class="linklike">🎭 Manage roles…</button></div>
                 <div class="roles-line modal-hint dim"><strong>Skills</strong> are reusable instructions the agent loads on demand. <button type="button" id="manageSkills" class="linklike">🧩 Manage skills…</button></div>
+                <div class="roles-line modal-hint dim"><strong>Hooks</strong> run shell commands at lifecycle points (PreToolUse can block a tool). <button type="button" id="manageHooks" class="linklike">🪝 Manage hooks…</button></div>
                 <label class="modal-check"><input type="checkbox" id="crewReview" checked> 🧑 You — review before merge (hold every branch; nothing auto-merges)</label>
                 <label class="modal-label">Ollama hosts <span class="dim">(optional — comma-separated, runs coders in parallel across machines/GPUs)</span></label>
                 <input id="crewHosts" class="field mono" placeholder="http://localhost:11434, http://192.168.1.50:11434">
@@ -259,6 +260,30 @@
             </details>
             <div class="modal-actions">
                 <button id="skillsClose">Done</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="hooksOverlay" class="modal-overlay" hidden>
+        <div class="modal">
+            <div class="modal-title">🪝 Hooks</div>
+            <div class="modal-sub dim">Shell commands fired at lifecycle points. A <strong>PreToolUse</strong> hook that exits non-zero blocks the tool. Shared by the terminal, desktop, and web (<code>~/.ollamadev/config.json</code>).</div>
+            <div id="hooksList" class="roles-list"></div>
+            <details class="crew-adv" id="hookAddBox">
+                <summary>＋ Add a hook</summary>
+                <label class="modal-label">Event</label>
+                <select id="hookEvent" class="select"></select>
+                <label class="modal-label">Command <span class="dim">— gets the tool name + JSON input on stdin; non-zero exit blocks (PreToolUse)</span></label>
+                <input id="hookCommand" class="field mono" placeholder="e.g. sh -c 'echo no secrets; exit 1'">
+                <label class="modal-label">Matcher <span class="dim">(optional regex on the tool name — e.g. bash|rm)</span></label>
+                <input id="hookMatcher" class="field mono" placeholder="bash|rm|write">
+                <div class="modal-actions">
+                    <div class="spacer"></div>
+                    <button id="hookSave" class="primary" type="button">Add hook</button>
+                </div>
+            </details>
+            <div class="modal-actions">
+                <button id="hooksClose">Done</button>
             </div>
         </div>
     </div>

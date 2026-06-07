@@ -16,7 +16,8 @@
     'webAccess', 'setWebAccess', 'searchEnabled', 'setSearchEnabled',
     'codeSearch', 'codeIndexStatus', 'codeIndexBuild', 'reviewDiff', 'temperature', 'setTemperature',
     'sttModel', 'setSttModel', 'sttHistory', 'sttClearHistory', 'openExternal', 'proxyFetch', 'crewModels',
-    'crewSteer', 'skillsList', 'skillsGet', 'skillsSave', 'skillsRemove'];
+    'crewSteer', 'skillsList', 'skillsGet', 'skillsSave', 'skillsRemove',
+    'hooksList', 'hooksAdd', 'hooksRemove'];
 
   function rpc(name, args) {
     var headers = { 'Content-Type': 'application/json' };

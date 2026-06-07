@@ -290,6 +290,11 @@ if ($argc >= 2 && $argv[1] === 'github') {
 
 // Hooks editor CLI Command — view/add/remove shell hooks (persisted to config.json).
 if ($argc >= 2 && $argv[1] === 'hooks') {
+    // JSON surface for the desktop/web Hooks panel.
+    if (in_array('--json', $argv, true)) {
+        echo json_encode(['hooks' => Hooks::configuredData(), 'events' => Hooks::knownEvents()]) . "\n";
+        exit(0);
+    }
     echo rtrim(Hooks::editorCommand(array_slice($argv, 2))) . "\n";
     exit(0);
 }

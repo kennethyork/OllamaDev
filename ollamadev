@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '4.8.48');
+define('OLLAMADEV_VERSION', '4.8.49');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -5552,6 +5552,17 @@ class Hooks {
         Config::persist('hooks.' . $ev, array_values($list));
         return true;
     }
+    // Flat list of every configured hook, for the desktop/web Hooks panel.
+    public static function configuredData(): array {
+        $out = [];
+        foreach (self::knownEvents() as $ev) {
+            foreach (self::listFor($ev) as $i => $h) {
+                $out[] = ['event' => $ev, 'index' => $i, 'command' => $h['command'], 'matcher' => $h['matcher'] ?? ''];
+            }
+        }
+        return $out;
+    }
+
     // Human-readable listing of every configured hook, grouped by event.
     public static function renderConfigured(): string {
         $c = "\033[36m"; $d = "\033[2m"; $r = "\033[0m";
@@ -10072,6 +10083,11 @@ if ($argc >= 2 && $argv[1] === 'github') {
 
 // Hooks editor CLI Command — view/add/remove shell hooks (persisted to config.json).
 if ($argc >= 2 && $argv[1] === 'hooks') {
+    // JSON surface for the desktop/web Hooks panel.
+    if (in_array('--json', $argv, true)) {
+        echo json_encode(['hooks' => Hooks::configuredData(), 'events' => Hooks::knownEvents()]) . "\n";
+        exit(0);
+    }
     echo rtrim(Hooks::editorCommand(array_slice($argv, 2))) . "\n";
     exit(0);
 }

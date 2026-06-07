@@ -217,6 +217,17 @@ class Hooks {
         Config::persist('hooks.' . $ev, array_values($list));
         return true;
     }
+    // Flat list of every configured hook, for the desktop/web Hooks panel.
+    public static function configuredData(): array {
+        $out = [];
+        foreach (self::knownEvents() as $ev) {
+            foreach (self::listFor($ev) as $i => $h) {
+                $out[] = ['event' => $ev, 'index' => $i, 'command' => $h['command'], 'matcher' => $h['matcher'] ?? ''];
+            }
+        }
+        return $out;
+    }
+
     // Human-readable listing of every configured hook, grouped by event.
     public static function renderConfigured(): string {
         $c = "\033[36m"; $d = "\033[2m"; $r = "\033[0m";

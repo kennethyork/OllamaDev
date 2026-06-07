@@ -491,6 +491,25 @@ shell_exec('rm -rf ' . escapeshellarg($shk));
 ok('desktop exposes skill bindings + a Skills manager UI', strpos($bind, 'function skillsList') !== false &&
     strpos($bind, 'function skillsSave') !== false && strpos($bind, "'skillsList'") !== false &&
     strpos($ajs, 'var SkillMgr') !== false && strpos($ajs, 'SkillMgr.bind()') !== false);
+// Desktop Hooks panel: bindings + bridge + UI, backed by `ollamadev hooks --json`.
+$ihtml_h = (string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/index.html');
+ok('desktop exposes hooks bindings + a Hooks panel UI', strpos($bind, 'function hooksList') !== false &&
+    strpos($bind, 'function hooksAdd') !== false && strpos($bind, 'function hooksRemove') !== false &&
+    strpos($bind, "'hooksList'") !== false &&
+    strpos($ajs, 'var HookMgr') !== false && strpos($ajs, 'HookMgr.bind()') !== false &&
+    strpos($ihtml_h, 'id="hooksOverlay"') !== false && strpos($ihtml_h, 'id="manageHooks"') !== false);
+ok('hooks JSON surface for the panel', strpos($src, "\$argv[1] === 'hooks'") !== false &&
+    strpos($src, 'Hooks::configuredData()') !== false);
+// Functional: the JSON surface the panel reads round-trips through the binary.
+if (isset($BIN) && is_file($BIN)) {
+    $hj = sys_get_temp_dir() . '/odv_hooksjson_' . getmypid(); @mkdir($hj . '/.ollamadev', 0777, true);
+    run_bin(['hooks', 'add', 'PostToolUse', 'echo hi'], '', ['HOME' => $hj]);
+    [$hjson] = run_bin(['hooks', 'list', '--json'], '', ['HOME' => $hj]);
+    $hd = json_decode(trim($hjson), true);
+    ok('hooks list --json feeds the panel', is_array($hd) && isset($hd['hooks'][0]['event']) &&
+        $hd['hooks'][0]['event'] === 'PostToolUse' && !empty($hd['events']));
+    @exec('rm -rf ' . escapeshellarg($hj));
+}
 // Plain shell as the top entry of the model dropdown (no ollamadev when chosen).
 ok('desktop offers a plain shell via the model list', strpos($ajs, 'value="shell"') !== false &&
     strpos($ajs, "isShell = (model === 'shell')") !== false && strpos($ajs, 'if (!isShell) self.launchCli') !== false &&
