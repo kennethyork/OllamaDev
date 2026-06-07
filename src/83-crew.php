@@ -528,7 +528,7 @@ class Crew {
             $messages = [['role' => 'user', 'content' => $prompt]];
             $dbg = (bool)getenv('CREW_DEBUG');
             for ($i = 0; $i < $maxIter; $i++) {
-                if ($steerN > 0) self::injectSteerFor($messages, $steerFile, $steerN);   // separate Director redirects
+                if ($steerN > 0) self::injectSteerFor($messages, $steerFile, $steerN, $agent);   // separate Director redirects (incl. "model <name>" hot-swap)
                 echo "\033[2m·\033[0m"; @flush();   // heartbeat
                 $turn = $agent->chatTurn($messages);
                 $calls = $turn['calls'] ?? [];
@@ -607,7 +607,7 @@ class Crew {
     }
 
     // Inject any not-yet-seen steering messages addressed to coder $n as user turns.
-    private static function injectSteerFor(array &$messages, string $steerFile, int $n): void {
+    private static function injectSteerFor(array &$messages, string $steerFile, int $n, ?Agent $agent = null): void {
         if ($n <= 0 || $steerFile === '' || !is_file($steerFile)) return;
         $seen = self::$steerSeen[$n] ?? 0.0;
         foreach (file($steerFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $ln) {
@@ -617,7 +617,24 @@ class Crew {
             if ($t !== $n && $t !== 0) continue;   // 0 = broadcast to the whole crew
             $ts = (float)($e['ts'] ?? 0);
             if ($ts <= $seen) continue;
-            $messages[] = ['role' => 'user', 'content' => "🧭 Director steering (apply this now): " . (string)($e['msg'] ?? '')];
+            $msg = (string)($e['msg'] ?? '');
+            // A model directive ("model <name>") hot-swaps THIS coder's model mid-run —
+            // same worktree, same message history, next iteration runs on the new model.
+            if ($agent !== null && preg_match('/^\s*(?:@|\/)?model\s+(\S+)\s*$/i', $msg, $mm)) {
+                $want = $mm[1];
+                $resolved = $agent->resolveModel($want);
+                if ($resolved === null) {
+                    $messages[] = ['role' => 'user', 'content' => "🧭 Director tried to switch your model to '{$want}', but it isn't installed — continuing on the current model."];
+                    echo "\033[33m  ⇄ coder {$n} model switch failed (not installed: {$want})\033[0m\n";
+                } else {
+                    $agent->setModel($resolved);
+                    $messages[] = ['role' => 'user', 'content' => "🧭 Director switched your model to {$resolved}. Continue this same subtask on it."];
+                    echo "\033[36m  ⇄ coder {$n} model → {$resolved}\033[0m\n";
+                }
+                self::$steerSeen[$n] = $ts;
+                continue;
+            }
+            $messages[] = ['role' => 'user', 'content' => "🧭 Director steering (apply this now): " . $msg];
             self::$steerSeen[$n] = $ts;
             echo "\033[36m  ⇄ coder {$n} got steering" . ($t === 0 ? " (crew-wide)" : "") . "\033[0m\n";
         }

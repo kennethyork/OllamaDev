@@ -1873,7 +1873,7 @@ if ($cmd === 'chat') {
             }
         };
         $prompt = "\n{$c}🧭 ▸{$r} ";
-        echo "\n{$b}🧭 Director console{$r} {$d}— live view of your crew. Steer one coder \"<#>: instruction\", or the whole crew \"all: instruction\". 'board' · 'exit'.{$r}\n";
+        echo "\n{$b}🧭 Director console{$r} {$d}— live view of your crew. Steer one coder \"<#>: instruction\", or the whole crew \"all: instruction\". Swap a coder's model live: \"<#>: model <name>\". 'board' · 'exit'.{$r}\n";
         $renderBoard();
         echo $prompt;
         @stream_set_blocking(STDIN, false);
@@ -1898,7 +1898,7 @@ if ($cmd === 'chat') {
                 $who = $tgt === 0 ? 'the crew' : "coder {$tgt}";
                 echo !empty($sr['ok']) ? "  {$g}✓{$r} {$who} steered\n" : "  {$y}" . ($sr['error'] ?? 'could not steer') . "{$r}\n";
             } else {
-                echo "  {$d}use \"<#>: instruction\", \"all: instruction\", 'board', or 'exit'{$r}\n";
+                echo "  {$d}use \"<#>: instruction\", \"all: instruction\", \"<#>: model <name>\", 'board', or 'exit'{$r}\n";
             }
             echo $prompt;
         }

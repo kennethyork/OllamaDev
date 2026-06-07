@@ -467,6 +467,17 @@ file_put_contents($shome . '/.ollamadev/crew/current.json', json_encode(['active
 [$o2, , $c2] = run_bin(['crew', 'steer', '2', 'focus on tests'], '', ['HOME' => $shome]);
 $sj = (string) @file_get_contents($shome . '/.ollamadev/crew/crew_x/steer.jsonl');
 ok('crew steer queues a targeted message to steer.jsonl', $c2 === 0 && strpos($sj, '"target":2') !== false && strpos($sj, 'focus on tests') !== false, trim($o2 . ' | ' . $sj));
+// Live model swap via the Director: "<#>: model <name>" is sent through the same
+// steer channel and hot-swaps that coder's model mid-run (same worktree + history).
+[$o3, , $c3] = run_bin(['crew', 'steer', '2', 'model llama3.2:latest'], '', ['HOME' => $shome]);
+$sj2 = (string) @file_get_contents($shome . '/.ollamadev/crew/crew_x/steer.jsonl');
+ok('Director can send a live model-swap through steer', $c3 === 0 && strpos($sj2, 'model llama3.2:latest') !== false);
+ok('coder recognizes a "model <name>" directive + hot-swaps its model', strpos($src, "model\\s+(\\S+)") !== false &&
+    strpos($src, 'injectSteerFor($messages, $steerFile, $steerN, $agent)') !== false &&
+    strpos($src, '$agent->setModel($resolved)') !== false && strpos($src, "coder {\$n} model →") !== false);
+ok('live model swap is discoverable (console + desktop box)',
+    strpos($src, "Swap a coder's model live") !== false &&
+    strpos((string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/index.html'), '2: model llama3.3:70b') !== false);
 shell_exec('rm -rf ' . escapeshellarg($shome));
 $bind = (string) @file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/src/Bindings.php');
 ok('desktop exposes crewSteer for the Director box', strpos($bind, 'function crewSteer') !== false && strpos($bind, "'crewSteer'") !== false);

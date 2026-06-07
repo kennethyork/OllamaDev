@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.8.50 (2026-06-07)
+
+### Added
+- **Swap a coder's model live, through the Director.** Send `2: model llama3.3:70b` from the Director console (`crew director`), the desktop Director box, or `crew steer 2 "model <name>"`, and that coder **hot-swaps its model mid-run** — same worktree, same subtask, same message history; the next iteration just runs on the new model. `all: model <name>` switches the whole crew. If the model isn't installed, the coder is told and stays on its current one. (So when a 7B coder stalls, bump it to a 70B without losing its progress.)
+
 ## v4.8.49 (2026-06-07)
 
 ### Added

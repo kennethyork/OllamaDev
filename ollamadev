@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '4.8.49');
+define('OLLAMADEV_VERSION', '4.8.50');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -7025,7 +7025,7 @@ class Crew {
             $messages = [['role' => 'user', 'content' => $prompt]];
             $dbg = (bool)getenv('CREW_DEBUG');
             for ($i = 0; $i < $maxIter; $i++) {
-                if ($steerN > 0) self::injectSteerFor($messages, $steerFile, $steerN);   // separate Director redirects
+                if ($steerN > 0) self::injectSteerFor($messages, $steerFile, $steerN, $agent);   // separate Director redirects (incl. "model <name>" hot-swap)
                 echo "\033[2m·\033[0m"; @flush();   // heartbeat
                 $turn = $agent->chatTurn($messages);
                 $calls = $turn['calls'] ?? [];
@@ -7104,7 +7104,7 @@ class Crew {
     }
 
     // Inject any not-yet-seen steering messages addressed to coder $n as user turns.
-    private static function injectSteerFor(array &$messages, string $steerFile, int $n): void {
+    private static function injectSteerFor(array &$messages, string $steerFile, int $n, ?Agent $agent = null): void {
         if ($n <= 0 || $steerFile === '' || !is_file($steerFile)) return;
         $seen = self::$steerSeen[$n] ?? 0.0;
         foreach (file($steerFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $ln) {
@@ -7114,7 +7114,24 @@ class Crew {
             if ($t !== $n && $t !== 0) continue;   // 0 = broadcast to the whole crew
             $ts = (float)($e['ts'] ?? 0);
             if ($ts <= $seen) continue;
-            $messages[] = ['role' => 'user', 'content' => "🧭 Director steering (apply this now): " . (string)($e['msg'] ?? '')];
+            $msg = (string)($e['msg'] ?? '');
+            // A model directive ("model <name>") hot-swaps THIS coder's model mid-run —
+            // same worktree, same message history, next iteration runs on the new model.
+            if ($agent !== null && preg_match('/^\s*(?:@|\/)?model\s+(\S+)\s*$/i', $msg, $mm)) {
+                $want = $mm[1];
+                $resolved = $agent->resolveModel($want);
+                if ($resolved === null) {
+                    $messages[] = ['role' => 'user', 'content' => "🧭 Director tried to switch your model to '{$want}', but it isn't installed — continuing on the current model."];
+                    echo "\033[33m  ⇄ coder {$n} model switch failed (not installed: {$want})\033[0m\n";
+                } else {
+                    $agent->setModel($resolved);
+                    $messages[] = ['role' => 'user', 'content' => "🧭 Director switched your model to {$resolved}. Continue this same subtask on it."];
+                    echo "\033[36m  ⇄ coder {$n} model → {$resolved}\033[0m\n";
+                }
+                self::$steerSeen[$n] = $ts;
+                continue;
+            }
+            $messages[] = ['role' => 'user', 'content' => "🧭 Director steering (apply this now): " . $msg];
             self::$steerSeen[$n] = $ts;
             echo "\033[36m  ⇄ coder {$n} got steering" . ($t === 0 ? " (crew-wide)" : "") . "\033[0m\n";
         }
@@ -11666,7 +11683,7 @@ if ($cmd === 'chat') {
             }
         };
         $prompt = "\n{$c}🧭 ▸{$r} ";
-        echo "\n{$b}🧭 Director console{$r} {$d}— live view of your crew. Steer one coder \"<#>: instruction\", or the whole crew \"all: instruction\". 'board' · 'exit'.{$r}\n";
+        echo "\n{$b}🧭 Director console{$r} {$d}— live view of your crew. Steer one coder \"<#>: instruction\", or the whole crew \"all: instruction\". Swap a coder's model live: \"<#>: model <name>\". 'board' · 'exit'.{$r}\n";
         $renderBoard();
         echo $prompt;
         @stream_set_blocking(STDIN, false);
@@ -11691,7 +11708,7 @@ if ($cmd === 'chat') {
                 $who = $tgt === 0 ? 'the crew' : "coder {$tgt}";
                 echo !empty($sr['ok']) ? "  {$g}✓{$r} {$who} steered\n" : "  {$y}" . ($sr['error'] ?? 'could not steer') . "{$r}\n";
             } else {
-                echo "  {$d}use \"<#>: instruction\", \"all: instruction\", 'board', or 'exit'{$r}\n";
+                echo "  {$d}use \"<#>: instruction\", \"all: instruction\", \"<#>: model <name>\", 'board', or 'exit'{$r}\n";
             }
             echo $prompt;
         }
