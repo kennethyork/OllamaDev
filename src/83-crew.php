@@ -558,6 +558,38 @@ class Crew {
         return $ok ? ['ok' => true, 'runId' => $board['runId']] : ['ok' => false, 'error' => 'could not write to the steer inbox'];
     }
 
+    // Director "answer mode": reply to a question directly (read-only — it may read
+    // the codebase to ground the answer, but never writes or starts a crew run).
+    public static function answer(string $question, string $model = ''): void {
+        $question = trim($question);
+        if ($question === '') return;
+        $agent = new Agent();
+        $m = trim($model) !== '' ? ($agent->resolveModel($model) ?: $model) : $agent->getModel();
+        $agent->setModel($m);
+        $prevMode = Permission::getMode(); $prevInt = Permission::isInteractive();
+        Permission::setMode('readonly'); Permission::setInteractive(false);
+        try {
+            $sys = "You are the Director of a local coding crew, acting as a helpful assistant. Answer the user's question directly and concisely. You MAY read the codebase with your tools to ground the answer, but you MUST NOT modify anything or start any task — only answer.";
+            $messages = [['role' => 'system', 'content' => $sys], ['role' => 'user', 'content' => $question]];
+            for ($i = 0; $i < 8; $i++) {
+                $turn = $agent->chatTurn($messages);
+                $content = (string)($turn['content'] ?? '');
+                $calls = $turn['calls'] ?? [];
+                $text = trim($agent->stripToolMarkup($content));
+                if ($text !== '') echo "  " . str_replace("\n", "\n  ", $text) . "\n";
+                $messages[] = ['role' => 'assistant', 'content' => $content];
+                if (empty($calls)) break;
+                foreach ($agent->executeCalls($calls) as $rr) {
+                    $messages[] = ['role' => 'tool', 'content' => (string)($rr['content'] ?? ''), 'tool_name' => $rr['name'] ?? '?'];
+                }
+            }
+        } catch (\Throwable $e) {
+            echo "  \033[31manswer failed: " . $e->getMessage() . "\033[0m\n";
+        } finally {
+            Permission::setMode($prevMode); Permission::setInteractive($prevInt);
+        }
+    }
+
     // Inject any not-yet-seen steering messages addressed to coder $n as user turns.
     private static function injectSteerFor(array &$messages, string $steerFile, int $n): void {
         if ($n <= 0 || $steerFile === '' || !is_file($steerFile)) return;

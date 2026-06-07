@@ -927,7 +927,15 @@ ok('crew-watch subcommand dispatches', strpos($src, "\$cmd === 'crew-watch'") !=
 ok('Crew::watchPanes splits a tmux pane per coder', strpos($src, 'function watchPanes(') !== false && strpos($src, 'tmux split-window') !== false);
 ok('--panes degrades gracefully without tmux', strpos($src, '--panes needs tmux') !== false);
 ok('--panes uses tail -f on coder logs', strpos($src, "'tail -n +1 -f '") !== false);
-ok('crew supports interactive mode (no task → Director prompt)', strpos($src, 'Director ▸') !== false && strpos($src, 'posix_isatty(STDIN)') !== false);
+ok('crew supports interactive mode (no task → Director prompt)', strpos($src, 'Type a task for the Director') !== false && strpos($src, 'posix_isatty(STDIN)') !== false);
+// Director answer mode: "ask" answers questions read-only instead of tasking.
+ok('Director has an answer mode (read-only Q&A, no tasking)', strpos($src, 'public static function answer(') !== false &&
+    strpos($src, "Permission::setMode('readonly')") !== false && strpos($src, '$answerMode') !== false &&
+    strpos($src, 'Crew::answer(') !== false);
+// Desktop restore brings crew + director terminals back as themselves (not -m label).
+ok('desktop restores crew/director terminals to their real command', strpos($ajs, 'spawnCmd: function') !== false &&
+    strpos($ajs, "ti.kind === 'director'") !== false && strpos($ajs, "cli + ' crew director'") !== false &&
+    strpos($ajs, "cli + ' crew'") !== false);
 ok('interactive crew loops Crew::run per prompt', strpos($src, "in_array(strtolower(\$line), ['exit', 'quit', 'q', ':q']") !== false);
 
 echo "\n== LM Studio provider ==\n";

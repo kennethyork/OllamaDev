@@ -6609,6 +6609,38 @@ class Crew {
         return $ok ? ['ok' => true, 'runId' => $board['runId']] : ['ok' => false, 'error' => 'could not write to the steer inbox'];
     }
 
+    // Director "answer mode": reply to a question directly (read-only — it may read
+    // the codebase to ground the answer, but never writes or starts a crew run).
+    public static function answer(string $question, string $model = ''): void {
+        $question = trim($question);
+        if ($question === '') return;
+        $agent = new Agent();
+        $m = trim($model) !== '' ? ($agent->resolveModel($model) ?: $model) : $agent->getModel();
+        $agent->setModel($m);
+        $prevMode = Permission::getMode(); $prevInt = Permission::isInteractive();
+        Permission::setMode('readonly'); Permission::setInteractive(false);
+        try {
+            $sys = "You are the Director of a local coding crew, acting as a helpful assistant. Answer the user's question directly and concisely. You MAY read the codebase with your tools to ground the answer, but you MUST NOT modify anything or start any task — only answer.";
+            $messages = [['role' => 'system', 'content' => $sys], ['role' => 'user', 'content' => $question]];
+            for ($i = 0; $i < 8; $i++) {
+                $turn = $agent->chatTurn($messages);
+                $content = (string)($turn['content'] ?? '');
+                $calls = $turn['calls'] ?? [];
+                $text = trim($agent->stripToolMarkup($content));
+                if ($text !== '') echo "  " . str_replace("\n", "\n  ", $text) . "\n";
+                $messages[] = ['role' => 'assistant', 'content' => $content];
+                if (empty($calls)) break;
+                foreach ($agent->executeCalls($calls) as $rr) {
+                    $messages[] = ['role' => 'tool', 'content' => (string)($rr['content'] ?? ''), 'tool_name' => $rr['name'] ?? '?'];
+                }
+            }
+        } catch (\Throwable $e) {
+            echo "  \033[31manswer failed: " . $e->getMessage() . "\033[0m\n";
+        } finally {
+            Permission::setMode($prevMode); Permission::setInteractive($prevInt);
+        }
+    }
+
     // Inject any not-yet-seen steering messages addressed to coder $n as user turns.
     private static function injectSteerFor(array &$messages, string $steerFile, int $n): void {
         if ($n <= 0 || $steerFile === '' || !is_file($steerFile)) return;
@@ -11073,19 +11105,29 @@ if ($cmd === 'chat') {
             $ans = strtolower(trim((string)fgets(STDIN)));
             if ($ans === '' || $ans === 'y' || $ans === 'yes') { Crew::resume((string)$interrupted['runId']); }
         }
-        echo "{$d}Type a task for the Director. \"clear board\" wipes the board; blank line re-prompts; 'exit' or Ctrl-D to leave.{$r}\n";
+        echo "{$d}Type a task for the Director. \"ask\" = answer mode (just answers, no tasking) · \"task\" = build · \"?<question>\" answers once · \"clear board\" · 'exit'.{$r}\n";
+        $answerMode = false;
         while (true) {
-            echo "\n{$c}Director ▸{$r} ";
+            echo "\n{$c}Director" . ($answerMode ? " (ask)" : "") . " ▸{$r} ";
             $line = fgets(STDIN);
             if ($line === false) break;                       // Ctrl-D / EOF
             $line = trim($line);
             if ($line === '') continue;
-            if (in_array(strtolower($line), ['exit', 'quit', 'q', ':q'], true)) break;
+            $low = strtolower($line);
+            if (in_array($low, ['exit', 'quit', 'q', ':q'], true)) break;
+            // Answer mode: the Director just answers questions (read-only), no crew run.
+            if (in_array($low, ['ask', 'chat', 'answer'], true)) { $answerMode = true; echo "{$d}Answer mode — I'll just answer (read-only, no tasking). Type 'task' to build again.{$r}\n"; continue; }
+            if (in_array($low, ['task', 'build'], true)) { $answerMode = false; echo "{$d}Task mode — I'll dispatch the crew on what you ask.{$r}\n"; continue; }
             // Board meta-commands are handled directly — typing it here IS the explicit
             // request, so clear it instead of spending a whole crew run on the phrase.
             if (preg_match('/^(clear|reset|wipe|empty)\s+(the\s+)?board$/i', $line)) {
                 $cr = Crew::clearBoard();
                 echo !empty($cr['ok']) ? "{$g}✓{$r} board cleared\n" : "{$y}" . ($cr['error'] ?? 'could not clear the board') . "{$r}\n";
+                continue;
+            }
+            // In answer mode, or a one-off "?question", answer instead of tasking.
+            if ($answerMode || substr($line, 0, 1) === '?') {
+                Crew::answer(ltrim($line, "? \t"), (string)($copts['directorModel'] ?? ''));
                 continue;
             }
             unset($copts['runId']);                            // fresh run id per task

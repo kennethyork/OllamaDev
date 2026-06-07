@@ -1883,19 +1883,29 @@ if ($cmd === 'chat') {
             $ans = strtolower(trim((string)fgets(STDIN)));
             if ($ans === '' || $ans === 'y' || $ans === 'yes') { Crew::resume((string)$interrupted['runId']); }
         }
-        echo "{$d}Type a task for the Director. \"clear board\" wipes the board; blank line re-prompts; 'exit' or Ctrl-D to leave.{$r}\n";
+        echo "{$d}Type a task for the Director. \"ask\" = answer mode (just answers, no tasking) · \"task\" = build · \"?<question>\" answers once · \"clear board\" · 'exit'.{$r}\n";
+        $answerMode = false;
         while (true) {
-            echo "\n{$c}Director ▸{$r} ";
+            echo "\n{$c}Director" . ($answerMode ? " (ask)" : "") . " ▸{$r} ";
             $line = fgets(STDIN);
             if ($line === false) break;                       // Ctrl-D / EOF
             $line = trim($line);
             if ($line === '') continue;
-            if (in_array(strtolower($line), ['exit', 'quit', 'q', ':q'], true)) break;
+            $low = strtolower($line);
+            if (in_array($low, ['exit', 'quit', 'q', ':q'], true)) break;
+            // Answer mode: the Director just answers questions (read-only), no crew run.
+            if (in_array($low, ['ask', 'chat', 'answer'], true)) { $answerMode = true; echo "{$d}Answer mode — I'll just answer (read-only, no tasking). Type 'task' to build again.{$r}\n"; continue; }
+            if (in_array($low, ['task', 'build'], true)) { $answerMode = false; echo "{$d}Task mode — I'll dispatch the crew on what you ask.{$r}\n"; continue; }
             // Board meta-commands are handled directly — typing it here IS the explicit
             // request, so clear it instead of spending a whole crew run on the phrase.
             if (preg_match('/^(clear|reset|wipe|empty)\s+(the\s+)?board$/i', $line)) {
                 $cr = Crew::clearBoard();
                 echo !empty($cr['ok']) ? "{$g}✓{$r} board cleared\n" : "{$y}" . ($cr['error'] ?? 'could not clear the board') . "{$r}\n";
+                continue;
+            }
+            // In answer mode, or a one-off "?question", answer instead of tasking.
+            if ($answerMode || substr($line, 0, 1) === '?') {
+                Crew::answer(ltrim($line, "? \t"), (string)($copts['directorModel'] ?? ''));
                 continue;
             }
             unset($copts['runId']);                            // fresh run id per task

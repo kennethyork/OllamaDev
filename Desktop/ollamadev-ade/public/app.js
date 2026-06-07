@@ -1790,8 +1790,21 @@ var App = {
         var dir = (this.cwd && this.cwd !== '.') ? this.cwd : '';
         var id = rid(); var t = new Terminal(id, 'Director', dir); t.kind = 'director';
         Promise.resolve(window.termCreate(id, 'Director', dir)).then(function () {
-            self.terminals.push(t); self.render();
+            self.live[id] = true; self.terminals.push(t); self.render();
             setTimeout(function () { try { window.termWrite(id, strToB64(cmd + '\n')); } catch (e) {} }, 550);
+        }).catch(function () {});
+    },
+    // Spawn a terminal in `folder` that runs a specific command. Used to RESTORE crew
+    // and director terminals to their real command (e.g. `crew director`) instead of a
+    // bare `-m <label>`, which is why they didn't come back after a restart.
+    spawnCmd: function (model, kind, folder, cmd) {
+        if (this.terminals.length >= this.MAX_TERMINALS) return;
+        var dir = this.expandHome(folder) || (this.cwd && this.cwd !== '.' ? this.cwd : '');
+        var id = rid(); var t = new Terminal(id, model, dir); if (kind) t.kind = kind;
+        var self = this;
+        Promise.resolve(window.termCreate(id, model, dir)).then(function () {
+            self.live[id] = true; self.terminals.push(t); self.render();
+            if (cmd) setTimeout(function () { try { window.termWrite(id, strToB64(cmd + '\n')); } catch (e) {} }, 500);
         }).catch(function () {});
     },
     // Poll the live crew board so the kanban reflects the Director's plan + progress.
@@ -2007,9 +2020,16 @@ var App = {
         terms.forEach(function (ti) { if (self.live[ti.id]) { self.attachTerminal(ti.id, ti.model, ti.kind, ti.cwd); attached++; } });
         this.zoomed = state.zoomed || null;
         if (attached) this.render();
-        // saved terminals whose pty is gone → respawn (each renders itself). A saved
-        // model of "shell" comes back as a plain shell; the rest relaunch ollamadev.
-        terms.forEach(function (ti) { if (!self.live[ti.id]) self.spawnTerminal(ti.model, ti.cwd); });
+        // saved terminals whose pty is gone → respawn (each renders itself). Restore by
+        // KIND so the Director console + crew prompt come back as themselves, not a bare
+        // `-m <label>`; "shell" comes back as a plain shell; the rest relaunch ollamadev.
+        var cli = self.cli || 'ollamadev';
+        terms.forEach(function (ti) {
+            if (self.live[ti.id]) return;
+            if (ti.kind === 'director') self.spawnCmd('Director', 'director', ti.cwd, cli + ' crew director');
+            else if (ti.kind === 'crew') self.spawnCmd(ti.model, 'crew', ti.cwd, cli + ' crew');
+            else self.spawnTerminal(ti.model, ti.cwd);
+        });
         if (!terms.length && !this.terminals.length) this.spawnTerminal();
         if (state.layout) this.setLayout(state.layout);
         if (state.view) this.setView(state.view);
