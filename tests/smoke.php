@@ -785,6 +785,32 @@ $brg = (string)@file_get_contents($adeDir . '/web/bridge.js');
 ok('browser shim maps window.<binding> to /api', strpos($brg, "'/api/'") !== false && strpos($brg, 'listModels') !== false && strpos($brg, 'sttTranscribe') !== false);
 $srv = (string)@file_get_contents($adeDir . '/web/server.php');
 ok('server is localhost-shaped with optional token', strpos($srv, 'OLLAMADEV_SERVE_TOKEN') !== false && strpos($srv, "str_starts_with(\$uri, '/api/')") !== false);
+// Web polish: SSE terminal streaming, safe-by-design (503 without workers → client
+// falls back to polling) so it never blocks the single-threaded built-in server.
+ok('web streams terminal output over SSE (with safe fallback)',
+    strpos($srv, "str_starts_with(\$uri, '/api/stream')") !== false &&
+    strpos($srv, "text/event-stream") !== false &&
+    strpos($srv, "(int) getenv('PHP_CLI_SERVER_WORKERS') < 2") !== false &&   // 503-guards when it can't stream
+    strpos($brg, 'window.__odvOpenStream') !== false &&
+    strpos($ajs, 'window.__odvOpenStream') !== false && strpos($ajs, '_pollLoop') !== false);
+ok('serve script enables workers so SSE streams by default',
+    strpos((string)@file_get_contents($adeDir . '/composer.json'), 'PHP_CLI_SERVER_WORKERS=4') !== false);
+// Functional: the SSE endpoint 503s without workers (proving the safe fallback path).
+$sp = 41977; $sproc = @proc_open('php -S localhost:' . $sp . ' ' . escapeshellarg($adeDir . '/web/server.php'),
+    [['pipe','r'],['pipe','w'],['pipe','w']], $spipes, $adeDir);
+if (is_resource($sproc)) {
+    usleep(700000);
+    $code = (int)(@shell_exec('curl -s -o /dev/null -w "%{http_code}" http://localhost:' . $sp . '/api/stream?term=x 2>/dev/null') ?: 0);
+    @proc_terminate($sproc); @proc_close($sproc);
+    ok('SSE endpoint 503s without workers (client then polls)', $code === 503, "got HTTP $code");
+}
+// Desktop+web polish: full ANSI color/attributes (bg, 256-color, truecolor, italic/
+// underline/dim/reverse) — was foreground+bold only.
+ok('terminal renders full SGR (bg/256/truecolor + attributes)',
+    strpos($ajs, 'function xterm256(') !== false && strpos($ajs, 'var ANSI16') !== false &&
+    strpos($ajs, 'this.reverse') !== false && strpos($ajs, 'this.underline') !== false &&
+    strpos($ajs, "this[target] = xterm256(") !== false &&
+    strpos($ajs, 'c >= 40 && c <= 47') !== false);
 ok('web mode stays vanilla (no deps in web/)', !is_file($adeDir . '/web/package.json') && strpos($brg, 'import ') === false && strpos($brg, 'require(') === false);
 ok('composer serve script wired', strpos((string)@file_get_contents($adeDir . '/composer.json'), '"serve"') !== false);
 $adeCss = (string)@file_get_contents($adeDir . '/public/app.css');

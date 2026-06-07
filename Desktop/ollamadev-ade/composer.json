@@ -14,7 +14,7 @@
     },
     "scripts": {
         "start": "php -S localhost:41434 -t public",
-        "serve": "php -S localhost:41434 web/server.php",
+        "serve": "PHP_CLI_SERVER_WORKERS=4 php -S localhost:41434 web/server.php",
         "build": "bash ../../scripts/build-desktop.sh"
     }
 }

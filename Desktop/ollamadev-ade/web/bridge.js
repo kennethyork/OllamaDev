@@ -30,4 +30,17 @@
   NAMES.forEach(function (name) {
     window[name] = function () { return rpc(name, Array.prototype.slice.call(arguments)); };
   });
+
+  // Low-latency terminal output over Server-Sent Events. The server 503s when it
+  // can't stream concurrently (no workers), and onError below makes the terminal
+  // fall back to polling — so this is a pure optimization that never breaks the app.
+  window.__odvOpenStream = function (id, offset, onData, onError) {
+    if (typeof EventSource === 'undefined') return null;
+    var u = '/api/stream?term=' + encodeURIComponent(id) + '&offset=' + (offset | 0) + (TOKEN ? '&token=' + encodeURIComponent(TOKEN) : '');
+    var es;
+    try { es = new EventSource(u); } catch (e) { return null; }
+    es.onmessage = function (ev) { try { var r = JSON.parse(ev.data); if (r && r.data) onData(r.data, r.offset); } catch (e) {} };
+    es.onerror = function () { try { es.close(); } catch (e) {} if (onError) onError(); };
+    return es;
+  };
 })();

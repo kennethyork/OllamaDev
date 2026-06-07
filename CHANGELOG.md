@@ -1,5 +1,15 @@
 # Changelog
 
+## v4.8.55 (2026-06-07) — desktop & web terminal polish
+
+### Added
+- **Full terminal color & attributes** (desktop + web). The terminal renderer went from foreground-color + bold only to the **full SGR set**: background colors, 256-color, 24-bit truecolor, and italic / underline / dim / reverse. Build tools, test runners, and colorized agent output now render the way they do in a real terminal.
+- **Low-latency terminal streaming in web mode** via Server-Sent Events. The browser stops round-tripping `termRead` every 80ms; output is pushed as it arrives. It's **safe by design** — the server only streams when it has spare workers (the `serve` script now sets `PHP_CLI_SERVER_WORKERS=4`), and if it can't, the endpoint returns 503 and the client transparently falls back to the old polling. Native `EventSource`, no library.
+
+_Still 100% vanilla — native `EventSource`, hand-written SGR parsing, PHP's built-in server; no xterm.js, no dependencies._
+
+_Not included (deliberately): full alt-screen TUI emulation (vim/htop) needs a grid model + pty-resize wiring and real browser validation — scoped as a follow-up rather than shipped blind._
+
 ## v4.8.54 (2026-06-07) — fixes from the multi-agent cloud review
 
 A `/code-review ultra` pass (7 finder angles) over v4.8.43→v4.8.53 found real issues — including three regressions the previous "hardening" commit (v4.8.53) had introduced. All fixed and regression-tested (555 tests):

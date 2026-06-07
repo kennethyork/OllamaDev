@@ -36,6 +36,41 @@ if ($uri === '/' || $uri === '/index.html') {
     return true;
 }
 
+// --- SSE: stream a terminal's output (lower latency than polling termRead) -----
+// One long-lived GET pushes new pty bytes as they arrive, so the browser stops
+// round-tripping every 80ms. It holds a worker for its lifetime, so it engages
+// ONLY when the built-in server has spare workers (PHP_CLI_SERVER_WORKERS>=2);
+// otherwise it 503s and the client falls back to polling — never blocks the app.
+if (str_starts_with($uri, '/api/stream')) {
+    if ($token !== '') {
+        $given = $_SERVER['HTTP_X_ODV_TOKEN'] ?? ($_GET['token'] ?? '');
+        if (!hash_equals($token, (string) $given)) { http_response_code(403); echo 'forbidden'; return true; }
+    }
+    if ((int) getenv('PHP_CLI_SERVER_WORKERS') < 2) { http_response_code(503); echo 'streaming needs PHP_CLI_SERVER_WORKERS>=2'; return true; }
+    $id = (string) ($_GET['term'] ?? '');
+    if ($id === '') { http_response_code(400); echo 'no term'; return true; }
+    $offset = (int) ($_GET['offset'] ?? 0);
+    header('Content-Type: text/event-stream');
+    header('Cache-Control: no-cache');
+    header('X-Accel-Buffering: no');   // tell any proxy not to buffer
+    @ini_set('zlib.output_compression', '0');
+    while (ob_get_level() > 0) @ob_end_flush();
+    $pty = new PtyManager();
+    $bx = new Bindings($pty, new FileBrowser(), PtyManager::cliBinary());
+    $deadline = time() + 600;   // cap one stream at 10 min; EventSource auto-reconnects
+    while (!connection_aborted() && time() < $deadline) {
+        $r = $bx->call('termRead', [$id, $offset]);
+        if (is_array($r) && !empty($r['data'])) {
+            $offset = (int) ($r['offset'] ?? $offset);
+            echo 'data: ' . json_encode(['data' => $r['data'], 'offset' => $offset]) . "\n\n";
+            @flush();
+        } else {
+            usleep(60000);   // 60ms server-side poll of the file-backed pty — no client round-trip
+        }
+    }
+    return true;
+}
+
 // --- API: POST /api/<binding>, body = JSON array of positional args ----------
 if (str_starts_with($uri, '/api/')) {
     header('Content-Type: application/json');

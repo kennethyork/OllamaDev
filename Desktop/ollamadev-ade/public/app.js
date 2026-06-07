@@ -82,6 +82,20 @@ function b64ToStr(b64) {
 function rid() { return 'term_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8); }
 
 var ANSI_FG = { 30:'#484f58',31:'#f85149',32:'#3fb950',33:'#d29922',34:'#58a6ff',35:'#bc8cff',36:'#39c5cf',37:'#b1bac4',90:'#6e7681',91:'#ff7b72',92:'#56d364',93:'#e3b341',94:'#79c0ff',95:'#d2a8ff',96:'#56d4dd',97:'#f0f6fc' };
+// The 16 base colors as an indexable palette (0-7 normal, 8-15 bright) for the
+// 256-color cube, reusing the same GitHub-dark tones as ANSI_FG above.
+var ANSI16 = ['#484f58','#f85149','#3fb950','#d29922','#58a6ff','#bc8cff','#39c5cf','#b1bac4','#6e7681','#ff7b72','#56d364','#e3b341','#79c0ff','#d2a8ff','#56d4dd','#f0f6fc'];
+// xterm 256-color index → #rrggbb. 0-15 palette, 16-231 the 6×6×6 cube, 232-255 grayscale.
+function xterm256(n) {
+    n = n | 0;
+    if (n < 16) return ANSI16[n] || '#b1bac4';
+    if (n < 232) {
+        n -= 16; var r = Math.floor(n / 36), g = Math.floor((n % 36) / 6), b = n % 6;
+        var lv = function (v) { return v === 0 ? 0 : 55 + v * 40; };
+        return 'rgb(' + lv(r) + ',' + lv(g) + ',' + lv(b) + ')';
+    }
+    var v = 8 + (n - 232) * 10; return 'rgb(' + v + ',' + v + ',' + v + ')';
+}
 
 // Map a browser keydown to the byte sequence a real terminal would send, so the
 // pty (and the raw-mode ollamadev CLI inside it) gets live keystrokes.
@@ -125,12 +139,15 @@ function D(name, focus, max) {
 // ---------- terminal pane (dependency-free, ANSI colors) ----------
 function Terminal(id, model, cwd) {
     this.id = id; this.model = model; this.cwd = cwd || ''; this.offset = 0; this.polling = false;
-    this.screen = null; this.line = null; this.fg = null; this.bold = false;
+    this.screen = null; this.line = null; this.fg = null; this.bg = null; this.bold = false;
+    this.dim = false; this.italic = false; this.underline = false; this.reverse = false;
     this.status = 'idle'; this.lastData = 0; this.badgeEl = null; this.cr = false;
 }
 Terminal.prototype.mount = function (host) {
     var self = this;
-    this.offset = 0; this.line = null; this.fg = null; this.bold = false; this.cr = false;
+    this.offset = 0; this.line = null; this.fg = null; this.bg = null; this.bold = false;
+    this.dim = false; this.italic = false; this.underline = false; this.reverse = false; this.cr = false;
+    this._closeStream(); this._triedStream = false;   // re-attempt SSE streaming on (re)mount
     host.innerHTML =
         '<div class="term-head"><span class="nm">' + esc(this.model) + '</span><span class="id">' + this.id.slice(-6) + '</span>' +
         '<span class="badge ' + this.status + '"><span class="b-dot"></span><span class="b-label">' + this.status + '</span></span>' +
@@ -232,8 +249,15 @@ Terminal.prototype.emit = function (s) {
     s = s.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
     if (s === '') return;
     var sp = document.createElement('span');
-    if (this.fg) sp.style.color = this.fg;
+    // Reverse video swaps fg/bg (default fg is the screen's foreground colour).
+    var fg = this.fg, bg = this.bg;
+    if (this.reverse) { var t = fg; fg = bg || 'var(--term-fg, #c9d1d9)'; bg = t || 'var(--term-bg, #0d1117)'; }
+    if (fg) sp.style.color = fg;
+    if (bg) sp.style.background = bg;
     if (this.bold) sp.style.fontWeight = '700';
+    if (this.dim) sp.style.opacity = '0.6';
+    if (this.italic) sp.style.fontStyle = 'italic';
+    if (this.underline) sp.style.textDecoration = 'underline';
     sp.textContent = s; this.line.appendChild(sp);
 };
 Terminal.prototype.sgr = function (p) {
@@ -241,11 +265,28 @@ Terminal.prototype.sgr = function (p) {
     if (!codes.length) codes = [0];
     for (var i = 0; i < codes.length; i++) {
         var c = codes[i];
-        if (c === 0) { this.fg = null; this.bold = false; }
+        if (c === 0) { this.fg = null; this.bg = null; this.bold = false; this.dim = false; this.italic = false; this.underline = false; this.reverse = false; }
         else if (c === 1) this.bold = true;
-        else if (c === 22) this.bold = false;
+        else if (c === 2) this.dim = true;
+        else if (c === 3) this.italic = true;
+        else if (c === 4) this.underline = true;
+        else if (c === 7) this.reverse = true;
+        else if (c === 22) { this.bold = false; this.dim = false; }
+        else if (c === 23) this.italic = false;
+        else if (c === 24) this.underline = false;
+        else if (c === 27) this.reverse = false;
         else if (c === 39) this.fg = null;
-        else if (ANSI_FG[c]) this.fg = ANSI_FG[c];
+        else if (c === 49) this.bg = null;
+        // 256-color / truecolor: 38;5;n or 38;2;r;g;b (fg), 48;… (bg). Consume the
+        // extended args inline so they aren't misread as separate SGR codes.
+        else if (c === 38 || c === 48) {
+            var target = c === 38 ? 'fg' : 'bg';
+            if (codes[i + 1] === 5) { this[target] = xterm256(codes[i + 2]); i += 2; }
+            else if (codes[i + 1] === 2) { this[target] = 'rgb(' + (codes[i + 2] | 0) + ',' + (codes[i + 3] | 0) + ',' + (codes[i + 4] | 0) + ')'; i += 4; }
+        }
+        else if (ANSI_FG[c]) this.fg = ANSI_FG[c];                       // 30-37, 90-97
+        else if (c >= 40 && c <= 47) this.bg = ANSI16[c - 40];           // standard bg
+        else if (c >= 100 && c <= 107) this.bg = ANSI16[c - 100 + 8];    // bright bg
     }
 };
 Terminal.prototype.write = function (text) {
@@ -277,6 +318,22 @@ Terminal.prototype.write = function (text) {
 };
 Terminal.prototype.poll = function () {
     var self = this; this.polling = true;
+    // Web mode: stream output over SSE for low latency. If the server can't stream
+    // (no workers → 503) or anything errors, onError demotes us to polling.
+    if (window.__odvOpenStream && !this._triedStream) {
+        this._triedStream = true;
+        this._es = window.__odvOpenStream(this.id, this.offset, function (data, offset) {
+            self.write(b64ToStr(data)); self.offset = offset; self.lastData = Date.now();
+            if (self.status === 'running' && self.lastData && Date.now() - self.lastData > 2500) self.setStatus('done');
+        }, function () { self._es = null; if (self.polling) self._pollLoop(); });
+        if (this._es) return;
+    }
+    this._pollLoop();
+};
+// The original 80ms poll — used on the desktop (native bridge) and as the web
+// fallback when SSE streaming isn't available.
+Terminal.prototype._pollLoop = function () {
+    var self = this; this.polling = true;
     function tick() {
         if (!self.polling) return;
         Promise.resolve(window.termRead(self.id, self.offset)).then(function (r) {
@@ -287,10 +344,11 @@ Terminal.prototype.poll = function () {
     }
     tick();
 };
-Terminal.prototype.close = function () { this.polling = false; try { window.termKill(this.id); } catch (e) {} };
+Terminal.prototype._closeStream = function () { if (this._es) { try { this._es.close(); } catch (e) {} this._es = null; } };
+Terminal.prototype.close = function () { this.polling = false; this._closeStream(); try { window.termKill(this.id); } catch (e) {} };
 // Detach the UI but KEEP the backend pty alive (used when switching workspaces),
 // so re-attaching later resumes the same running session.
-Terminal.prototype.detach = function () { this.polling = false; };
+Terminal.prototype.detach = function () { this.polling = false; this._closeStream(); };
 
 function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 
