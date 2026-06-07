@@ -21,7 +21,17 @@ class SubAgent {
         if ($maxIterations < 1) $maxIterations = 1;
         if ($maxIterations > 12) $maxIterations = 12;
 
+        // A custom agent type (.ollamadev/agents/<name>.md) can supply a persona,
+        // model, permission, and a tool allowlist. Unknown names just fall through.
+        $def = null;
+        $at = trim((string)($p['agent_type'] ?? $p['agent'] ?? $p['subagent_type'] ?? ''));
+        if ($at !== '' && class_exists('AgentDefs')) {
+            $def = AgentDefs::get($at);
+            if ($def === null) return "No such agent type: $at. List them with `ollamadev agents`, or omit agent_type.";
+        }
+
         $model = $GLOBALS['currentSessionModel'] ?? Config::get('ollama.defaultModel', 'llama3.2:latest');
+        if ($def && ($def['model'] ?? '') !== '') $model = $def['model'];   // the agent def picks its own model
 
         $sub = new Agent();
         if (!empty($model)) {
@@ -36,16 +46,26 @@ class SubAgent {
         $parentMode = Permission::getMode();
         $parentInteractive = Permission::isInteractive();
         $subMode = Config::get('agents.subagentPermission', 'readonly');
+        if ($def && ($def['permission'] ?? '') !== '') $subMode = $def['permission'];   // def's policy is the baseline
         $req = strtolower(trim((string)($p['permission'] ?? '')));
         if (!empty($p['allow_writes']) || $req === 'auto') $subMode = 'auto';
         elseif (in_array($req, ['ask', 'readonly', 'auto'], true)) $subMode = $req;
         if ($parentMode === 'readonly') $subMode = 'readonly';            // can't escalate past parent
         if ($parentMode === 'ask' && $subMode === 'auto') $subMode = 'ask';
 
+        // The agent def's persona becomes a system message; a tools allowlist is
+        // advertised to the model (it's a soft constraint at the prompt level).
+        if ($def && ($def['prompt'] ?? '') !== '') {
+            $persona = $def['prompt'];
+            if (!empty($def['tools'])) $persona .= "\n\nUse ONLY these tools: " . implode(', ', $def['tools']) . ".";
+            $messages = [['role' => 'system', 'content' => $persona]];
+        } else {
+            $messages = [];
+        }
         $userContent = "Task: $prompt";
         if ($context !== '') $userContent .= "\n\nContext:\n$context";
         $userContent .= "\n\nWork through this using tools as needed, then give a concise final answer in plain text.";
-        $messages = [['role' => 'user', 'content' => $userContent]];
+        $messages[] = ['role' => 'user', 'content' => $userContent];
 
         $lastText = '';
         $toolTail = [];
@@ -82,6 +102,7 @@ class SubAgent {
             self::$depth--;
             Permission::setMode($parentMode);          // restore parent policy
             Permission::setInteractive($parentInteractive);
+            if (class_exists('Hooks')) Hooks::event('SubagentStop', ['_subject' => $at, 'agent_type' => $at, 'prompt' => substr($prompt, 0, 500)]);
         }
 
         if ($lastText !== '') return $lastText;

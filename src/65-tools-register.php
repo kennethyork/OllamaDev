@@ -1184,3 +1184,24 @@ Tools::register('git_merge', function($p) {
     return shell_exec($cmd . " 2>&1") ?: "Merge failed";
 });
 
+
+// Plan mode: research read-only, then propose a plan and wait for the user's OK
+// before any edits. While Permission mode is 'plan' all mutating tools are blocked;
+// calling exit_plan_mode presents the plan and (on approval) restores the prior mode.
+Tools::register('exit_plan_mode', function($p) {
+    $plan = trim((string)(is_array($p) ? ($p['plan'] ?? $p['steps'] ?? '') : $p));
+    if (!Permission::inPlanMode()) return "Not in plan mode — just proceed with the task.";
+    if ($plan === '') return "Provide the plan: exit_plan_mode(plan: \"...\"). Summarize the steps you intend to take.";
+    echo "\n\033[1m📋 Proposed plan\033[0m\n" . $plan . "\n";
+    if (Permission::isInteractive()) {
+        echo "\033[36mProceed with this plan? [y]es / [n]o (keep planning): \033[0m";
+        $ans = strtolower(trim((string)fgets(STDIN)));
+        if ($ans === 'y' || $ans === 'yes' || $ans === '') {
+            $m = Permission::exitPlan();
+            return "✅ Plan approved — plan mode off (now: $m). Implement it now by calling your write/edit/bash tools.";
+        }
+        return "Plan not approved. Stay in plan mode, incorporate the user's feedback, and propose a revised plan.";
+    }
+    $m = Permission::exitPlan();
+    return "Plan recorded — plan mode off (now: $m).";
+});

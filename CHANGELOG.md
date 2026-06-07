@@ -1,5 +1,17 @@
 # Changelog
 
+## v4.8.47 (2026-06-07)
+
+### Added — Claude-Code-parity harness (six features)
+- **Plan mode.** `ollamadev --plan` or `/plan` — the agent researches with read-only tools only (all mutations blocked at the permission layer), proposes a plan via the new `exit_plan_mode` tool, and only after you approve does editing unlock. `/permission` gains a `plan` mode.
+- **Full hook coverage with blocking.** Hooks expanded from 2 events to the complete set: **PreToolUse** (a hook that exits non-zero **blocks** the tool; its output is the reason returned to the model), **PostToolUse**, **UserPromptSubmit**, **SessionStart**, **Stop**, **PreCompact**, **SubagentStop**, **Notification** — plus the original `beforePrompt`/`afterEdit`. Each event accepts a bare command or a list of `{command, matcher}` entries (matcher = regex on the tool name). Configured in `~/.ollamadev/config.json` under `hooks`.
+- **Output styles.** `default · concise · explanatory · formal · bullets` — adjust the agent's tone/verbosity. `/output-style <name>` or `config set outputStyle <name>`; appended to the system prompt.
+- **Configurable status line.** `/statusline` — a template with `{model} {cwd} {branch} {mode}` tokens, or a shell command whose output is shown above the prompt.
+- **File-defined custom agent types.** Drop `.ollamadev/agents/<name>.md` (frontmatter: `name, description, model, permission, tools`; body = its system prompt) and delegate to it: `task(prompt, agent_type="name")`. New `ollamadev agents` command (and `/agents`) lists them.
+- **MCP server mode.** `ollamadev mcp serve` exposes this CLI's tool registry to any MCP client over stdio (JSON-RPC 2.0: initialize / tools/list / tools/call / ping) — OllamaDev was already an MCP *client*; now it's a server too.
+
+All six are 100% vanilla PHP, zero new dependencies, and covered by 23 new smoke tests (517 total).
+
 ## v4.8.46 (2026-06-07)
 
 ### Changed

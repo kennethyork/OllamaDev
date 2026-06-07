@@ -288,8 +288,25 @@ if ($argc >= 2 && $argv[1] === 'github') {
     exit(0);
 }
 
+// Custom agent types CLI Command — list/show file-defined subagent personas.
+if ($argc >= 2 && $argv[1] === 'agents') {
+    $sub = $argv[2] ?? 'list';
+    if ($sub === 'show' && isset($argv[3])) {
+        $a = AgentDefs::get($argv[3]);
+        if (!$a) { echo "No such agent: {$argv[3]}\n"; exit(1); }
+        echo "Agent: {$a['name']}\n  desc:       " . ($a['description'] ?: '(none)') . "\n";
+        echo "  model:      " . ($a['model'] ?: '(session model)') . "\n  permission: " . ($a['permission'] ?: '(default)') . "\n";
+        echo "  tools:      " . (!empty($a['tools']) ? implode(', ', $a['tools']) : '(all)') . "\n  prompt:\n    " . str_replace("\n", "\n    ", $a['prompt']) . "\n";
+        exit(0);
+    }
+    if (in_array('--json', $argv, true)) { echo json_encode(['agents' => array_values(AgentDefs::all())]) . "\n"; exit(0); }
+    echo rtrim(AgentDefs::render()) . "\n"; exit(0);
+}
+
 // MCP CLI Command
 if ($argc >= 2 && $argv[1] === 'mcp') {
+    // Server mode: expose THIS CLI's tool registry to any MCP client over stdio.
+    if (($argv[2] ?? '') === 'serve') { exit(McpServer::serve()); }
     $config = Config::load();
     $mcpConfig = $config['mcp'] ?? [];
     $action = $argv[2] ?? '';
@@ -468,7 +485,8 @@ for ($i = 1; $i < $argc; $i++) {
     elseif ($a === '-p' || $a === '--prompt') { $flags['prompt'] = $argv[++$i] ?? null; }
     elseif ($a === '--agent') { $flags['agent'] = $argv[++$i] ?? null; }
     elseif ($a === '--pure') { $flags['pure'] = true; }
-    elseif ($a === '--readonly' || $a === '--plan') { $flags['permission'] = 'readonly'; }
+    elseif ($a === '--readonly') { $flags['permission'] = 'readonly'; }
+    elseif ($a === '--plan') { $flags['permission'] = 'plan'; }
     elseif ($a === '--auto' || $a === '--yolo') { $flags['permission'] = 'auto'; }
     elseif ($a === '--ask') { $flags['permission'] = 'ask'; }
     elseif ($a === '--port') { $flags['port'] = (int)($argv[++$i] ?? 0); }
@@ -1448,6 +1466,8 @@ Commands:
   ollamadev pr create|review <n>   Open a PR, or review one with the local model (needs gh)
   ollamadev config get|set <key> [value]   Inspect/persist ~/.ollamadev/config.json
   ollamadev skills      Manage skills (list/search/browse/add/install/export)
+  ollamadev agents      List file-defined custom agent types (.ollamadev/agents/*.md)
+  ollamadev mcp serve   Expose this CLI's tools to any MCP client over stdio
   ollamadev attest      Audit + prove the air-gap posture (--offline to lock down)
   ollamadev git        Git commands (status, diff, commit, etc.)
   ollamadev terminal   Terminal multiplexer

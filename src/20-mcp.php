@@ -193,3 +193,75 @@ class MCP {
     }
 }
 
+// MCP SERVER — expose THIS CLI's tool registry to any MCP client over stdio.
+// Speaks newline-delimited JSON-RPC 2.0 (the MCP stdio transport): initialize,
+// tools/list, tools/call, ping. Lets editors/agents that speak MCP drive
+// OllamaDev's tools. `ollamadev mcp serve`. Vanilla PHP, no dependencies.
+class McpServer {
+    public static function serve(): int {
+        // Non-interactive auto so calls never block on an approval prompt; the
+        // air-gap (offline) flag, if set in config, still hard-blocks network tools.
+        Permission::setMode('auto');
+        Permission::setInteractive(false);
+        if (Config::get('network.offline', false)) Permission::setOffline(true);
+        $in = fopen('php://stdin', 'r');
+        if (!$in) return 1;
+        while (($line = fgets($in)) !== false) {
+            $line = trim($line);
+            if ($line === '') continue;
+            $msg = json_decode($line, true);
+            if (!is_array($msg)) continue;
+            $resp = self::handle($msg);
+            if ($resp !== null) { echo json_encode($resp) . "\n"; @flush(); }
+        }
+        return 0;
+    }
+
+    private static function handle(array $msg): ?array {
+        $id = $msg['id'] ?? null;
+        $method = (string)($msg['method'] ?? '');
+        if ($id === null && str_starts_with($method, 'notifications/')) return null; // fire-and-forget
+        switch ($method) {
+            case 'initialize':
+                return self::ok($id, [
+                    'protocolVersion' => '2024-11-05',
+                    'capabilities' => ['tools' => new stdClass()],
+                    'serverInfo' => ['name' => 'ollamadev', 'version' => defined('OLLAMADEV_VERSION') ? OLLAMADEV_VERSION : '0'],
+                ]);
+            case 'ping':
+                return self::ok($id, new stdClass());
+            case 'tools/list':
+                return self::ok($id, ['tools' => self::toolList()]);
+            case 'tools/call':
+                $params = is_array($msg['params'] ?? null) ? $msg['params'] : [];
+                $name = (string)($params['name'] ?? '');
+                $args = is_array($params['arguments'] ?? null) ? $params['arguments'] : [];
+                if (!Tools::find($name)) return self::err($id, -32602, "Unknown tool: $name");
+                // Tools may echo (diff previews etc.) — capture so stdout stays pure JSON-RPC.
+                ob_start();
+                $result = Tools::run($name, $args);
+                $echoed = trim((string) ob_get_clean());
+                $text = trim((string) $result);
+                if ($echoed !== '') $text = trim($echoed . ($text !== '' ? "\n" . $text : ''));
+                return self::ok($id, ['content' => [['type' => 'text', 'text' => $text]], 'isError' => false]);
+            default:
+                return $id !== null ? self::err($id, -32601, "Method not found: $method") : null;
+        }
+    }
+
+    // Native function-call schemas → MCP tool descriptors (name/description/inputSchema).
+    private static function toolList(): array {
+        $out = [];
+        foreach (Tools::schemas() as $s) {
+            $f = $s['function'] ?? null;
+            if (!is_array($f) || empty($f['name'])) continue;
+            $out[] = ['name' => $f['name'], 'description' => (string)($f['description'] ?? ''),
+                'inputSchema' => $f['parameters'] ?? ['type' => 'object', 'properties' => new stdClass()]];
+        }
+        return $out;
+    }
+
+    private static function ok($id, $result): array { return ['jsonrpc' => '2.0', 'id' => $id, 'result' => $result]; }
+    private static function err($id, int $code, string $message): array { return ['jsonrpc' => '2.0', 'id' => $id, 'error' => ['code' => $code, 'message' => $message]]; }
+}
+

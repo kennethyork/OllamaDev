@@ -1528,6 +1528,57 @@ ok('crew usage lists steer/director/clear subcommands',
     strpos($crewUsage, 'crew steer') !== false && strpos($crewUsage, 'crew director') !== false
     && strpos($crewUsage, 'crew clear') !== false, 'crew usage missing a subcommand');
 
+// ===== Claude-Code-parity harness: plan mode, hooks, styles, statusline, agents, MCP server =====
+echo "\n== Harness parity (plan/hooks/styles/statusline/agents/mcp) ==\n";
+// 1. Plan mode — Permission gates mutations; exit_plan_mode restores the prior mode.
+if (preg_match('/class Permission \{.*?\n\}/s', $src, $pmh)) {
+    if (!class_exists('Permission')) eval($pmh[0]);
+    Permission::setMode('auto'); Permission::setMode('plan');
+    ok('plan mode blocks mutating tools', Permission::check('write', []) === false && Permission::check('bash', []) === false);
+    ok('plan mode allows read-only + exit_plan_mode', Permission::check('view', []) === true && Permission::check('exit_plan_mode', []) === true);
+    ok('exitPlan restores the prior mode', Permission::exitPlan() === 'auto' && Permission::check('write', []) === true);
+}
+ok('exit_plan_mode tool + schema registered', strpos($src, "Tools::register('exit_plan_mode'") !== false && strpos($src, "\$fn('exit_plan_mode'") !== false);
+ok('--plan flag sets plan mode (not readonly)', strpos($src, "\$a === '--plan') { \$flags['permission'] = 'plan'") !== false);
+ok('/plan command wired', strpos($src, "'plan' => \$this->togglePlan(") !== false);
+ok('agent system prompt honors plan mode', strpos($src, 'Permission::inPlanMode()') !== false && strpos($src, 'PLAN MODE:') !== false);
+
+// 2. Hooks — full event set + PreToolUse blocking, fired from Tools::run.
+ok('Hooks support PreToolUse blocking + PostToolUse', strpos($src, 'function preToolUse(') !== false &&
+    strpos($src, 'function postToolUse(') !== false && strpos($src, 'Blocked by PreToolUse hook') !== false);
+ok('Hooks fire from Tools::run', strpos($src, 'Hooks::preToolUse($name, $params)') !== false && strpos($src, 'Hooks::postToolUse($name, $params') !== false);
+ok('lifecycle events wired (SessionStart/UserPromptSubmit/Stop/PreCompact/SubagentStop)',
+    strpos($src, "Hooks::event('SessionStart'") !== false && strpos($src, "Hooks::event('UserPromptSubmit'") !== false &&
+    strpos($src, "Hooks::event('Stop'") !== false && strpos($src, "Hooks::event('PreCompact'") !== false &&
+    strpos($src, "Hooks::event('SubagentStop'") !== false);
+ok('hooks support per-tool matchers + list form', strpos($src, "\$h['matcher']") !== false && strpos($src, 'function forEvent(') !== false);
+
+// 3 & 4. Output styles + status line classes present and wired.
+ok('OutputStyles class with named presets', strpos($src, 'class OutputStyles') !== false && strpos($src, "'concise'") !== false && strpos($src, 'function promptSuffix(') !== false);
+ok('output style appended to system prompt', strpos($src, 'OutputStyles::promptSuffix()') !== false);
+ok('/output-style command wired', strpos($src, "=> \$this->setOutputStyle(") !== false);
+ok('StatusLine class + tokens + render in REPL', strpos($src, 'class StatusLine') !== false && strpos($src, '{branch}') !== false && strpos($src, 'StatusLine::render(') !== false);
+ok('/statusline command wired', strpos($src, "'statusline' => \$this->setStatusLine(") !== false);
+
+// 5. Custom agent types.
+ok('AgentDefs class reads .ollamadev/agents/*.md', strpos($src, 'class AgentDefs') !== false && strpos($src, '/.ollamadev/agents') !== false);
+ok('SubAgent honors agent_type (model/permission/persona)', strpos($src, 'AgentDefs::get($at)') !== false &&
+    strpos($src, "\$p['agent_type']") !== false);
+ok('agents CLI command + --json', strpos($src, "\$argv[1] === 'agents'") !== false && strpos($src, 'AgentDefs::all()') !== false);
+
+// 6. MCP server.
+ok('McpServer speaks JSON-RPC over stdio', strpos($src, 'class McpServer') !== false &&
+    strpos($src, "'tools/list'") !== false && strpos($src, "'tools/call'") !== false && strpos($src, "'initialize'") !== false);
+ok('mcp serve dispatched', strpos($src, "(\$argv[2] ?? '') === 'serve') { exit(McpServer::serve())") !== false);
+// Functional: drive the server end-to-end through the real binary.
+if (isset($BIN) && is_file($BIN)) {
+    $rpc = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' . "\n" . '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' . "\n";
+    [$mo] = run_bin(['mcp', 'serve'], $rpc);
+    ok('mcp serve: initialize + tools/list round-trip', strpos($mo, '"serverInfo"') !== false && strpos($mo, '"name":"view"') !== false);
+    [$mc] = run_bin(['mcp', 'serve'], '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"echo","arguments":{"text":"ping"}}}' . "\n");
+    ok('mcp serve: tools/call returns content', strpos($mc, '"content"') !== false && strpos($mc, 'ping') !== false);
+}
+
 echo "\n========================\n";
 echo "Results: $pass passed, $fail failed\n";
 if ($fail > 0) { echo "FAILED: " . implode(', ', $fails) . "\n"; exit(1); }

@@ -94,22 +94,81 @@ class UserCmds {
 }
 
 // Optional shell hooks fired at well-defined points. All opt-in via config.
+//
+// Each hooks.<event> may be a bare command STRING, or a LIST of entries — each a
+// string or {command, matcher}. A matcher is a regex tested against a subject
+// (the tool name for tool events); no matcher means "always". Events:
+//   PreToolUse   — before a tool runs; a hook exiting non-zero BLOCKS it (output = reason)
+//   PostToolUse  — after a tool runs (informational)
+//   UserPromptSubmit, SessionStart, Stop, PreCompact, SubagentStop, Notification
+//   beforePrompt, afterEdit — the original two (still supported, string or list)
 class Hooks {
-    // Run the shell command configured at hooks.<event>, if any. Extra args are
-    // appended (shell-escaped) and also exposed via $OLLAMADEV_EDITED_FILES for
-    // afterEdit. Failures are swallowed; output is shown only in verbose mode.
-    public static function run(string $event, array $args = []): void {
-        $cmd = Config::get('hooks.' . $event, null);
-        if (!is_string($cmd) || trim($cmd) === '') return;
-        $full = trim($cmd);
-        foreach ($args as $a) $full .= ' ' . escapeshellarg((string)$a);
-        $env = '';
-        if ($event === 'afterEdit' && !empty($args)) {
-            $env = 'OLLAMADEV_EDITED_FILES=' . escapeshellarg(implode(' ', $args)) . ' ';
+    // Resolve the configured commands for an event, filtered by $subject matcher.
+    private static function forEvent(string $event, string $subject = ''): array {
+        $cfg = Config::get('hooks.' . $event, null);
+        $out = [];
+        if (is_string($cfg)) { if (trim($cfg) !== '') $out[] = $cfg; return $out; }
+        if (!is_array($cfg)) return $out;
+        foreach ($cfg as $h) {
+            if (is_string($h)) { if (trim($h) !== '') $out[] = $h; continue; }
+            if (!is_array($h)) continue;
+            $cmd = trim((string)($h['command'] ?? $h['cmd'] ?? ''));
+            if ($cmd === '') continue;
+            $matcher = trim((string)($h['matcher'] ?? $h['match'] ?? ''));
+            if ($matcher !== '' && $subject !== '' && !@preg_match('/' . str_replace('/', '\\/', $matcher) . '/i', $subject)) continue;
+            $out[] = $cmd;
         }
-        $output = @shell_exec($env . $full . ' 2>&1');
-        if (!empty($GLOBALS['verbose']) && is_string($output) && trim($output) !== '') {
-            echo "\033[2m  [hook:$event] " . trim($output) . "\033[0m\n";
+        return $out;
+    }
+
+    // Run a command with a JSON payload on stdin + context env. Returns [output, exitCode].
+    private static function exec(string $cmd, string $stdin = '', array $env = []): array {
+        $proc = @proc_open($cmd, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes, null, array_merge(getenv() ?: [], $env));
+        if (!is_resource($proc)) return ['', 0];
+        if ($stdin !== '') @fwrite($pipes[0], $stdin);
+        @fclose($pipes[0]);
+        $out = (string) stream_get_contents($pipes[1]); $err = (string) stream_get_contents($pipes[2]);
+        @fclose($pipes[1]); @fclose($pipes[2]);
+        $code = proc_close($proc);
+        $combined = trim($out . ($err !== '' ? "\n" . $err : ''));
+        if (!empty($GLOBALS['verbose']) && $combined !== '') echo "\033[2m  [hook] " . $combined . "\033[0m\n";
+        return [$combined, $code];
+    }
+
+    // The original simple events: run hooks.<event>, append args, swallow failures.
+    public static function run(string $event, array $args = []): void {
+        foreach (self::forEvent($event) as $cmd) {
+            $full = trim($cmd);
+            foreach ($args as $a) $full .= ' ' . escapeshellarg((string)$a);
+            $env = ($event === 'afterEdit' && !empty($args)) ? ['OLLAMADEV_EDITED_FILES' => implode(' ', $args)] : [];
+            self::exec($full, '', $env);
+        }
+    }
+
+    // PreToolUse: a hook that exits non-zero BLOCKS the tool; its output is the
+    // reason returned to the model. Returns the block reason, or null to allow.
+    public static function preToolUse(string $tool, array $params): ?string {
+        foreach (self::forEvent('PreToolUse', $tool) as $cmd) {
+            $payload = (string) json_encode(['tool' => $tool, 'input' => $params]);
+            [$out, $code] = self::exec($cmd, $payload, ['OLLAMADEV_TOOL_NAME' => $tool, 'OLLAMADEV_TOOL_INPUT' => $payload]);
+            if ($code !== 0) return $out !== '' ? $out : "PreToolUse hook blocked '$tool' (exit $code)";
+        }
+        return null;
+    }
+
+    // PostToolUse: informational, never blocks.
+    public static function postToolUse(string $tool, array $params, string $result): void {
+        foreach (self::forEvent('PostToolUse', $tool) as $cmd) {
+            $payload = (string) json_encode(['tool' => $tool, 'input' => $params, 'result' => substr($result, 0, 4000)]);
+            self::exec($cmd, $payload, ['OLLAMADEV_TOOL_NAME' => $tool, 'OLLAMADEV_TOOL_INPUT' => (string) json_encode($params)]);
+        }
+    }
+
+    // A generic event with a JSON payload on stdin (UserPromptSubmit, SessionStart,
+    // Stop, PreCompact, SubagentStop, Notification). Non-blocking.
+    public static function event(string $event, array $payload = []): void {
+        foreach (self::forEvent($event, (string)($payload['_subject'] ?? '')) as $cmd) {
+            self::exec($cmd, (string) json_encode($payload), ['OLLAMADEV_EVENT' => $event]);
         }
     }
 }

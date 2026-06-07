@@ -31,7 +31,12 @@ class Agent {
     public function buildSystemPrompt(): array {
         $manualPrompt = Config::get('agents.systemPrompt', '');
         $prompt = !empty($manualPrompt) ? $manualPrompt : SystemPrompts::detectForModel($this->model);
-        
+        // Output style (tone/verbosity) shapes every reply; plan mode gates editing.
+        if (class_exists('OutputStyles')) $prompt .= OutputStyles::promptSuffix();
+        if (class_exists('Permission') && Permission::inPlanMode()) {
+            $prompt .= "\n\nPLAN MODE: Investigate with READ-ONLY tools only — do NOT create/edit files or run mutating commands yet. When you have a concrete plan, call exit_plan_mode(plan: \"…\") and wait for the user's approval before implementing.";
+        }
+
         $projectMemory = '';
         $memoryFiles = ['OLLAMADEV.md', '.ollamadev.md', '.ollamadev'];
         foreach ($memoryFiles as $mf) {

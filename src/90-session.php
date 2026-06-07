@@ -213,8 +213,47 @@ class Session {
             'memory', 'mem' => $this->manageMemory($args),
             'retry', 'regenerate' => $this->retryLast(),
             'commands' => UserCmds::render(),
+            'plan' => $this->togglePlan($args),
+            'output-style', 'outputstyle', 'style' => $this->setOutputStyle($args),
+            'statusline' => $this->setStatusLine($args),
+            'agents' => AgentDefs::render(),
             default => UserCmds::exists($cmd) ? ('PROMPT:' . UserCmds::expand($cmd, $args)) : false
         };
+    }
+
+    // Plan mode: research-only until you approve a plan. /plan toggles; the agent
+    // rebuilds its system prompt so the gate + the directive take effect at once.
+    private function togglePlan(string $args): string {
+        $a = strtolower(trim($args));
+        $on = $a === 'on' || (Permission::getMode() !== 'plan' && $a !== 'off');
+        Permission::setMode($on ? 'plan' : ($a === 'off' ? 'ask' : Permission::getMode()));
+        $this->agent->setModel($this->model); // rebuild system prompt with/without the plan note
+        return $on
+            ? "\033[36m📋 Plan mode ON\033[0m — I'll research read-only and propose a plan; edits are blocked until you approve it.\n"
+            : "\033[36mPlan mode OFF\033[0m — back to " . Permission::getMode() . " mode.\n";
+    }
+
+    private function setOutputStyle(string $args): string {
+        $name = trim($args);
+        if ($name === '') return OutputStyles::render();
+        if (!OutputStyles::set($name)) return "No such output style: $name\n" . OutputStyles::render();
+        $this->agent->setModel($this->model); // rebuild system prompt with the new style
+        return "\033[32m●\033[0m output style → \033[36m$name\033[0m\n";
+    }
+
+    private function setStatusLine(string $args): string {
+        $a = trim($args);
+        if ($a === '') {
+            $cur = Config::get('statusline', '');
+            $preview = StatusLine::render($this->model);
+            return "Status line: " . ($cur !== '' ? "\033[36m$cur\033[0m" : "\033[2m(unset)\033[0m") . "\n"
+                . ($preview !== '' ? "  preview: $preview\n" : '')
+                . "  \033[2mSet a template (tokens {model} {cwd} {branch} {mode}) or a shell command:\033[0m\n"
+                . "  \033[2m/statusline {branch} · {model}   ·   /statusline off to clear\033[0m\n";
+        }
+        if (strtolower($a) === 'off' || strtolower($a) === 'clear') { StatusLine::set(''); return "Status line cleared.\n"; }
+        StatusLine::set($a);
+        return "Status line set. Preview: " . StatusLine::render($this->model) . "\n";
     }
 
     private function manageSkills(string $args): string {
@@ -329,11 +368,12 @@ class Session {
                 $out .= "  auto     - run every tool without asking\n";
                 $out .= "  ask      - prompt before mutating tools (default)\n";
                 $out .= "  readonly - block all mutating tools\n";
+                $out .= "  plan     - research only; propose a plan, edit after approval (/plan)\n";
                 $out .= "Session allowed: " . (empty($allowed) ? '(none)' : implode(', ', $allowed)) . "\n";
                 $out .= "Session denied:  " . (empty($denied) ? '(none)' : implode(', ', $denied)) . "\n";
                 return $out;
             default:
-                return "Usage: /permission [mode <auto|ask|readonly> | allow <tool> | deny <tool> | status]\n";
+                return "Usage: /permission [mode <auto|ask|readonly|plan> | allow <tool> | deny <tool> | status]\n";
         }
     }
 
@@ -367,7 +407,11 @@ class Session {
         $out .= $row('/commands', 'list custom commands');
         $out .= $row('/skills', 'list skills the agent can load on demand');
         $out .= $row('/memory', 'browse the project knowledge graph (recall/remember)');
-        $out .= $row('/permission <…>', 'manage tool approval (auto|ask|readonly)');
+        $out .= $row('/permission <…>', 'manage tool approval (auto|ask|readonly|plan)');
+        $out .= $row('/plan', 'plan mode — research read-only, propose a plan, then implement on approval');
+        $out .= $row('/output-style [name]', 'tone/verbosity preset (default·concise·explanatory·formal·bullets)');
+        $out .= $row('/statusline [tpl]', 'set the prompt status line ({model} {cwd} {branch} {mode}, or a command)');
+        $out .= $row('/agents', 'list file-defined custom agent types (.ollamadev/agents/*.md)');
         $out .= "\n  {$d}Session{$r}\n";
         $out .= $row('/cd · /ls · /pwd', 'navigate the working directory');
         $out .= $row('/git <cmd>', 'run a git command');
@@ -719,6 +763,7 @@ ART;
     }
 
     private function compactSession(): string {
+        if (class_exists('Hooks')) Hooks::event('PreCompact', ['messages' => count($this->messages)]);
         $this->compactMessages(true);
         return '';
     }
@@ -941,6 +986,7 @@ $GLOBALS['currentSessionModel'] = null;
 
     public function start(): void {
         Permission::setInteractive(true); // enable approval prompts for mutating tools
+        if (class_exists('Hooks')) Hooks::event('SessionStart', ['model' => $this->model, 'cwd' => getcwd(), 'messages' => count($this->messages)]);
         // Hosts that show their own model/title chrome (e.g. the desktop ADE) set
         // OLLAMADEV_NO_BANNER to suppress the ASCII banner and the model tip.
         $showBanner = !getenv('OLLAMADEV_NO_BANNER');
@@ -978,6 +1024,10 @@ $GLOBALS['currentSessionModel'] = null;
 
         while (true) {
             Hooks::run('beforePrompt');
+            if (class_exists('StatusLine') && StatusLine::configured()) {
+                $sl = StatusLine::render($this->model);
+                if ($sl !== '') echo "\033[2m" . $sl . "\033[0m\n";
+            }
             $raw = $this->readInput();
             if ($raw === null) { echo "\n"; break; } // EOF / Ctrl-D
             $input = trim($raw);
@@ -1002,6 +1052,8 @@ $GLOBALS['currentSessionModel'] = null;
             }
 
             if ($this->handleCommand($input)) break;
+
+            if (class_exists('Hooks')) Hooks::event('UserPromptSubmit', ['_subject' => $input, 'prompt' => $input]);
 
             // Image attachments (@image / /image) are captured first; the
             // remaining text then has any non-image @path mentions inlined.
@@ -1041,6 +1093,7 @@ $GLOBALS['currentSessionModel'] = null;
             }
             if (class_exists('Interrupt') && Interrupt::aborted()) { Interrupt::reset(); echo "\033[2m  interrupted\033[0m"; }
             echo "\n";
+            if (class_exists('Hooks')) Hooks::event('Stop', ['model' => $this->model, 'reply' => substr($fTrim, 0, 2000)]);
 
             // Quietly note any files that were changed this turn.
             $edited = $GLOBALS['editedFiles'] ?? [];

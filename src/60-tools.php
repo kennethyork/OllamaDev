@@ -7,7 +7,11 @@ class Tools {
         $fn = self::find($name);
         if (!$fn) return CmdError::toolNotFound($name);
         if (!Permission::check($name, $params)) return CmdError::permissionDenied($name);
-        try { return $fn($params); } catch (Exception $e) { return CmdError::toolFailed($name, $e->getMessage()); }
+        // PreToolUse hooks may block a tool (exit non-zero); the reason goes to the model.
+        if (class_exists('Hooks')) { $block = Hooks::preToolUse($name, $params); if ($block !== null) return "Blocked by PreToolUse hook: $block"; }
+        try { $out = $fn($params); } catch (Exception $e) { return CmdError::toolFailed($name, $e->getMessage()); }
+        if (class_exists('Hooks')) Hooks::postToolUse($name, $params, $out);
+        return $out;
     }
     public static function all(): array { return array_keys(self::$tools); }
 
@@ -55,6 +59,9 @@ class Tools {
             $fn('clear_board', 'Clear/dismiss the crew kanban board (crew cards, ideas, AND manual cards). ONLY call this when the user EXPLICITLY asks to clear/dismiss/reset the board in their latest message — NEVER on your own initiative or as cleanup. Refused while a crew run is active.', [
                 'confirm' => ['type' => 'boolean', 'description' => 'Must be true. Set true ONLY when the user explicitly asked to clear the board in their latest message.'],
             ], ['confirm']),
+            $fn('exit_plan_mode', 'Call this ONLY in plan mode, after you have researched (read-only) and are ready to act. Presents your plan to the user for approval; on yes, plan mode ends and you may edit. Do NOT call it for pure research/answer tasks.', [
+                'plan' => $str('The plan: the concrete steps you intend to take, in markdown.'),
+            ], ['plan']),
             $fn('ls', 'List the contents of a directory.', [
                 'path' => $str('Directory path (defaults to current directory)'),
             ], []),
