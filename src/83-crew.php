@@ -71,7 +71,7 @@ class Crew {
         $research = '';
         if (($opts['research'] ?? true) !== false) {
             echo "\n{$b}▸ Researcher{$r} surveying the codebase…\n";
-            $research = self::research($agent, $task, max(3, (int)Config::get("crew.researchIterations", 6)), $mResearcher);
+            $research = self::research($agent, $task, max(3, (int)Config::get("crew.researchIterations", 6)), $mResearcher, self::skillsBrief($teamSkills));
             if ($research !== '') {
                 $vaultDir = Config::dataDir() . '/crew/' . $runId;
                 @mkdir($vaultDir, 0755, true);
@@ -85,7 +85,7 @@ class Crew {
 
         // ---- Director: decompose the task (informed by research) ----
         echo "\n{$b}▸ Director{$r} planning…" . ($amplify > 1 ? " {$d}(self-consistency ×{$amplify}){$r}" : '') . "\n";
-        $subtasks = self::plan($agent, $task, $maxCoders, $research, $mDirector, $focus, $amplify);
+        $subtasks = self::plan($agent, $task, $maxCoders, $research, $mDirector, $focus, $amplify, self::skillsBrief($teamSkills));
         if (empty($subtasks)) { echo "  Director produced no subtasks; treating the whole task as one.\n"; $subtasks = [['title' => 'Task', 'prompt' => $task]]; }
         $subtasks = array_slice($subtasks, 0, $maxCoders);
         foreach ($subtasks as $i => $st) echo "  {$c}" . ($i + 1) . ".{$r} {$d}[" . ($st['role'] ?? 'coder') . "]{$r} " . ($st['title'] ?? 'subtask') . "\n";
@@ -224,11 +224,14 @@ class Crew {
     private static function auditAndLand(Agent $agent, array $results, array $opts, string $base, string $baseCommit, string $mAuditor, int $amplify, string $task, callable $setState, ?array $ctx = null): void {
         $d = "\033[2m"; $b = "\033[1m"; $g = "\033[32m"; $y = "\033[33m"; $r = "\033[0m";
         $doAudit = ($opts['audit'] ?? true) !== false;
+        // Same skills the coders loaded — so the Auditor reviews against their standards.
+        $auditBrief = ($opts['skills'] ?? true) !== false
+            ? self::skillsBrief(CrewSkills::resolve(trim((string)($opts['focus'] ?? '')), $opts['forceSkills'] ?? [])) : '';
         echo "\n{$b}▸ Auditor{$r} " . ($doAudit ? ("reviewing…" . ($amplify > 1 ? " {$d}({$amplify}-reviewer panel, majority rules){$r}" : '')) : "{$d}(disabled — all branches held for your review){$r}") . "\n";
         foreach ($results as &$res) {
             if ($res['empty']) { $res['audit'] = ['clean' => false, 'summary' => 'no changes', 'issues' => []]; echo "  {$d}#{$res['n']} skipped (empty){$r}\n"; continue; }
             if (!$doAudit) { $res['audit'] = ['clean' => false, 'summary' => 'no auditor — review manually', 'issues' => []]; continue; }
-            $res['audit'] = self::audit($agent, $res['title'], $res["diff"], $task, $mAuditor, $amplify);
+            $res['audit'] = self::audit($agent, $res['title'], $res["diff"], $task, $mAuditor, $amplify, $auditBrief);
             $vc = $res['audit']['clean'] ? "{$g}clean{$r}" : "{$y}flagged{$r}";
             echo "  #{$res['n']} {$vc} {$d}" . substr((string)($res['audit']['summary'] ?? ''), 0, 80) . "{$r}\n";
             foreach (($res['audit']['issues'] ?? []) as $iss) echo "      {$y}- " . substr((string)$iss, 0, 100) . "{$r}\n";
@@ -253,7 +256,7 @@ class Crew {
                     self::runCoder($res['wt'], $fixSt, (string)($ctx['coderModel'] ?? ''), (int)($ctx['maxIter'] ?? 10), (string)($ctx['research'] ?? ''), $task, (string)($ctx['focus'] ?? ''), '', ((string)($ctx['logDir'] ?? sys_get_temp_dir())) . '/coder-' . $res['n'] . '.log');
                     $re = self::collectCoderResult(['n' => $res['n'], 'st' => ['title' => $res['title']], 'branch' => $res['branch'], 'wt' => $res['wt']], $baseCommit);
                     $res['diff'] = $re['diff']; $res['files'] = $re['files']; $res['empty'] = $re['empty'];
-                    $res['audit'] = !empty($re['empty']) ? ['clean' => false, 'summary' => 'fix produced no changes', 'issues' => []] : self::audit($agent, $res['title'], $res['diff'], $task, $mAuditor, $amplify);
+                    $res['audit'] = !empty($re['empty']) ? ['clean' => false, 'summary' => 'fix produced no changes', 'issues' => []] : self::audit($agent, $res['title'], $res['diff'], $task, $mAuditor, $amplify, $auditBrief);
                     echo "  {$d}↻ #{$res['n']} fix-back: " . ($res['audit']['clean'] ? "{$g}now clean{$r}" : "{$y}still flagged{$r}") . "\n";
                 }
             }
@@ -369,16 +372,17 @@ class Crew {
     }
 
     // Researcher worker: read-only survey of the codebase → shared findings text.
-    private static function research(Agent $agent, string $task, int $maxIter, string $model = ''): string {
+    private static function research(Agent $agent, string $task, int $maxIter, string $model = '', string $skillsBrief = ''): string {
         $prevMode = Permission::getMode(); $prevInt = Permission::isInteractive();
         Permission::setMode('readonly'); Permission::setInteractive(false);
         $findings = '';
         try {
             $a = new Agent(); $a->setModel($model !== '' ? $model : $agent->getModel());
+            $skillNote = $skillsBrief !== '' ? " In your briefing, note which loaded team-skill is relevant to each area you find, so coders know where to apply it." . $skillsBrief : '';
             $sys = ['role' => 'system', 'content' =>
                 "You are the Researcher. Investigate the codebase using READ-ONLY tools (ls, grep, view, glob, find) " .
                 "to gather context relevant to the task. Then give a concise findings briefing: key files and where " .
-                "they are, conventions, entry points, and anything the coders must know to avoid mistakes. Do NOT edit files."];
+                "they are, conventions, entry points, and anything the coders must know to avoid mistakes. Do NOT edit files." . $skillNote];
             $messages = [$sys, ['role' => 'user', 'content' => "Task:\n$task\n\nInvestigate, then summarize your findings."]];
             $last = '';
             for ($i = 0; $i < $maxIter; $i++) {
@@ -397,16 +401,26 @@ class Crew {
         return trim($findings);
     }
 
+    // A compact "these skills are loaded" brief shared by the Director, Researcher,
+    // and Auditor prompts — so the planner routes subtasks to the right skill, the
+    // researcher flags where each applies, and the auditor reviews against their
+    // standards. Empty string when the run has no team-skills.
+    private static function skillsBrief(array $teamSkills): string {
+        if (empty($teamSkills)) return '';
+        $lines = array_map(fn($s) => '- ' . $s['name'] . ': ' . trim((string)($s['description'] ?? '')), $teamSkills);
+        return "\n\nThe coders have these team-skills loaded (each loadable on demand via the `skill` tool):\n" . implode("\n", $lines);
+    }
+
     // Director: decompose into subtasks. With $samples > 1 (amplify mode) it draws
     // several independent plans and keeps the one whose subtask COUNT is the mode —
     // cheap self-consistency that damps a weak model's planning variance.
-    private static function plan(Agent $agent, string $task, int $max, string $research = '', string $model = '', string $focus = '', int $samples = 1): array {
+    private static function plan(Agent $agent, string $task, int $max, string $research = '', string $model = '', string $focus = '', int $samples = 1, string $skillsBrief = ''): array {
         $samples = max(1, $samples);
-        if ($samples === 1) return self::dedupeSubtasks(self::planOnce($agent, $task, $max, $research, $model, $focus));
+        if ($samples === 1) return self::dedupeSubtasks(self::planOnce($agent, $task, $max, $research, $model, $focus, $skillsBrief));
         $cands = [];
         for ($i = 0; $i < $samples; $i++) {
             echo "\033[2m·\033[0m"; @flush();
-            $p = self::planOnce($agent, $task, $max, $research, $model, $focus);
+            $p = self::planOnce($agent, $task, $max, $research, $model, $focus, $skillsBrief);
             if (!empty($p)) $cands[] = $p;
         }
         echo "\n";
@@ -437,20 +451,21 @@ class Crew {
         return $out;
     }
 
-    private static function planOnce(Agent $agent, string $task, int $max, string $research = '', string $model = '', string $focus = ''): array {
+    private static function planOnce(Agent $agent, string $task, int $max, string $research = '', string $model = '', string $focus = '', string $skillsBrief = ''): array {
         // The Director also assigns each subtask a ROLE from the team catalog
         // (coder/tester/docs/… plus any user-defined roles). Each coder then runs
         // with that role's persona, model, and permission mode.
         $roleNames = CrewRoles::names();
+        $skillNote = $skillsBrief !== '' ? " When a subtask matches a loaded team-skill, NAME that skill in its prompt and tell the coder to load it with the `skill` tool first." : '';
         $sys = ['role' => 'system', 'content' =>
             "You are the Director of a team of coding agents. Decompose the user's task into at most $max " .
             "INDEPENDENT subtasks that, where possible, touch DIFFERENT files so they can be built in parallel " .
             "without conflicts. If the task is small, return a single subtask. Assign each subtask the most " .
             "fitting ROLE from this team (use the role name EXACTLY; default to \"coder\" when unsure):\n" .
-            CrewRoles::catalog() . "\n\nOutput ONLY JSON: " .
+            CrewRoles::catalog() . $skillNote . "\n\nOutput ONLY JSON: " .
             '{"subtasks":[{"title":"short label","role":"coder","prompt":"a complete, self-contained instruction for one coder"}]}'];
         $ctx = $research !== '' ? "\n\nResearcher findings:\n" . substr($research, 0, 6000) : '';
-        $fc = $focus !== '' ? "\n\nDomain/stack focus: $focus" : '';
+        $fc = ($focus !== '' ? "\n\nDomain/stack focus: $focus" : '') . $skillsBrief;
         $user = ['role' => 'user', 'content' => "Task:\n$task" . $fc . $ctx];
         $j = ModelClient::default()->chatJson($model !== "" ? $model : $agent->getModel(), [$sys, $user]);
         $subs = is_array($j) && isset($j['subtasks']) && is_array($j['subtasks']) ? $j['subtasks'] : [];
@@ -612,12 +627,12 @@ class Crew {
     // With $passes > 1 (amplify mode) it runs an adversarial panel — alternating
     // neutral and skeptic reviewers — and only calls the diff clean on a STRICT
     // majority of clean votes. A change must survive scrutiny, not just pass once.
-    private static function audit(Agent $agent, string $title, string $diff, string $goal = '', string $model = '', int $passes = 1): array {
+    private static function audit(Agent $agent, string $title, string $diff, string $goal = '', string $model = '', int $passes = 1, string $skillsBrief = ''): array {
         $passes = max(1, $passes);
-        if ($passes === 1) return self::auditOnce($agent, $title, $diff, $goal, $model, false);
+        if ($passes === 1) return self::auditOnce($agent, $title, $diff, $goal, $model, false, $skillsBrief);
         $clean = 0; $issues = []; $summary = '';
         for ($i = 0; $i < $passes; $i++) {
-            $a = self::auditOnce($agent, $title, $diff, $goal, $model, $i % 2 === 1); // odd passes = skeptic
+            $a = self::auditOnce($agent, $title, $diff, $goal, $model, $i % 2 === 1, $skillsBrief); // odd passes = skeptic
             if (!empty($a['clean'])) $clean++;
             else foreach ($a['issues'] as $x) $issues[] = (string)$x;
             if ($summary === '' && ($a['summary'] ?? '') !== '') $summary = (string)$a['summary'];
@@ -631,11 +646,12 @@ class Crew {
         ];
     }
 
-    private static function auditOnce(Agent $agent, string $title, string $diff, string $goal = '', string $model = '', bool $skeptic = false): array {
+    private static function auditOnce(Agent $agent, string $title, string $diff, string $goal = '', string $model = '', bool $skeptic = false, string $skillsBrief = ''): array {
         $diff = substr($diff, 0, 16000);
         $stance = $skeptic
             ? "You are a SKEPTICAL adversarial reviewer. Actively hunt for a reason to reject this diff; when in doubt, mark clean=false. "
             : "You are a meticulous code Auditor. ";
+        $skillNote = $skillsBrief !== '' ? " Hold the diff to the standards of any loaded team-skill that applies (e.g. a payments change must respect payments-money)." . $skillsBrief : '';
         $sys = ['role' => 'system', 'content' =>
             $stance .
             "Review the git diff for correctness, security (secrets, injection, " .
@@ -643,7 +659,7 @@ class Crew {
             '{"clean": true|false, "summary": "one line", "issues": ["..."]}. ' .
             "Mark clean=false if there are real problems, OR if the change is OFF-SCOPE: it adds files unrelated to " .
             "the goal, introduces a language/framework the project doesn't use, or includes scaffolding that wasn't " .
-            "requested. Minor style nits do not block."];
+            "requested. Minor style nits do not block." . $skillNote];
         $user = ['role' => 'user', 'content' => ($goal !== '' ? "Overall goal: $goal\n" : '') . "Subtask: $title\n\nDiff:\n$diff"];
         $j = ModelClient::default()->chatJson($model !== "" ? $model : $agent->getModel(), [$sys, $user]);
         if (!is_array($j)) return ['clean' => false, 'summary' => 'audit unavailable (could not parse review)', 'issues' => []];

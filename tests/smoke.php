@@ -1044,6 +1044,14 @@ if (preg_match('/class CrewSkills \{.*?\n\}/s', $src, $cs)) {
 ok('crew computes team skills from focus', strpos($src, 'CrewSkills::resolve($focus, $opts[\'forceSkills\'] ?? [])') !== false);
 ok('crew materializes skills into worktrees', strpos($src, 'CrewSkills::materialize($teamSkills, $wt)') !== false);
 ok('crew --no-skills flag wired', strpos($src, "'--no-skills'") !== false);
+// Skill-awareness: the Director, Researcher, and Auditor all receive the loaded
+// team-skills (so the planner routes them, the researcher flags them, the auditor
+// holds work to their standards) — not just the coders.
+ok('Director/Researcher/Auditor are skill-aware', strpos($src, 'function skillsBrief(') !== false &&
+    strpos($src, 'self::plan($agent, $task, $maxCoders, $research, $mDirector, $focus, $amplify, self::skillsBrief($teamSkills))') !== false &&
+    strpos($src, 'self::skillsBrief($teamSkills))') !== false &&   // research call
+    strpos($src, 'self::audit($agent, $res[\'title\'], $res["diff"], $task, $mAuditor, $amplify, $auditBrief)') !== false);
+ok('Director names the skill in each subtask prompt', strpos($src, 'NAME that skill in its prompt') !== false);
 // /crew slash command exposes per-role models + focus
 ok('/crew parses per-role model flags', strpos($src, "--' . \$role . '-model") !== false);
 ok('/crew parses --focus', strpos($src, "--focus\\s+\"") !== false || strpos($src, '--focus\s+"') !== false);

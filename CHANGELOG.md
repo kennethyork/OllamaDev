@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.8.46 (2026-06-07)
+
+### Changed
+- **The Director, Researcher, and Auditor are now skill-aware too** — previously only the coders knew about the team-skills. Each of the three now receives the loaded skills (name + description) in its prompt: the **Director** names the relevant skill in each subtask it hands out (and tells the coder to load it first), the **Researcher** flags which skill applies to each area it surveys, and the **Auditor** holds every diff to the standards of any applicable skill (e.g. a payments change must respect `payments-money`). Shared via one `CrewSkills`-fed brief, so skill-awareness stays consistent across all roles and `crew resume`.
+
 ## v4.8.45 (2026-06-07)
 
 ### Added
