@@ -197,9 +197,12 @@ class Crew {
                 // Empty diff = the model didn't actually edit. Retry with a firm nudge,
                 // and AUTO-ESCALATE to a bigger installed model when one exists — so a
                 // weak coder that can't complete the task hands off to a stronger one.
+                // $climb advances each retry so successive retries reach larger tiers,
+                // not the same next-up every time.
+                $climb = $mCoder;
                 for ($try = 1; $res['empty'] && $try <= $coderRetries; $try++) {
-                    $retryModel = $mCoder;
-                    if ($escalate) { $bigger = Models::escalate($mCoder, $installedModels); if ($bigger !== null) $retryModel = $bigger; }
+                    $retryModel = $climb;
+                    if ($escalate) { $bigger = Models::escalate($climb, $installedModels); if ($bigger !== null) { $retryModel = $bigger; $climb = $bigger; } }
                     $esc = $retryModel !== $mCoder ? " {$c}↑ escalating to {$retryModel}{$r}" : '';
                     echo "  {$y}no changes — retry {$try}/{$coderRetries} (model didn't edit the files){$r}{$esc}\n";
                     $retry = $job['st'];
@@ -312,9 +315,14 @@ class Crew {
         // started with — so an interrupted run can continue on a different model.
         // Recorded BEFORE the connection check so the intent persists regardless.
         if (!empty($overrides)) {
-            $opts = array_merge($opts, array_filter($overrides, fn($v) => $v !== null && $v !== ''));
-            $run['opts'] = $opts;
-            self::saveRunOpts($runId, $opts);   // a second resume keeps it, not the original
+            // Whitelist known keys so a stray flag can't pollute the persisted run.
+            $allowed = array_flip(['directorModel', 'coderModel', 'auditorModel', 'researcherModel', 'model', 'focus', 'amplify', 'max', 'retries', 'land', 'research', 'audit', 'skills', 'hosts', 'ideas', 'memory', 'forceSkills', 'escalate']);
+            $clean = array_filter(array_intersect_key($overrides, $allowed), fn($v) => $v !== null && $v !== '');
+            if ($clean) {
+                $opts = array_merge($opts, $clean);
+                $run['opts'] = $opts;
+                self::saveRunOpts($runId, $opts);   // a second resume keeps it, not the original
+            }
         }
         $agent = new Agent();
         if (!$agent->checkConnection()) { echo "\033[31mCannot reach Ollama.\033[0m Start it with: ollama serve\n"; return 1; }
@@ -527,6 +535,11 @@ class Crew {
         $steerN = 0; $steerFile = '';
         if ($logFile !== '' && preg_match('/coder-(\d+)\.log$/', $logFile, $sm)) {
             $steerN = (int)$sm[1]; $steerFile = dirname($logFile) . '/steer.jsonl';
+            // Fresh attempt = fresh message history, so clear this coder's steering
+            // watermark — otherwise a retry/fix-back coder (same number, new Agent)
+            // would skip steering the Director sent during the earlier attempt,
+            // including a "model <name>" rescue swap.
+            if ($steerN > 0) unset(self::$steerSeen[$steerN]);
         }
 
         $prevCwd = getcwd();
@@ -643,13 +656,18 @@ class Crew {
             if ($agent !== null && preg_match('/^\s*(?:@|\/)?model\s+(\S+)\s*$/i', $msg, $mm)) {
                 $want = $mm[1];
                 $resolved = $agent->resolveModel($want);
-                if ($resolved === null) {
-                    $messages[] = ['role' => 'user', 'content' => "🧭 Director tried to switch your model to '{$want}', but it isn't installed — continuing on the current model."];
-                    echo "\033[33m  ⇄ coder {$n} model switch failed (not installed: {$want})\033[0m\n";
-                } else {
+                $installed = $agent->listModels();
+                // Only swap to a VERIFIED-installed model. When Ollama is unreachable
+                // listModels() is empty and resolveModel() echoes the raw name back —
+                // swapping then would point the next chatTurn at a dead model and kill
+                // the coder. Require positive confirmation it's really installed.
+                if ($resolved !== null && !empty($installed) && in_array($resolved, $installed, true)) {
                     $agent->setModel($resolved);
                     $messages[] = ['role' => 'user', 'content' => "🧭 Director switched your model to {$resolved}. Continue this same subtask on it."];
                     echo "\033[36m  ⇄ coder {$n} model → {$resolved}\033[0m\n";
+                } else {
+                    $messages[] = ['role' => 'user', 'content' => "🧭 Director tried to switch your model to '{$want}', but it isn't a confirmed-installed model — continuing on the current one."];
+                    echo "\033[33m  ⇄ coder {$n} model switch skipped (unverified: {$want})\033[0m\n";
                 }
                 self::$steerSeen[$n] = $ts;
                 continue;

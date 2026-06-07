@@ -1,5 +1,21 @@
 # Changelog
 
+## v4.8.53 (2026-06-07) — security & correctness hardening
+
+An adversarial review of the permission/hooks/steering/escalation code surfaced several real issues, now fixed and regression-tested:
+
+### Fixed (security)
+- **Permission-gate bypass via the `agent` tool.** The legacy `agent` tool invoked tool closures directly, skipping `Tools::run` — and therefore the permission gate, hooks, plan mode, and the tool allowlist entirely. It now routes every nested call through `Tools::run`.
+- **Plan mode could be self-exited.** In non-interactive runs (crew/subagent/one-shot) `exit_plan_mode` unconditionally left plan mode, so a model could escape it without approval; a bare Enter/EOF also counted as approval. Now leaving plan mode requires an **explicit interactive “yes”** — non-interactive runs stay read-only.
+- **Hooks failed open.** A PreToolUse hook that couldn’t start (proc_open failure) returned exit 0 (= allow), and an **invalid matcher regex** silently skipped the hook. Both now **fail closed** (block / apply), and a reentrancy depth-guard prevents a hook that re-invokes the CLI from recursing.
+
+### Fixed (correctness)
+- **Live model swap** now only targets a **confirmed-installed** model, so a swap while Ollama is unreachable can’t point a coder at a dead model and kill it mid-run.
+- **Steering watermark** is cleared per coder attempt, so a retry/fix-back coder no longer ignores steering (including a rescue model-swap) the Director sent during the earlier attempt.
+- **Crew auto-escalation** now climbs across retries (tier 1 → 2 → 3) instead of jumping to the same next-up model every time.
+- **MoE model sizing** — `8x7b`/`8x22b` tags are now sized as experts × per-expert (≈56/176B), not 7/22B, so escalation ranks them correctly.
+- **Resume overrides** are key-whitelisted so a stray flag can’t pollute the persisted run; the **escalation ladder** matches by alias/base-name, so a ladder written with `qwen2.5-coder` still matches a resolved `qwen2.5-coder:7b`.
+
 ## v4.8.52 (2026-06-07)
 
 ### Added

@@ -1405,7 +1405,8 @@ if (preg_match('/class Models \{.*?\n\}/s', $src, $mEsc)) {
     })());
 }
 // Crew auto-escalates a coder on an empty/failed retry; opt out with --no-escalate.
-ok('crew auto-escalates a stalled coder', strpos($src, 'Models::escalate($mCoder, $installedModels)') !== false &&
+ok('crew auto-escalates a stalled coder (climbing across retries)', strpos($src, 'Models::escalate($climb, $installedModels)') !== false &&
+    strpos($src, '$climb = $bigger') !== false &&
     strpos($src, "Config::get('crew.escalate', true)") !== false && strpos($src, "'--no-escalate'") !== false);
 // eval --escalate retries a failed task on a bigger model; --min gates the exit code.
 ok('eval supports --escalate and --min threshold', strpos($mainSrc, "in_array('--escalate', \$args, true)") !== false &&
@@ -1687,6 +1688,36 @@ if (isset($BIN) && is_file($BIN)) {
     [$mc] = run_bin(['mcp', 'serve'], '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"echo","arguments":{"text":"ping"}}}' . "\n");
     ok('mcp serve: tools/call returns content', strpos($mc, '"content"') !== false && strpos($mc, 'ping') !== false);
 }
+
+// ── Security-review regressions (found by adversarial review, now guarded) ──────
+// 1. The `agent` tool must route nested calls through Tools::run (gate/hooks/plan),
+//    not invoke the closure directly (which bypassed every guard).
+ok('agent tool routes nested calls through the permission gate',
+    strpos($src, '$result = $tool ? Tools::run($toolName, $params)') !== false &&
+    strpos($src, '$result = $tool($params);') === false);
+// 2. Plan mode can only be left via an EXPLICIT interactive yes — no self-exit in
+//    non-interactive runs, and a bare Enter/EOF is not approval.
+ok('exit_plan_mode cannot self-approve non-interactively',
+    strpos($src, 'if (!Permission::isInteractive()) {') !== false &&
+    strpos($src, "Leaving plan mode needs explicit user approval") !== false &&
+    strpos($src, "\$ans === 'y' || \$ans === 'yes') {") !== false &&   // no "|| $ans === ''"
+    strpos($src, "\$ans === 'y' || \$ans === 'yes' || \$ans === ''") === false);
+// 3. Hooks fail CLOSED: a PreToolUse hook that can't start (proc_open fails) blocks
+//    the tool (non-zero), and an INVALID matcher regex applies the hook (not skip).
+ok('PreToolUse hooks fail closed (proc fail → block; bad matcher → apply)',
+    strpos($src, "if (!is_resource(\$proc)) return ['', 127];") !== false &&
+    strpos($src, '$m === 0) continue;') !== false &&
+    strpos($src, 'OLLAMADEV_HOOK_DEPTH') !== false);
+// 4. A live model swap only targets a CONFIRMED-installed model (no dead-model swap
+//    when Ollama is unreachable).
+ok('crew model hot-swap verifies the model is installed',
+    strpos($src, "in_array(\$resolved, \$installed, true)") !== false &&
+    strpos($src, 'model switch skipped (unverified') !== false);
+// 5. A fresh coder attempt clears its steering watermark so retries see the Director.
+ok('retry coder clears its steering watermark', strpos($src, 'unset(self::$steerSeen[$steerN]);') !== false);
+// 6. MoE tags size correctly (experts × per-expert), and resume whitelists override keys.
+ok('MoE param sizes + resume key whitelist', strpos($src, ')\s*x\s*(') !== false &&
+    strpos($src, 'array_intersect_key($overrides, $allowed)') !== false);
 
 echo "\n========================\n";
 echo "Results: $pass passed, $fail failed\n";

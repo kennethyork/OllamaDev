@@ -115,7 +115,13 @@ class Hooks {
             $cmd = trim((string)($h['command'] ?? $h['cmd'] ?? ''));
             if ($cmd === '') continue;
             $matcher = trim((string)($h['matcher'] ?? $h['match'] ?? ''));
-            if ($matcher !== '' && $subject !== '' && !@preg_match('/' . str_replace('/', '\\/', $matcher) . '/i', $subject)) continue;
+            if ($matcher !== '' && $subject !== '') {
+                $m = @preg_match('/' . str_replace('/', '\\/', $matcher) . '/i', $subject);
+                // m===0 → matcher valid but didn't match: skip. m===false → INVALID
+                // regex: fail CLOSED (apply the hook) rather than silently dropping a
+                // security filter; the broken pattern is the user's to fix.
+                if ($m === 0) continue;
+            }
             $out[] = $cmd;
         }
         return $out;
@@ -123,8 +129,14 @@ class Hooks {
 
     // Run a command with a JSON payload on stdin + context env. Returns [output, exitCode].
     private static function exec(string $cmd, string $stdin = '', array $env = []): array {
+        // Reentrancy guard: a hook that itself runs ollamadev (firing more hooks) must
+        // not recurse without bound. One level deep, hooks are suppressed.
+        if ((int)getenv('OLLAMADEV_HOOK_DEPTH') >= 1) return ['', 0];
+        $env = array_merge($env, ['OLLAMADEV_HOOK_DEPTH' => (string)((int)getenv('OLLAMADEV_HOOK_DEPTH') + 1)]);
         $proc = @proc_open($cmd, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes, null, array_merge(getenv() ?: [], $env));
-        if (!is_resource($proc)) return ['', 0];
+        // proc_open failed → the hook did NOT run. Return a non-zero code so a
+        // PreToolUse gate fails CLOSED (blocks) rather than silently allowing.
+        if (!is_resource($proc)) return ['', 127];
         if ($stdin !== '') @fwrite($pipes[0], $stdin);
         @fclose($pipes[0]);
         $out = (string) stream_get_contents($pipes[1]); $err = (string) stream_get_contents($pipes[2]);

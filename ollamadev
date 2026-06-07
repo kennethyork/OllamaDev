@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '4.8.52');
+define('OLLAMADEV_VERSION', '4.8.53');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -1331,6 +1331,9 @@ class Models {
         // Match the size token after the ':' (…:7b, :14b, :70b, :30b-q5) — not the
         // family version (qwen2.5 / llama3.2). Fall back to any "<n>b" if no colon.
         $cand = strpos($tag, ':') !== false ? substr($tag, strpos($tag, ':') + 1) : $tag;
+        // Mixture-of-experts tags (8x7b, 8x22b) are experts×size, far bigger than the
+        // per-expert number — match these FIRST so e.g. 8x7b ≈ 56, not 7.
+        if (preg_match('/(\d+)\s*x\s*(\d+(?:\.\d+)?)\s*b\b/i', $cand, $x)) return (float)$x[1] * (float)$x[2];
         if (preg_match('/(\d+(?:\.\d+)?)\s*b\b/i', $cand, $m)) return (float)$m[1];
         return null;
     }
@@ -1342,7 +1345,15 @@ class Models {
         $current = trim($current);
         $ladder = Config::get('models.escalation', null);
         if (is_array($ladder) && $ladder) {
+            // Find current on the ladder by exact tag, else by alias/base-name match
+            // (so a ladder written with `qwen2.5-coder` still matches a resolved
+            // `qwen2.5-coder:7b`) — otherwise an explicit ladder is silently ignored.
             $pos = array_search($current, $ladder, true);
+            if ($pos === false) {
+                foreach ($ladder as $i => $entry) {
+                    if (self::match($entry, [$current]) === $current) { $pos = $i; break; }
+                }
+            }
             if ($pos !== false) {
                 for ($i = $pos + 1; $i < count($ladder); $i++) {
                     if (in_array($ladder[$i], $installed, true)) return $ladder[$i];
@@ -3931,12 +3942,10 @@ Tools::register('agent', function($p) {
             $params = $call['params'] ?? [];
             $tool = Tools::find($toolName);
             
-            if (!$tool) {
-                $result = "Error: tool '$toolName' not found";
-            } else {
-                $result = $tool($params);
-            }
-            
+            // Route through Tools::run so the permission gate, hooks, plan mode, and
+            // tool allowlist all apply — calling $tool() directly bypassed every guard.
+            $result = $tool ? Tools::run($toolName, $params) : "Error: tool '$toolName' not found";
+
             $messages[] = ['role' => 'tool', 'content' => "[$toolName] result: $result"];
             $output[] = "[$toolName] → " . substr($result, 0, 200) . (strlen($result) > 200 ? '...' : '') . "\n";
         }
@@ -4176,17 +4185,20 @@ Tools::register('exit_plan_mode', function($p) {
     if (!Permission::inPlanMode()) return "Not in plan mode — just proceed with the task.";
     if ($plan === '') return "Provide the plan: exit_plan_mode(plan: \"...\"). Summarize the steps you intend to take.";
     echo "\n\033[1m📋 Proposed plan\033[0m\n" . $plan . "\n";
-    if (Permission::isInteractive()) {
-        echo "\033[36mProceed with this plan? [y]es / [n]o (keep planning): \033[0m";
-        $ans = strtolower(trim((string)fgets(STDIN)));
-        if ($ans === 'y' || $ans === 'yes' || $ans === '') {
-            $m = Permission::exitPlan();
-            return "✅ Plan approved — plan mode off (now: $m). Implement it now by calling your write/edit/bash tools.";
-        }
-        return "Plan not approved. Stay in plan mode, incorporate the user's feedback, and propose a revised plan.";
+    // Approval is the USER's call, so it requires an interactive session and an
+    // explicit yes. Non-interactive runs (crew/subagent/one-shot) can't approve, so
+    // the model cannot self-exit plan mode — mutations stay blocked. A bare Enter/EOF
+    // is NOT approval (defaults to keep-planning), so it can't be coerced via piped stdin.
+    if (!Permission::isInteractive()) {
+        return "Plan recorded. Leaving plan mode needs explicit user approval, which isn't available in a non-interactive run — stay read-only and do not attempt edits.";
     }
-    $m = Permission::exitPlan();
-    return "Plan recorded — plan mode off (now: $m).";
+    echo "\033[36mProceed with this plan? [y]es / [n]o (keep planning): \033[0m";
+    $ans = strtolower(trim((string)fgets(STDIN)));
+    if ($ans === 'y' || $ans === 'yes') {
+        $m = Permission::exitPlan();
+        return "✅ Plan approved — plan mode off (now: $m). Implement it now by calling your write/edit/bash tools.";
+    }
+    return "Plan not approved. Stay in plan mode, incorporate the user's feedback, and propose a revised plan.";
 });
 // DiffView: unified diff computation + colorized rendering, and an apply-with-preview
 // gate used by the write/edit tools. Vanilla PHP only (no libraries).
@@ -5487,7 +5499,13 @@ class Hooks {
             $cmd = trim((string)($h['command'] ?? $h['cmd'] ?? ''));
             if ($cmd === '') continue;
             $matcher = trim((string)($h['matcher'] ?? $h['match'] ?? ''));
-            if ($matcher !== '' && $subject !== '' && !@preg_match('/' . str_replace('/', '\\/', $matcher) . '/i', $subject)) continue;
+            if ($matcher !== '' && $subject !== '') {
+                $m = @preg_match('/' . str_replace('/', '\\/', $matcher) . '/i', $subject);
+                // m===0 → matcher valid but didn't match: skip. m===false → INVALID
+                // regex: fail CLOSED (apply the hook) rather than silently dropping a
+                // security filter; the broken pattern is the user's to fix.
+                if ($m === 0) continue;
+            }
             $out[] = $cmd;
         }
         return $out;
@@ -5495,8 +5513,14 @@ class Hooks {
 
     // Run a command with a JSON payload on stdin + context env. Returns [output, exitCode].
     private static function exec(string $cmd, string $stdin = '', array $env = []): array {
+        // Reentrancy guard: a hook that itself runs ollamadev (firing more hooks) must
+        // not recurse without bound. One level deep, hooks are suppressed.
+        if ((int)getenv('OLLAMADEV_HOOK_DEPTH') >= 1) return ['', 0];
+        $env = array_merge($env, ['OLLAMADEV_HOOK_DEPTH' => (string)((int)getenv('OLLAMADEV_HOOK_DEPTH') + 1)]);
         $proc = @proc_open($cmd, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes, null, array_merge(getenv() ?: [], $env));
-        if (!is_resource($proc)) return ['', 0];
+        // proc_open failed → the hook did NOT run. Return a non-zero code so a
+        // PreToolUse gate fails CLOSED (blocks) rather than silently allowing.
+        if (!is_resource($proc)) return ['', 127];
         if ($stdin !== '') @fwrite($pipes[0], $stdin);
         @fclose($pipes[0]);
         $out = (string) stream_get_contents($pipes[1]); $err = (string) stream_get_contents($pipes[2]);
@@ -6731,9 +6755,12 @@ class Crew {
                 // Empty diff = the model didn't actually edit. Retry with a firm nudge,
                 // and AUTO-ESCALATE to a bigger installed model when one exists — so a
                 // weak coder that can't complete the task hands off to a stronger one.
+                // $climb advances each retry so successive retries reach larger tiers,
+                // not the same next-up every time.
+                $climb = $mCoder;
                 for ($try = 1; $res['empty'] && $try <= $coderRetries; $try++) {
-                    $retryModel = $mCoder;
-                    if ($escalate) { $bigger = Models::escalate($mCoder, $installedModels); if ($bigger !== null) $retryModel = $bigger; }
+                    $retryModel = $climb;
+                    if ($escalate) { $bigger = Models::escalate($climb, $installedModels); if ($bigger !== null) { $retryModel = $bigger; $climb = $bigger; } }
                     $esc = $retryModel !== $mCoder ? " {$c}↑ escalating to {$retryModel}{$r}" : '';
                     echo "  {$y}no changes — retry {$try}/{$coderRetries} (model didn't edit the files){$r}{$esc}\n";
                     $retry = $job['st'];
@@ -6846,9 +6873,14 @@ class Crew {
         // started with — so an interrupted run can continue on a different model.
         // Recorded BEFORE the connection check so the intent persists regardless.
         if (!empty($overrides)) {
-            $opts = array_merge($opts, array_filter($overrides, fn($v) => $v !== null && $v !== ''));
-            $run['opts'] = $opts;
-            self::saveRunOpts($runId, $opts);   // a second resume keeps it, not the original
+            // Whitelist known keys so a stray flag can't pollute the persisted run.
+            $allowed = array_flip(['directorModel', 'coderModel', 'auditorModel', 'researcherModel', 'model', 'focus', 'amplify', 'max', 'retries', 'land', 'research', 'audit', 'skills', 'hosts', 'ideas', 'memory', 'forceSkills', 'escalate']);
+            $clean = array_filter(array_intersect_key($overrides, $allowed), fn($v) => $v !== null && $v !== '');
+            if ($clean) {
+                $opts = array_merge($opts, $clean);
+                $run['opts'] = $opts;
+                self::saveRunOpts($runId, $opts);   // a second resume keeps it, not the original
+            }
         }
         $agent = new Agent();
         if (!$agent->checkConnection()) { echo "\033[31mCannot reach Ollama.\033[0m Start it with: ollama serve\n"; return 1; }
@@ -7061,6 +7093,11 @@ class Crew {
         $steerN = 0; $steerFile = '';
         if ($logFile !== '' && preg_match('/coder-(\d+)\.log$/', $logFile, $sm)) {
             $steerN = (int)$sm[1]; $steerFile = dirname($logFile) . '/steer.jsonl';
+            // Fresh attempt = fresh message history, so clear this coder's steering
+            // watermark — otherwise a retry/fix-back coder (same number, new Agent)
+            // would skip steering the Director sent during the earlier attempt,
+            // including a "model <name>" rescue swap.
+            if ($steerN > 0) unset(self::$steerSeen[$steerN]);
         }
 
         $prevCwd = getcwd();
@@ -7177,13 +7214,18 @@ class Crew {
             if ($agent !== null && preg_match('/^\s*(?:@|\/)?model\s+(\S+)\s*$/i', $msg, $mm)) {
                 $want = $mm[1];
                 $resolved = $agent->resolveModel($want);
-                if ($resolved === null) {
-                    $messages[] = ['role' => 'user', 'content' => "🧭 Director tried to switch your model to '{$want}', but it isn't installed — continuing on the current model."];
-                    echo "\033[33m  ⇄ coder {$n} model switch failed (not installed: {$want})\033[0m\n";
-                } else {
+                $installed = $agent->listModels();
+                // Only swap to a VERIFIED-installed model. When Ollama is unreachable
+                // listModels() is empty and resolveModel() echoes the raw name back —
+                // swapping then would point the next chatTurn at a dead model and kill
+                // the coder. Require positive confirmation it's really installed.
+                if ($resolved !== null && !empty($installed) && in_array($resolved, $installed, true)) {
                     $agent->setModel($resolved);
                     $messages[] = ['role' => 'user', 'content' => "🧭 Director switched your model to {$resolved}. Continue this same subtask on it."];
                     echo "\033[36m  ⇄ coder {$n} model → {$resolved}\033[0m\n";
+                } else {
+                    $messages[] = ['role' => 'user', 'content' => "🧭 Director tried to switch your model to '{$want}', but it isn't a confirmed-installed model — continuing on the current one."];
+                    echo "\033[33m  ⇄ coder {$n} model switch skipped (unverified: {$want})\033[0m\n";
                 }
                 self::$steerSeen[$n] = $ts;
                 continue;

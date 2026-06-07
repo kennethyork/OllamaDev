@@ -80,6 +80,9 @@ class Models {
         // Match the size token after the ':' (…:7b, :14b, :70b, :30b-q5) — not the
         // family version (qwen2.5 / llama3.2). Fall back to any "<n>b" if no colon.
         $cand = strpos($tag, ':') !== false ? substr($tag, strpos($tag, ':') + 1) : $tag;
+        // Mixture-of-experts tags (8x7b, 8x22b) are experts×size, far bigger than the
+        // per-expert number — match these FIRST so e.g. 8x7b ≈ 56, not 7.
+        if (preg_match('/(\d+)\s*x\s*(\d+(?:\.\d+)?)\s*b\b/i', $cand, $x)) return (float)$x[1] * (float)$x[2];
         if (preg_match('/(\d+(?:\.\d+)?)\s*b\b/i', $cand, $m)) return (float)$m[1];
         return null;
     }
@@ -91,7 +94,15 @@ class Models {
         $current = trim($current);
         $ladder = Config::get('models.escalation', null);
         if (is_array($ladder) && $ladder) {
+            // Find current on the ladder by exact tag, else by alias/base-name match
+            // (so a ladder written with `qwen2.5-coder` still matches a resolved
+            // `qwen2.5-coder:7b`) — otherwise an explicit ladder is silently ignored.
             $pos = array_search($current, $ladder, true);
+            if ($pos === false) {
+                foreach ($ladder as $i => $entry) {
+                    if (self::match($entry, [$current]) === $current) { $pos = $i; break; }
+                }
+            }
             if ($pos !== false) {
                 for ($i = $pos + 1; $i < count($ladder); $i++) {
                     if (in_array($ladder[$i], $installed, true)) return $ladder[$i];

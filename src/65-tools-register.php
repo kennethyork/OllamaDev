@@ -948,12 +948,10 @@ Tools::register('agent', function($p) {
             $params = $call['params'] ?? [];
             $tool = Tools::find($toolName);
             
-            if (!$tool) {
-                $result = "Error: tool '$toolName' not found";
-            } else {
-                $result = $tool($params);
-            }
-            
+            // Route through Tools::run so the permission gate, hooks, plan mode, and
+            // tool allowlist all apply — calling $tool() directly bypassed every guard.
+            $result = $tool ? Tools::run($toolName, $params) : "Error: tool '$toolName' not found";
+
             $messages[] = ['role' => 'tool', 'content' => "[$toolName] result: $result"];
             $output[] = "[$toolName] → " . substr($result, 0, 200) . (strlen($result) > 200 ? '...' : '') . "\n";
         }
@@ -1193,15 +1191,18 @@ Tools::register('exit_plan_mode', function($p) {
     if (!Permission::inPlanMode()) return "Not in plan mode — just proceed with the task.";
     if ($plan === '') return "Provide the plan: exit_plan_mode(plan: \"...\"). Summarize the steps you intend to take.";
     echo "\n\033[1m📋 Proposed plan\033[0m\n" . $plan . "\n";
-    if (Permission::isInteractive()) {
-        echo "\033[36mProceed with this plan? [y]es / [n]o (keep planning): \033[0m";
-        $ans = strtolower(trim((string)fgets(STDIN)));
-        if ($ans === 'y' || $ans === 'yes' || $ans === '') {
-            $m = Permission::exitPlan();
-            return "✅ Plan approved — plan mode off (now: $m). Implement it now by calling your write/edit/bash tools.";
-        }
-        return "Plan not approved. Stay in plan mode, incorporate the user's feedback, and propose a revised plan.";
+    // Approval is the USER's call, so it requires an interactive session and an
+    // explicit yes. Non-interactive runs (crew/subagent/one-shot) can't approve, so
+    // the model cannot self-exit plan mode — mutations stay blocked. A bare Enter/EOF
+    // is NOT approval (defaults to keep-planning), so it can't be coerced via piped stdin.
+    if (!Permission::isInteractive()) {
+        return "Plan recorded. Leaving plan mode needs explicit user approval, which isn't available in a non-interactive run — stay read-only and do not attempt edits.";
     }
-    $m = Permission::exitPlan();
-    return "Plan recorded — plan mode off (now: $m).";
+    echo "\033[36mProceed with this plan? [y]es / [n]o (keep planning): \033[0m";
+    $ans = strtolower(trim((string)fgets(STDIN)));
+    if ($ans === 'y' || $ans === 'yes') {
+        $m = Permission::exitPlan();
+        return "✅ Plan approved — plan mode off (now: $m). Implement it now by calling your write/edit/bash tools.";
+    }
+    return "Plan not approved. Stay in plan mode, incorporate the user's feedback, and propose a revised plan.";
 });
