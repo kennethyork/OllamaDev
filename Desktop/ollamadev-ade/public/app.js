@@ -875,17 +875,27 @@ var SkillMgr = {
         var skills = (d && Array.isArray(d.skills)) ? d.skills : [];
         this.skills = skills;
         if (!skills.length) { box.innerHTML = '<div class="board-empty">No skills yet — create one below.</div>'; return; }
-        box.innerHTML = skills.map(function (s) {
-            return '<div class="role-row"><div class="role-main"><span class="role-name">' + esc(s.name) + '</span>' +
+        var mine = skills.filter(function (s) { return !s.builtin; });
+        var built = skills.filter(function (s) { return s.builtin; });
+        var row = function (s) {
+            // Built-ins are read-only starters: view/customize (saving makes a disk
+            // copy that overrides), and no delete. Your own skills edit/remove freely.
+            var tag = s.builtin ? '<span class="skill-tag" title="Built-in team-skill — crews load it by focus or template">built-in</span>' : '';
+            var editTitle = s.builtin ? 'View / customize a copy' : 'Edit this skill';
+            var del = s.builtin ? '' : '<button class="role-del" data-skill="' + esc(s.name) + '" title="Remove this skill">✕</button>';
+            return '<div class="role-row"><div class="role-main"><span class="role-name">' + esc(s.name) + '</span>' + tag +
                 '<div class="role-desc dim">' + esc(s.description || 'no description') + '</div></div>' +
-                '<button class="role-edit" data-skill="' + esc(s.name) + '" title="Edit this skill">✎</button>' +
-                '<button class="role-del" data-skill="' + esc(s.name) + '" title="Remove this skill">✕</button></div>';
-        }).join('');
+                '<button class="role-edit" data-skill="' + esc(s.name) + '" title="' + editTitle + '">' + (s.builtin ? '⎘' : '✎') + '</button>' + del + '</div>';
+        };
+        var html = mine.map(row).join('');
+        if (built.length) html += '<div class="skill-sec dim">Built-in team-skills (' + built.length + ') — crews load these by focus or template; customize one to override it.</div>' + built.map(row).join('');
+        box.innerHTML = html;
         box.querySelectorAll('.role-edit').forEach(function (b) { b.onclick = function () { self.edit(b.dataset.skill); }; });
         box.querySelectorAll('.role-del').forEach(function (b) { b.onclick = function () { self.remove(b.dataset.skill); }; });
     },
     edit: function (name) {
         if (!window.skillsGet) return;
+        var self = this;
         Promise.resolve(window.skillsGet(name)).then(function (s) {
             if (!s || s.error) { banner('could not load skill', 'err'); return; }
             if ($('#skillName')) $('#skillName').value = s.name || name;
@@ -893,6 +903,7 @@ var SkillMgr = {
             if ($('#skillBody')) $('#skillBody').value = s.body || '';
             var box = $('#skillAddBox'); if (box) box.open = true;
             var n = $('#skillName'); if (n) n.focus();
+            if (s.builtin) banner('built-in "' + (s.name || name) + '" loaded — Save creates your own editable copy that overrides it', 'ok');
         }).catch(function () { banner('could not load skill', 'err'); });
     },
     save: function () {
@@ -1542,14 +1553,17 @@ var App = {
     // Recommended fast coder models, in preference order, for the crew run.
     CREW_PREFERRED: ['qwen2.5-coder', 'qwen3-coder', 'codestral', 'deepseek-coder', 'mistral', 'llama3.1'],
     // Setup templates (BridgeSpace-style) — prefill the task + suggested config.
+    // Each template carries the built-in team-skill(s) the crew should load for that
+    // kind of work — forced in via `--skill` regardless of focus, so e.g. picking
+    // Tests always loads testing-discipline. (Domain teams add more by focus.)
     CREW_TEMPLATES: [
-        { id: 'feature', label: '✨ Feature', task: 'Implement this feature: ', max: 3, review: true },
-        { id: 'bugfix', label: '🐛 Bug fix', task: 'Find and fix this bug: ', max: 1, review: true },
-        { id: 'tests', label: '🧪 Tests', task: 'Write thorough tests for: ', max: 2, review: true },
-        { id: 'refactor', label: '♻️ Refactor', task: 'Refactor for clarity/maintainability (no behavior change): ', max: 2, review: true },
-        { id: 'docs', label: '📝 Docs', task: 'Write/update documentation for: ', max: 1, review: false },
-        { id: 'audit', label: '🔍 Audit & fix', task: 'Review the codebase for bugs and security issues, and fix them: ', max: 2, review: true },
-        { id: 'blank', label: '➕ Blank', task: '', max: 2, review: true }
+        { id: 'feature', label: '✨ Feature', task: 'Implement this feature: ', max: 3, review: true, skills: ['testing-discipline'] },
+        { id: 'bugfix', label: '🐛 Bug fix', task: 'Find and fix this bug: ', max: 1, review: true, skills: ['testing-discipline'] },
+        { id: 'tests', label: '🧪 Tests', task: 'Write thorough tests for: ', max: 2, review: true, skills: ['testing-discipline'] },
+        { id: 'refactor', label: '♻️ Refactor', task: 'Refactor for clarity/maintainability (no behavior change): ', max: 2, review: true, skills: ['refactor-safety'] },
+        { id: 'docs', label: '📝 Docs', task: 'Write/update documentation for: ', max: 1, review: false, skills: ['docs-writing'] },
+        { id: 'audit', label: '🔍 Audit & fix', task: 'Review the codebase for bugs and security issues, and fix them: ', max: 2, review: true, skills: ['security-hardening'] },
+        { id: 'blank', label: '➕ Blank', task: '', max: 2, review: true, skills: [] }
     ],
     openCrew: function () {
         var o = $('#modalOverlay'); if (!o) return;
@@ -1576,6 +1590,7 @@ var App = {
         };
         Promise.resolve(window.crewModels ? window.crewModels() : {}).then(apply).catch(function () { apply({}); });
         this.crewFocus = "";
+        this.crewTemplateSkills = [];
 
         this.renderTemplates();
         this.populatePresets();
@@ -1598,6 +1613,7 @@ var App = {
                 $('#crewTask').value = t.task;
                 $('#crewMax').value = String(t.max);
                 if ($('#crewReview')) $('#crewReview').checked = t.review;
+                self.crewTemplateSkills = t.skills || [];   // forced into the run via --skill
                 var ta = $('#crewTask'); ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length;
             };
         });
@@ -1731,6 +1747,7 @@ var App = {
                 auditorModel: self.mval('crewModelAuditor'),
                 researcherModel: self.mval('crewModelResearcher'),
                 focus: self.crewFocus || '',
+                skills: self.crewTemplateSkills || [],
                 hosts: ($('#crewHosts') && $('#crewHosts').value || '').trim()
             };
             self.closeCrew();
@@ -1766,6 +1783,7 @@ var App = {
             rmf('--researcher-model', opts.researcher !== false ? opts.researcherModel : '') +
             rmf('--auditor-model', opts.auditor !== false ? opts.auditorModel : '') +
             rmf('--focus', opts.focus) +
+            (Array.isArray(opts.skills) ? opts.skills.map(function (s) { return rmf('--skill', s); }).join('') : '') +
             (opts.hosts ? ' --hosts ' + "'" + String(opts.hosts).replace(/\s+/g, '').replace(/'/g, "'\\''") + "'" : '');
         var model = base;
         // Use the REAL model (not the literal 'crew') so a saved/resumed crew terminal

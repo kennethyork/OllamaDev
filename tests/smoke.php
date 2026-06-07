@@ -831,6 +831,7 @@ ok('no deprecated ${} interpolation outside nowdocs',
 
 echo "\n== Skills ==\n";
 if (preg_match('/class Skills \{.*?\n\}/s', $src, $sk)) {
+    if (!class_exists('CrewSkills') && preg_match('/class CrewSkills \{.*?\n\}/s', $src, $cs)) eval($cs[0]);   // Skills::builtins/get fall back to it
     eval($sk[0]);
     $tmpHome = sys_get_temp_dir() . '/odv_skills_' . getmypid();
     @mkdir($tmpHome . '/.ollamadev/skills/git-pro', 0755, true);
@@ -868,6 +869,33 @@ if (preg_match('/class Skills \{.*?\n\}/s', $src, $sk)) {
     // remove
     ok('Skills::remove deletes a skill', Skills::remove('shared-skill') === true && Skills::get('shared-skill') === null);
     ok('Skills::remove returns false for unknown', Skills::remove('nope') === false);
+    // Built-in team-skills are browsable through the manager surface, and get()
+    // falls back to them so the desktop can view a starter's full body.
+    if (class_exists('CrewSkills')) {
+        $built = Skills::builtins();
+        ok('Skills::builtins surfaces the team-skill library', count($built) >= 20 &&
+            in_array('testing-discipline', array_column($built, 'name'), true));
+        $mgr = Skills::listForManager();
+        $names = array_column($mgr, 'name');
+        ok('listForManager merges disk skills + built-ins', in_array('git-pro', $names, true) &&
+            in_array('refactor-safety', $names, true));
+        $tb = Skills::get('refactor-safety');
+        ok('Skills::get falls back to a built-in body', $tb !== null && !empty($tb['builtin']) &&
+            strpos($tb['body'], 'refactor-safety') !== false);
+        // A disk skill of the same name overrides (and drops out of builtins()).
+        Skills::save('testing-discipline', 'mine', "# mine\nlocal override\n");
+        ok('a user skill overrides a built-in of the same name',
+            !in_array('testing-discipline', array_column(Skills::builtins(), 'name'), true) &&
+            empty(Skills::get('testing-discipline')['builtin']));
+        Skills::remove('testing-discipline');
+        // resolve(): forced-by-name skills are always kept; focus adds more, deduped.
+        $r = CrewSkills::resolve('a docs site', ['security-hardening'], 5);
+        $rn = array_column($r, 'name');
+        ok('CrewSkills::resolve keeps forced skills + adds focus matches',
+            in_array('security-hardening', $rn, true) && in_array('docs-writing', $rn, true));
+        ok('CrewSkills::byNames ignores unknown names',
+            count(CrewSkills::byNames(['testing-discipline', 'not-a-real-skill'])) === 1);
+    }
     putenv("HOME=$oldHome"); chdir($oldCwd);
     @exec('rm -rf ' . escapeshellarg($tmpHome));
 } else { ok('Skills class extractable', false); }
@@ -877,6 +905,20 @@ ok('skill tool has native schema', strpos($src, "\$fn('skill'") !== false);
 ok('skills injected into system prompt', strpos($src, 'AVAILABLE SKILLS') !== false);
 ok('skills install/export/remove wired (CLI)', strpos($src, "\$sub === 'install'") !== false && strpos($src, "\$sub === 'export'") !== false);
 ok('skills install supports git + archive sources', strpos($src, 'git clone --depth 1') !== false && strpos($src, 'tgz|zip') !== false);
+// Built-in team-skills surface in the manager (list/show JSON carry builtin flag).
+ok('skills list/show JSON expose built-ins', strpos($src, 'Skills::listForManager()') !== false &&
+    strpos($src, "'builtin' => !empty(\$s['builtin'])") !== false);
+// crew --skill <name> forces a built-in team-skill into the run (template wiring).
+ok('crew --skill flag forces a team-skill in', strpos($src, "=== '--skill'") !== false &&
+    strpos($src, "'forceSkills'") !== false && strpos($src, 'CrewSkills::resolve(') !== false);
+// Desktop: each crew template carries its matching skill, passed via --skill.
+ok('desktop crew templates carry skills wired to --skill',
+    strpos($ajs, "skills: ['testing-discipline']") !== false &&
+    strpos($ajs, "skills: ['refactor-safety']") !== false &&
+    strpos($ajs, "rmf('--skill', s)") !== false);
+// Desktop Skills manager renders the built-in section (badge + customize-to-override).
+ok('desktop Skills manager shows built-ins (badge + override)',
+    strpos($ajs, 'Built-in team-skills') !== false && strpos($ajs, 's.builtin') !== false);
 
 echo "\n== Graph memory ==\n";
 if (preg_match('/class Memory \{.*?\n\}/s', $src, $mm)) {
@@ -976,7 +1018,7 @@ ok('skill tool is read-only', strpos($src, "'summarize', 'skill'") !== false);
 
 echo "\n== Crew team skills ==\n";
 if (preg_match('/class CrewSkills \{.*?\n\}/s', $src, $cs)) {
-    eval($cs[0]);
+    if (!class_exists('CrewSkills')) eval($cs[0]);
     $ecom = CrewSkills::forFocus('An e-commerce site — catalog, cart, checkout, payments, orders.');
     $enames = array_map(fn($s) => $s['name'], $ecom);
     ok('forFocus matches e-commerce → payments-money', in_array('payments-money', $enames, true));
@@ -999,7 +1041,7 @@ if (preg_match('/class CrewSkills \{.*?\n\}/s', $src, $cs)) {
     @exec('rm -rf ' . escapeshellarg($tmpWt));
 } else { ok('CrewSkills class extractable', false); }
 // Crew wiring: focus → team skills → materialized into worktrees
-ok('crew computes team skills from focus', strpos($src, 'CrewSkills::forFocus($focus)') !== false);
+ok('crew computes team skills from focus', strpos($src, 'CrewSkills::resolve($focus, $opts[\'forceSkills\'] ?? [])') !== false);
 ok('crew materializes skills into worktrees', strpos($src, 'CrewSkills::materialize($teamSkills, $wt)') !== false);
 ok('crew --no-skills flag wired', strpos($src, "'--no-skills'") !== false);
 // /crew slash command exposes per-role models + focus
@@ -1398,7 +1440,7 @@ ok('temperature dropdown wired across UI (binding + select + module)',
 ok('crew per-role models read crew.<role>Model config when no flag', substr_count($crewSrc, "Config::get('crew.' . \$key, '')") >= 2);
 // Team skills: templates' focus auto-matches a domain-skill library, seeded into worktrees.
 $teamSkillsSrc = (string)@file_get_contents($repoRoot . '/src/86-team-skills.php');
-ok('crew matches team skills by focus + seeds them into worktrees', strpos($crewSrc, 'CrewSkills::forFocus(') !== false &&
+ok('crew matches team skills by focus + seeds them into worktrees', strpos($crewSrc, 'CrewSkills::resolve(') !== false &&
     strpos($crewSrc, 'CrewSkills::materialize(') !== false);
 ok('Director plan de-duplicates overlapping subtasks', strpos($crewSrc, 'function dedupeSubtasks(') !== false &&
     strpos($crewSrc, 'dedupeSubtasks(self::planOnce(') !== false);

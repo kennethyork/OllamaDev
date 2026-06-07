@@ -45,9 +45,10 @@ class Crew {
         // Amplify: trade abundant free local compute for quality — N-sample plan
         // self-consistency + an N-pass adversarial audit panel. 0/1 = off.
         $amplify = max(1, (int)($opts['amplify'] ?? Config::get('crew.amplify', 1)));
-        // Per-team skill packs: starter skills matched to the team's focus, loaded
-        // into each coder's worktree so they pick up domain conventions on demand.
-        $teamSkills = ($opts['skills'] ?? true) !== false ? CrewSkills::forFocus($focus) : [];
+        // Per-team skill packs: starter skills matched to the team's focus (plus any
+        // forced by name via --skill, e.g. from a crew template), loaded into each
+        // coder's worktree so they pick up domain conventions on demand.
+        $teamSkills = ($opts['skills'] ?? true) !== false ? CrewSkills::resolve($focus, $opts['forceSkills'] ?? []) : [];
 
         $base = self::sh('git rev-parse --abbrev-ref HEAD');
         $baseCommit = self::sh('git rev-parse HEAD');
@@ -106,7 +107,7 @@ class Crew {
 
         // Persist the full plan (incl. subtask prompts + branch names) so this run
         // is resumable from disk if it's interrupted. Only the reusable opts are kept.
-        $resumeOpts = array_intersect_key($opts, array_flip(['directorModel', 'coderModel', 'auditorModel', 'researcherModel', 'focus', 'max', 'amplify', 'land', 'research', 'audit', 'skills', 'hosts', 'ideas', 'memory']));
+        $resumeOpts = array_intersect_key($opts, array_flip(['directorModel', 'coderModel', 'auditorModel', 'researcherModel', 'focus', 'max', 'amplify', 'land', 'research', 'audit', 'skills', 'hosts', 'ideas', 'memory', 'forceSkills']));
         $diskPlan = [];
         foreach ($subtasks as $i => $st) {
             $n = $i + 1; $title = $st['title'] ?? ('task ' . $n);
@@ -310,7 +311,7 @@ class Crew {
         $amplify = max(1, (int)($opts['amplify'] ?? 1));
         $maxIter = max(2, (int)Config::get('crew.coderIterations', 10));
         $focus = trim((string)($opts['focus'] ?? ''));
-        $teamSkills = ($opts['skills'] ?? true) !== false ? CrewSkills::forFocus($focus) : [];
+        $teamSkills = ($opts['skills'] ?? true) !== false ? CrewSkills::resolve($focus, $opts['forceSkills'] ?? []) : [];
         $subtasks = is_array($run['subtasks'] ?? null) ? $run['subtasks'] : [];
         // Re-use the shared research vault if it survived.
         $research = (string)@file_get_contents(Config::dataDir() . '/crew/' . $runId . '/research.md') ?: '';

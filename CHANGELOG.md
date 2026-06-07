@@ -1,6 +1,13 @@
 # Changelog
 
-## v4.8.44 (2026-06-07)
+## v4.8.45 (2026-06-07)
+
+### Added
+- **Crew templates now carry their own skills.** Picking a template forces the matching built-in team-skill into the run regardless of focus: **Tests / Feature / Bug fix → `testing-discipline`**, **Refactor → `refactor-safety`**, **Docs → `docs-writing`**, **Audit → `security-hardening`**. New CLI flag `crew --skill <name>` (repeatable, or `--skills a,b,c`) does the same from the terminal; domain teams still add more by focus on top.
+- **The 31 built-in team-skills are now browsable in the Skills manager** (desktop + web), not just materialized into coder worktrees during a crew run. Each shows a **built-in** badge; "customize" loads it into the editor and **Save creates your own copy that overrides it**. `skills list --json` and `skills show <name> --json` now include the built-ins (with a `builtin` flag), and `skills show` can display any starter's full body.
+
+### Changed
+- Crew skill selection moved from focus-only matching to `CrewSkills::resolve(focus, forced)` — forced-by-name skills are always kept (never dropped by the 5-skill cap), then focus matches fill the rest, deduped. Forced skills persist across `crew resume`.
 
 ### Changed
 - **Free is now the default terminal layout.** New users (and anyone who hasn't picked a mode) open in Free — draggable, resizable, overlapping windows. Tiled is still one click away via the **⊞ Tiled / ⮻ Free** toggle, and an explicit Tiled choice is remembered as before.

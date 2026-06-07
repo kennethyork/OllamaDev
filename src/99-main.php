@@ -1123,8 +1123,10 @@ if ($argc >= 2 && $argv[1] === 'skills') {
     $jsonMode = in_array('--json', $argv, true);
     // JSON surfaces for the desktop Skills manager (list / show / save).
     if (($sub === 'list' || $sub === 'ls') && $jsonMode) {
+        // The manager shows your disk skills AND the built-in team-skills (so the
+        // 28 starters are browsable, not just materialized during a crew run).
         $out = [];
-        foreach (Skills::all() as $s) $out[] = ['name' => $s['name'], 'description' => $s['description'] ?? '', 'dir' => $s['dir'] ?? ''];
+        foreach (Skills::listForManager() as $s) $out[] = ['name' => $s['name'], 'description' => $s['description'] ?? '', 'dir' => $s['dir'] ?? '', 'builtin' => !empty($s['builtin'])];
         echo json_encode(['skills' => $out]); exit(0);
     }
     if ($sub === 'show' || $sub === 'get') {
@@ -1133,7 +1135,7 @@ if ($argc >= 2 && $argv[1] === 'skills') {
         if ($jsonMode) {
             if (!$s) { echo json_encode(['error' => 'not found']); exit(0); }
             $body = preg_replace('/^---\s*\n.*?\n---\s*\n/s', '', (string)($s['body'] ?? ''));
-            echo json_encode(['name' => $s['name'], 'description' => $s['description'] ?? '', 'body' => ltrim((string)$body), 'files' => $s['files'] ?? []]); exit(0);
+            echo json_encode(['name' => $s['name'], 'description' => $s['description'] ?? '', 'body' => ltrim((string)$body), 'files' => $s['files'] ?? [], 'builtin' => !empty($s['builtin'])]); exit(0);
         }
         if (!$s) { echo "No such skill: $name\n"; exit(1); }
         echo ($s['body'] ?? '') . "\n"; exit(0);
@@ -1715,6 +1717,15 @@ if ($cmd === 'chat') {
     if (in_array('--no-research', $argv, true)) $flagOpts['research'] = false;
     if (in_array('--no-audit', $argv, true)) $flagOpts['audit'] = false;
     if (in_array('--no-skills', $argv, true)) $flagOpts['skills'] = false;
+    // --skill <name> (repeatable): force a built-in team-skill in regardless of
+    // focus. Lets a crew template guarantee its matching skill (e.g. tests →
+    // testing-discipline). Also accepts --skills a,b,c.
+    $forceSkills = [];
+    for ($si = 0; $si < count($argv); $si++) {
+        if ($argv[$si] === '--skill' && isset($argv[$si + 1])) $forceSkills[] = $argv[++$si];
+        elseif ($argv[$si] === '--skills' && isset($argv[$si + 1])) foreach (explode(',', $argv[++$si]) as $sk) { $sk = trim($sk); if ($sk !== '') $forceSkills[] = $sk; }
+    }
+    if ($forceSkills) $flagOpts['forceSkills'] = array_values(array_unique($forceSkills));
     if (in_array('--no-ideas', $argv, true)) $flagOpts['ideas'] = false;
     if (in_array('--no-memory', $argv, true)) $flagOpts['memory'] = false;
     if (!empty($flags['hosts'])) $flagOpts['hosts'] = array_values(array_filter(array_map('trim', explode(',', $flags['hosts']))));

@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '4.8.44');
+define('OLLAMADEV_VERSION', '4.8.45');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -6096,9 +6096,10 @@ class Crew {
         // Amplify: trade abundant free local compute for quality — N-sample plan
         // self-consistency + an N-pass adversarial audit panel. 0/1 = off.
         $amplify = max(1, (int)($opts['amplify'] ?? Config::get('crew.amplify', 1)));
-        // Per-team skill packs: starter skills matched to the team's focus, loaded
-        // into each coder's worktree so they pick up domain conventions on demand.
-        $teamSkills = ($opts['skills'] ?? true) !== false ? CrewSkills::forFocus($focus) : [];
+        // Per-team skill packs: starter skills matched to the team's focus (plus any
+        // forced by name via --skill, e.g. from a crew template), loaded into each
+        // coder's worktree so they pick up domain conventions on demand.
+        $teamSkills = ($opts['skills'] ?? true) !== false ? CrewSkills::resolve($focus, $opts['forceSkills'] ?? []) : [];
 
         $base = self::sh('git rev-parse --abbrev-ref HEAD');
         $baseCommit = self::sh('git rev-parse HEAD');
@@ -6157,7 +6158,7 @@ class Crew {
 
         // Persist the full plan (incl. subtask prompts + branch names) so this run
         // is resumable from disk if it's interrupted. Only the reusable opts are kept.
-        $resumeOpts = array_intersect_key($opts, array_flip(['directorModel', 'coderModel', 'auditorModel', 'researcherModel', 'focus', 'max', 'amplify', 'land', 'research', 'audit', 'skills', 'hosts', 'ideas', 'memory']));
+        $resumeOpts = array_intersect_key($opts, array_flip(['directorModel', 'coderModel', 'auditorModel', 'researcherModel', 'focus', 'max', 'amplify', 'land', 'research', 'audit', 'skills', 'hosts', 'ideas', 'memory', 'forceSkills']));
         $diskPlan = [];
         foreach ($subtasks as $i => $st) {
             $n = $i + 1; $title = $st['title'] ?? ('task ' . $n);
@@ -6361,7 +6362,7 @@ class Crew {
         $amplify = max(1, (int)($opts['amplify'] ?? 1));
         $maxIter = max(2, (int)Config::get('crew.coderIterations', 10));
         $focus = trim((string)($opts['focus'] ?? ''));
-        $teamSkills = ($opts['skills'] ?? true) !== false ? CrewSkills::forFocus($focus) : [];
+        $teamSkills = ($opts['skills'] ?? true) !== false ? CrewSkills::resolve($focus, $opts['forceSkills'] ?? []) : [];
         $subtasks = is_array($run['subtasks'] ?? null) ? $run['subtasks'] : [];
         // Re-use the shared research vault if it survived.
         $research = (string)@file_get_contents(Config::dataDir() . '/crew/' . $runId . '/research.md') ?: '';
@@ -7037,7 +7038,9 @@ class Skills {
         return ['name' => $name !== '' ? $name : $fallback, 'description' => $desc];
     }
 
-    // Full skill (body + helper file list) by name, or null.
+    // Full skill (body + helper file list) by name, or null. Falls back to the
+    // built-in team-skill library so the desktop manager can view a built-in's
+    // full body even though it isn't on disk until a crew run materializes it.
     public static function get(string $name): ?array {
         foreach (self::all() as $s) {
             if (strcasecmp($s['name'], $name) === 0) {
@@ -7045,7 +7048,35 @@ class Skills {
                 return $s + ['body' => (string) @file_get_contents($s['file']), 'files' => $files];
             }
         }
+        $lib = CrewSkills::library();
+        $key = strtolower(trim($name));
+        if (isset($lib[$key])) {
+            return ['name' => $key, 'description' => $lib[$key]['description'],
+                'body' => $lib[$key]['body'], 'files' => [], 'builtin' => true];
+        }
         return null;
+    }
+
+    // Built-in team-skills (from CrewSkills) as skill-shaped entries, EXCLUDING any
+    // name already defined on disk (a user skill of the same name wins).
+    public static function builtins(): array {
+        $onDisk = array_change_key_case(self::all(), CASE_LOWER);
+        $out = [];
+        foreach (CrewSkills::library() as $name => $s) {
+            if (isset($onDisk[strtolower($name)])) continue;
+            $out[] = ['name' => $name, 'description' => $s['description'], 'builtin' => true];
+        }
+        return $out;
+    }
+
+    // Everything the desktop/web Skills manager should show: your disk skills first
+    // (builtin=false), then the built-in team-skills (builtin=true). Each entry has
+    // name, description, builtin; disk entries also carry dir.
+    public static function listForManager(): array {
+        $out = [];
+        foreach (self::all() as $s) $out[] = ['name' => $s['name'], 'description' => $s['description'], 'dir' => $s['dir'], 'builtin' => false];
+        foreach (self::builtins() as $s) $out[] = $s;
+        return $out;
     }
 
     // "- name: description" lines for the system prompt (empty if no skills).
@@ -7403,7 +7434,7 @@ class TerminalManager
 // ~/.ollamadev/skills wins (we never clobber a customized one).
 class CrewSkills {
     // name => ['triggers' => [...], 'description' => '...', 'body' => "..."]
-    private static function library(): array {
+    public static function library(): array {
         return [
             'responsive-design' => [
                 'triggers' => ['responsive', 'website', 'landing page', 'web app', 'pwa', 'frontend', 'spa', 'dashboard'],
@@ -7561,6 +7592,29 @@ class CrewSkills {
                 'body' => "# docs-writing\n\n- Lead with what it does and a copy-paste quickstart that works.\n- Show runnable examples; keep them tested/accurate.\n- Document the why and the gotchas, not just the API surface.\n- Use clear headings and consistent terminology; link related pages.\n- Keep docs next to the code and update them with the change.\n",
             ],
         ];
+    }
+
+    // Specific built-in skills requested by name (e.g. a crew template forcing
+    // 'testing-discipline'). Unknown names are ignored. Returns skill-shaped entries.
+    public static function byNames(array $names): array {
+        $lib = self::library();
+        $out = [];
+        foreach ($names as $n) {
+            $n = strtolower(trim((string)$n));
+            if ($n !== '' && isset($lib[$n])) {
+                $out[$n] = ['name' => $n, 'description' => $lib[$n]['description'], 'body' => $lib[$n]['body']];
+            }
+        }
+        return array_values($out);
+    }
+
+    // The full skill set for a crew run: forced-by-name skills (always included,
+    // never dropped by the cap) plus the focus-matched starters, deduped by name.
+    public static function resolve(string $focus, array $forceNames = [], int $cap = 5): array {
+        $merged = [];
+        foreach (self::byNames($forceNames) as $s) $merged[$s['name']] = $s;   // forced first — kept
+        foreach (self::forFocus($focus, $cap) as $s) if (!isset($merged[$s['name']])) $merged[$s['name']] = $s;
+        return array_values($merged);
     }
 
     // Starter skills whose triggers appear in the focus text (most-specific first, capped).
@@ -10345,8 +10399,10 @@ if ($argc >= 2 && $argv[1] === 'skills') {
     $jsonMode = in_array('--json', $argv, true);
     // JSON surfaces for the desktop Skills manager (list / show / save).
     if (($sub === 'list' || $sub === 'ls') && $jsonMode) {
+        // The manager shows your disk skills AND the built-in team-skills (so the
+        // 28 starters are browsable, not just materialized during a crew run).
         $out = [];
-        foreach (Skills::all() as $s) $out[] = ['name' => $s['name'], 'description' => $s['description'] ?? '', 'dir' => $s['dir'] ?? ''];
+        foreach (Skills::listForManager() as $s) $out[] = ['name' => $s['name'], 'description' => $s['description'] ?? '', 'dir' => $s['dir'] ?? '', 'builtin' => !empty($s['builtin'])];
         echo json_encode(['skills' => $out]); exit(0);
     }
     if ($sub === 'show' || $sub === 'get') {
@@ -10355,7 +10411,7 @@ if ($argc >= 2 && $argv[1] === 'skills') {
         if ($jsonMode) {
             if (!$s) { echo json_encode(['error' => 'not found']); exit(0); }
             $body = preg_replace('/^---\s*\n.*?\n---\s*\n/s', '', (string)($s['body'] ?? ''));
-            echo json_encode(['name' => $s['name'], 'description' => $s['description'] ?? '', 'body' => ltrim((string)$body), 'files' => $s['files'] ?? []]); exit(0);
+            echo json_encode(['name' => $s['name'], 'description' => $s['description'] ?? '', 'body' => ltrim((string)$body), 'files' => $s['files'] ?? [], 'builtin' => !empty($s['builtin'])]); exit(0);
         }
         if (!$s) { echo "No such skill: $name\n"; exit(1); }
         echo ($s['body'] ?? '') . "\n"; exit(0);
@@ -10937,6 +10993,15 @@ if ($cmd === 'chat') {
     if (in_array('--no-research', $argv, true)) $flagOpts['research'] = false;
     if (in_array('--no-audit', $argv, true)) $flagOpts['audit'] = false;
     if (in_array('--no-skills', $argv, true)) $flagOpts['skills'] = false;
+    // --skill <name> (repeatable): force a built-in team-skill in regardless of
+    // focus. Lets a crew template guarantee its matching skill (e.g. tests →
+    // testing-discipline). Also accepts --skills a,b,c.
+    $forceSkills = [];
+    for ($si = 0; $si < count($argv); $si++) {
+        if ($argv[$si] === '--skill' && isset($argv[$si + 1])) $forceSkills[] = $argv[++$si];
+        elseif ($argv[$si] === '--skills' && isset($argv[$si + 1])) foreach (explode(',', $argv[++$si]) as $sk) { $sk = trim($sk); if ($sk !== '') $forceSkills[] = $sk; }
+    }
+    if ($forceSkills) $flagOpts['forceSkills'] = array_values(array_unique($forceSkills));
     if (in_array('--no-ideas', $argv, true)) $flagOpts['ideas'] = false;
     if (in_array('--no-memory', $argv, true)) $flagOpts['memory'] = false;
     if (!empty($flags['hosts'])) $flagOpts['hosts'] = array_values(array_filter(array_map('trim', explode(',', $flags['hosts']))));

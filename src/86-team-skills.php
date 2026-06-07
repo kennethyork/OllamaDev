@@ -8,7 +8,7 @@
 // ~/.ollamadev/skills wins (we never clobber a customized one).
 class CrewSkills {
     // name => ['triggers' => [...], 'description' => '...', 'body' => "..."]
-    private static function library(): array {
+    public static function library(): array {
         return [
             'responsive-design' => [
                 'triggers' => ['responsive', 'website', 'landing page', 'web app', 'pwa', 'frontend', 'spa', 'dashboard'],
@@ -166,6 +166,29 @@ class CrewSkills {
                 'body' => "# docs-writing\n\n- Lead with what it does and a copy-paste quickstart that works.\n- Show runnable examples; keep them tested/accurate.\n- Document the why and the gotchas, not just the API surface.\n- Use clear headings and consistent terminology; link related pages.\n- Keep docs next to the code and update them with the change.\n",
             ],
         ];
+    }
+
+    // Specific built-in skills requested by name (e.g. a crew template forcing
+    // 'testing-discipline'). Unknown names are ignored. Returns skill-shaped entries.
+    public static function byNames(array $names): array {
+        $lib = self::library();
+        $out = [];
+        foreach ($names as $n) {
+            $n = strtolower(trim((string)$n));
+            if ($n !== '' && isset($lib[$n])) {
+                $out[$n] = ['name' => $n, 'description' => $lib[$n]['description'], 'body' => $lib[$n]['body']];
+            }
+        }
+        return array_values($out);
+    }
+
+    // The full skill set for a crew run: forced-by-name skills (always included,
+    // never dropped by the cap) plus the focus-matched starters, deduped by name.
+    public static function resolve(string $focus, array $forceNames = [], int $cap = 5): array {
+        $merged = [];
+        foreach (self::byNames($forceNames) as $s) $merged[$s['name']] = $s;   // forced first — kept
+        foreach (self::forFocus($focus, $cap) as $s) if (!isset($merged[$s['name']])) $merged[$s['name']] = $s;
+        return array_values($merged);
     }
 
     // Starter skills whose triggers appear in the focus text (most-specific first, capped).

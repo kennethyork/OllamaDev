@@ -47,7 +47,9 @@ class Skills {
         return ['name' => $name !== '' ? $name : $fallback, 'description' => $desc];
     }
 
-    // Full skill (body + helper file list) by name, or null.
+    // Full skill (body + helper file list) by name, or null. Falls back to the
+    // built-in team-skill library so the desktop manager can view a built-in's
+    // full body even though it isn't on disk until a crew run materializes it.
     public static function get(string $name): ?array {
         foreach (self::all() as $s) {
             if (strcasecmp($s['name'], $name) === 0) {
@@ -55,7 +57,35 @@ class Skills {
                 return $s + ['body' => (string) @file_get_contents($s['file']), 'files' => $files];
             }
         }
+        $lib = CrewSkills::library();
+        $key = strtolower(trim($name));
+        if (isset($lib[$key])) {
+            return ['name' => $key, 'description' => $lib[$key]['description'],
+                'body' => $lib[$key]['body'], 'files' => [], 'builtin' => true];
+        }
         return null;
+    }
+
+    // Built-in team-skills (from CrewSkills) as skill-shaped entries, EXCLUDING any
+    // name already defined on disk (a user skill of the same name wins).
+    public static function builtins(): array {
+        $onDisk = array_change_key_case(self::all(), CASE_LOWER);
+        $out = [];
+        foreach (CrewSkills::library() as $name => $s) {
+            if (isset($onDisk[strtolower($name)])) continue;
+            $out[] = ['name' => $name, 'description' => $s['description'], 'builtin' => true];
+        }
+        return $out;
+    }
+
+    // Everything the desktop/web Skills manager should show: your disk skills first
+    // (builtin=false), then the built-in team-skills (builtin=true). Each entry has
+    // name, description, builtin; disk entries also carry dir.
+    public static function listForManager(): array {
+        $out = [];
+        foreach (self::all() as $s) $out[] = ['name' => $s['name'], 'description' => $s['description'], 'dir' => $s['dir'], 'builtin' => false];
+        foreach (self::builtins() as $s) $out[] = $s;
+        return $out;
     }
 
     // "- name: description" lines for the system prompt (empty if no skills).
