@@ -85,14 +85,24 @@ $src = file_get_contents($BIN);
 
 // extractJsonToolCalls + parseToolCalls live in the Agent class; pull the two
 // static/instance methods we want to exercise.
-if (preg_match('/public static function extractJsonToolCalls\(string \$content\): array \{.*?\n    \}/s', $src, $mE)) {
-    eval('class _P { ' . $mE[0] . ' }');
+if (preg_match('/public static function extractJsonToolCalls\(string \$content\): array \{.*?\n    \}/s', $src, $mE)
+    && preg_match('/public static function repairJson\(string \$s\): \?string \{.*?\n    \}/s', $src, $mR)) {
+    eval('class _P { ' . $mE[0] . "\n" . $mR[0] . ' }');
     $calls = _P::extractJsonToolCalls('blah <tool_code>{"name":"bash","arguments":{"command":"echo hi"}}');
     ok('extractJsonToolCalls handles missing close tag', count($calls) === 1 && $calls[0]['name'] === 'bash');
     $calls2 = _P::extractJsonToolCalls('{"name":"write","arguments":{"file_path":"a.txt","content":"x"}}');
     ok('extractJsonToolCalls parses nested args', count($calls2) === 1 && ($calls2[0]['params']['file_path'] ?? '') === 'a.txt');
     $calls3 = _P::extractJsonToolCalls('no tool calls here at all');
     ok('extractJsonToolCalls returns none for plain text', count($calls3) === 0);
+    // Small-model reliability: recover ALMOST-valid JSON tool calls instead of
+    // dropping them (which reads as "the model described it but did nothing").
+    $r1 = _P::extractJsonToolCalls('{"name":"write","arguments":{"file_path":"a.txt","done":True,}}');  // trailing comma + Python True
+    ok('recovers a tool call with a trailing comma + Python True', count($r1) === 1 && $r1[0]['name'] === 'write' && ($r1[0]['params']['file_path'] ?? '') === 'a.txt');
+    $r2 = _P::extractJsonToolCalls("{name: 'ls', params: {path: '/tmp'}}");                              // unquoted keys + single quotes
+    ok('recovers a tool call with unquoted keys + single quotes', count($r2) === 1 && $r2[0]['name'] === 'ls' && ($r2[0]['params']['path'] ?? '') === '/tmp');
+    ok('repairJson returns null for genuinely-not-JSON', _P::repairJson('this is just prose') === null);
+    // A VALID tool call is never sent through repair (repair only fires on parse failure).
+    ok('valid JSON tool call parses without repair', count(_P::extractJsonToolCalls('{"name":"bash","arguments":{"command":"ls"}}')) === 1);
 } else {
     ok('extractJsonToolCalls extractable', false, 'method not found in binary');
 }
@@ -1805,6 +1815,17 @@ ok('mcp tools/call surfaces tool errors', strpos($src, 'CmdError::isError($text)
     strpos($src, 'function isError(string $result)') !== false);
 // R9. Plan mode propagates into delegated subagents (they can't mutate either).
 ok('plan mode propagates into subagents', strpos($src, "\$parentMode === 'plan') \$subMode = 'readonly'") !== false);
+
+// Small-model reliability: "described but didn't call a tool" nudge in the agent loop.
+ok('agent loop nudges a described-but-unacted edit once', strpos($src, '$nudgedAct') !== false &&
+    strpos($src, 'self::looksLikeUnactedEdit($response)') !== false &&
+    strpos($src, 'You described the change but did NOT call a tool') !== false);
+if (preg_match('/private static function looksLikeUnactedEdit\(string \$response\): bool \{.*?\n    \}/s', $src, $mL)) {
+    eval('class _LU { ' . str_replace('private static', 'public static', $mL[0]) . ' }');
+    ok('looksLikeUnactedEdit flags a fenced code block', _LU::looksLikeUnactedEdit("Sure! ```php\n<?php function f(){ return 1; }\n```") === true);
+    ok('looksLikeUnactedEdit flags bare source', _LU::looksLikeUnactedEdit("<?php echo 1;") === true);
+    ok('looksLikeUnactedEdit ignores a plain answer', _LU::looksLikeUnactedEdit("The capital of France is Paris.") === false);
+}
 
 echo "\n========================\n";
 echo "Results: $pass passed, $fail failed\n";

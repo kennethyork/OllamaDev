@@ -1236,9 +1236,18 @@ $GLOBALS['currentSessionModel'] = null;
     // Run the model, execute any tool calls, feed results back, and repeat
     // until the model produces an answer with no tool calls (or we hit the cap).
     // $emit is an optional callback for streaming output to the terminal.
+    // Heuristic: did the model output a real code block / explicit "I'll create the
+    // file" intent, but (this turn) call no tool? Used to nudge it to actually act.
+    private static function looksLikeUnactedEdit(string $response): bool {
+        if (preg_match('/```[\s\S]{40,}/', $response)) return true;                 // a substantial fenced block
+        if (preg_match('/<\?php|#!\/|^\s*(?:function|def|class)\s+\w+/mi', $response)) return true;  // bare source
+        return false;
+    }
+
     private function agenticLoop(?callable $emit): string {
         $maxIter = (int)Config::get('agents.maxIterations', 8);
         $final = '';
+        $nudgedAct = false;   // one-shot "you described it but didn't call a tool" nudge
         if (class_exists('Interrupt')) Interrupt::begin();
         try {
         for ($i = 0; $i < $maxIter; $i++) {
@@ -1263,6 +1272,15 @@ $GLOBALS['currentSessionModel'] = null;
 
             $toolResults = $this->agent->executeCalls($calls);
             if (empty($toolResults)) {
+                // Described-not-called: the model wrote a code block / said it would
+                // make a change, but issued no tool call, so nothing happened — the
+                // single most common small-model failure. Nudge it ONCE to actually
+                // call write/edit, then let it retry instead of ending the turn.
+                if (!$nudgedAct && $i < $maxIter - 1 && !$this->agent->isChatMode() && self::looksLikeUnactedEdit($response)) {
+                    $nudgedAct = true;
+                    $this->addMessage('user', "You described the change but did NOT call a tool, so nothing was actually written. Make the change NOW by calling the write or edit tool with the file's full contents. Output ONLY the tool call — no prose, no ``` fences.");
+                    continue;
+                }
                 if ($emit) $emit($clean !== '' ? $clean : trim($response));
                 return $clean !== '' ? $clean : trim($response);
             }

@@ -1,5 +1,14 @@
 # Changelog
 
+## v4.8.57 (2026-06-07) — small-model tool-calling reliability
+
+The biggest real-world limiter for a local agent isn't the harness — it's whether a small model's tool calls actually land. Two fixes for the two most common failure modes, **measured on the eval suite**:
+
+- **Recover malformed tool calls instead of dropping them.** Small models often emit *almost*-valid JSON (trailing commas, single quotes, Python `True`/`None`, unquoted keys, smart quotes). Previously `json_decode` failed and the call vanished — which reads as "the model described it but did nothing." A conservative `repairJson` now fixes those and re-parses; it only runs *after* a strict parse fails and only accepts a result that actually parses, so it can recover a broken call but never corrupt a valid one.
+- **Nudge "described-but-didn't-call".** When a model writes a code block / says it'll make a change but issues no tool call, the agent loop now nudges it once to actually call write/edit, then lets it retry — instead of ending the turn with nothing written.
+
+**Measured impact** (`ollamadev eval --model qwen2.5-coder:7b`): pass rate went from a **45%** baseline to **55–65%** across runs (the suite is non-deterministic on a small model, so the magnitude varies; both post-change runs beat the baseline). The repair/nudge mechanisms themselves are covered by deterministic unit tests.
+
 ## v4.8.56 (2026-06-07) — full-screen TUI support (vim/htop) in the terminal
 
 ### Added

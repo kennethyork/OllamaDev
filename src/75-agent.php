@@ -384,6 +384,11 @@ User: run the tests
             if ($end < 0) break; // unbalanced from here on
             $raw = substr($content, $i, $end - $i + 1);
             $json = json_decode($raw, true);
+            // Small models often emit ALMOST-valid JSON (trailing commas, single
+            // quotes, Python True/None, unquoted keys). Rather than silently drop
+            // the call — which reads to the user as "the model described it but did
+            // nothing" — attempt a conservative repair before giving up.
+            if (!is_array($json)) { $rep = self::repairJson($raw); if ($rep !== null) $json = json_decode($rep, true); }
             // Accept both {"name":..} (text protocol) and {"tool":..} (structured envelope shape).
             $tn = (isset($json['name']) && is_string($json['name'])) ? $json['name']
                 : ((isset($json['tool']) && is_string($json['tool'])) ? $json['tool'] : null);
@@ -395,6 +400,27 @@ User: run the tests
             }
         }
         return $calls;
+    }
+
+    // Conservatively repair the almost-valid JSON small models emit, so a tool call
+    // isn't silently dropped. ONLY called after a strict parse already failed, and
+    // returns null unless the repair actually parses — so it can only recover a
+    // broken call, never corrupt a valid one (valid JSON never reaches here).
+    public static function repairJson(string $s): ?string {
+        $r = $s;
+        // Python/JS literals in value position → JSON.
+        $r = preg_replace('/:\s*True\b/', ': true', $r);
+        $r = preg_replace('/:\s*False\b/', ': false', $r);
+        $r = preg_replace('/:\s*(None|nil|undefined)\b/', ': null', $r);
+        // Single-quoted strings (no embedded double quote) → double-quoted.
+        $r = preg_replace("/'([^'\"]*)'/", '"$1"', $r);
+        // Unquoted object keys: {key: ..} / , key: .. → "key":
+        $r = preg_replace('/([{,]\s*)([A-Za-z_]\w*)(\s*):/', '$1"$2"$3:', $r);
+        // Trailing commas before } or ].
+        $r = preg_replace('/,(\s*[}\]])/', '$1', $r);
+        // Smart/curly quotes a model may paste → straight quotes.
+        $r = strtr($r, ['“' => '"', '”' => '"', '’' => "'", '‘' => "'"]);
+        return is_array(json_decode($r, true)) ? $r : null;
     }
 
     // Remove tool-call markup (tags + JSON objects) from text meant for display.
