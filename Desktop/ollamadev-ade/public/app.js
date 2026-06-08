@@ -241,6 +241,210 @@ TermGrid.prototype.renderHtml = function () {
     return out.join('');
 };
 
+// ---------- CanvasRenderer: GPU-composited terminal via a single <canvas> --------
+// Opt-in alternative to the DOM renderer. Instead of thousands of <div>/<span>
+// nodes, it keeps a scrollback cell buffer and PAINTS the visible viewport into one
+// canvas — a single hardware-composited layer with constant memory and dirty-cell
+// repaint, so it stays fast under firehose output. Alt-screen TUIs reuse TermGrid.
+// Pure vanilla (Canvas 2D, a browser built-in); no library, no WebGL.
+function cellEq(a, b) {
+    return a.ch === b.ch && a.fg === b.fg && a.bg === b.bg && a.bold === b.bold &&
+        a.dim === b.dim && a.italic === b.italic && a.underline === b.underline && a.reverse === b.reverse;
+}
+function blankCell() { return { ch: ' ', fg: null, bg: null, bold: false, dim: false, italic: false, underline: false, reverse: false }; }
+function CanvasRenderer(screenEl, opts) {
+    opts = opts || {};
+    this.fg = opts.fg || '#c9d1d9'; this.bg = opts.bg || '#0d1117';
+    this.maxLines = opts.maxLines || 5000;
+    this.screen = screenEl;
+    this.canvas = document.createElement('canvas');
+    this.canvas.className = 'term-canvas';
+    this.ctx = this.canvas.getContext('2d', { alpha: false });
+    if (screenEl) screenEl.appendChild(this.canvas);
+    this.lines = [this.newRow(1)];      // scrollback (each row is a growable cell array)
+    this.cols = 80; this.rows = 24; this.cw = 8; this.chh = 16; this.dpr = 1;
+    this.cx = 0; this.cy = 0; this.view = 0;   // view = scrollback offset from bottom
+    this.st = blankCell();
+    this.painted = [];                  // last-painted snapshot for dirty-diff
+    this.alt = false; this.grid = null;
+    this.sel = null;                    // {a:{r,c}, b:{r,c}} selection in viewport coords
+    this._bindMouse();
+}
+CanvasRenderer.prototype.newRow = function (n) { var a = []; for (var i = 0; i < (n || this.cols); i++) a.push(blankCell()); return a; };
+CanvasRenderer.prototype.dispose = function () { if (this.canvas && this.canvas.parentNode) this.canvas.parentNode.removeChild(this.canvas); };
+// Resize: set the canvas backing store (×dpr for crisp text) and remember geometry.
+CanvasRenderer.prototype.resize = function (cols, rows, cw, ch, dpr) {
+    this.cols = Math.max(2, cols | 0); this.rows = Math.max(2, rows | 0);
+    this.cw = cw || this.cw; this.chh = ch || this.chh; this.dpr = dpr || this.dpr || 1;
+    var W = Math.ceil(this.cols * this.cw), H = Math.ceil(this.rows * this.chh);
+    this.canvas.style.width = W + 'px'; this.canvas.style.height = H + 'px';
+    this.canvas.width = Math.ceil(W * this.dpr); this.canvas.height = Math.ceil(H * this.dpr);
+    this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    this.ctx.textBaseline = 'top';
+    if (this.alt && this.grid) this.grid.resize(this.cols, this.rows);
+    this.painted = []; this.fullRepaint();
+};
+// Active (bottom) screen rows of the scrollback buffer.
+CanvasRenderer.prototype.base = function () { return Math.max(0, this.lines.length - this.rows); };
+CanvasRenderer.prototype.ensureRows = function () {
+    while (this.lines.length < this.rows) this.lines.push(this.newRow());
+};
+CanvasRenderer.prototype.lf = function () {
+    if (this.cy < this.rows - 1) { this.cy++; return; }
+    this.lines.push(this.newRow());
+    if (this.lines.length > this.maxLines) this.lines.shift();
+};
+CanvasRenderer.prototype.cr = function () { this.cx = 0; };
+CanvasRenderer.prototype.bs = function () { if (this.cx > 0) this.cx--; };
+CanvasRenderer.prototype.curRow = function () { this.ensureRows(); var r = this.lines[this.base() + this.cy]; while (r.length < this.cols) r.push(blankCell()); return r; };
+CanvasRenderer.prototype.putChar = function (ch) {
+    if (this.cx >= this.cols) { this.cx = 0; this.lf(); }
+    var row = this.curRow(), cell = row[this.cx];
+    cell.ch = ch; cell.fg = this.st.fg; cell.bg = this.st.bg; cell.bold = this.st.bold;
+    cell.dim = this.st.dim; cell.italic = this.st.italic; cell.underline = this.st.underline; cell.reverse = this.st.reverse;
+    this.cx++;
+};
+CanvasRenderer.prototype.eraseLine = function (m) {
+    var row = this.curRow(), a = 0, b = this.cols - 1;
+    if (m === 0) a = this.cx; else if (m === 1) b = this.cx;
+    for (var c = a; c <= b; c++) row[c] = blankCell();
+};
+CanvasRenderer.prototype.enterAlt = function () { if (this.alt) return; this.alt = true; this.grid = new TermGrid(this.cols, this.rows); this.painted = []; };
+CanvasRenderer.prototype.leaveAlt = function () { if (!this.alt) return; this.alt = false; this.grid = null; this.painted = []; this.view = 0; this.fullRepaint(); };
+// Feed pty bytes. Reuses the shared SGR parser + TermGrid for the alt screen.
+CanvasRenderer.prototype.write = function (text) {
+    var i = 0;
+    while (i < text.length) {
+        var ch = text[i];
+        if (ch === '\x1b') {
+            var m = /^\x1b\[([0-9;?]*)([A-Za-z@])/.exec(text.slice(i));
+            if (m) {
+                var pp = m[1], fin = m[2];
+                if (/^\?(1049|47|1047)$/.test(pp) && (fin === 'h' || fin === 'l')) { if (fin === 'h') this.enterAlt(); else this.leaveAlt(); }
+                else if (this.alt && this.grid) { if (fin !== 'h' && fin !== 'l') this.grid.csi(pp, fin); }
+                else if (fin === 'm') parseSgr(this.st, pp);
+                else if (fin === 'K') this.eraseLine((parseInt(pp, 10) || 0));
+                else if (fin === 'J') { if ((parseInt(pp, 10) || 0) >= 2) { for (var z = 0; z < this.rows; z++) this.lines[this.base() + z] = this.newRow(); this.cx = 0; this.cy = 0; } else this.eraseLine(0); }
+                else if (fin === 'H' || fin === 'f') { var ps = pp.split(';'); this.cy = Math.min(this.rows - 1, Math.max(0, (parseInt(ps[0], 10) || 1) - 1)); this.cx = Math.min(this.cols - 1, Math.max(0, (parseInt(ps[1], 10) || 1) - 1)); }
+                else if (fin === 'A') this.cy = Math.max(0, this.cy - (parseInt(pp, 10) || 1));
+                else if (fin === 'B') this.cy = Math.min(this.rows - 1, this.cy + (parseInt(pp, 10) || 1));
+                else if (fin === 'C') this.cx = Math.min(this.cols - 1, this.cx + (parseInt(pp, 10) || 1));
+                else if (fin === 'D') this.cx = Math.max(0, this.cx - (parseInt(pp, 10) || 1));
+                else if (fin === 'G') this.cx = Math.min(this.cols - 1, Math.max(0, (parseInt(pp, 10) || 1) - 1));
+                i += m[0].length; continue;
+            }
+            var osc = /^\x1b\][^\x07]*(?:\x07|\x1b\\)/.exec(text.slice(i));
+            if (osc) { i += osc[0].length; continue; }
+            i++; if (this.alt && text[i] && /[A-Za-z=>]/.test(text[i])) i++; continue;
+        }
+        if (this.alt && this.grid) {
+            if (ch === '\r') { this.grid.cr(); i++; continue; }
+            if (ch === '\n') { this.grid.lf(); i++; continue; }
+            if (ch === '\x08') { this.grid.bs(); i++; continue; }
+            var aj = i; while (aj < text.length && text[aj] !== '\x1b' && '\r\n\x08'.indexOf(text[aj]) < 0) aj++;
+            this.grid.putText(text.slice(i, aj).replace(/[\x00-\x07\x0b-\x1f\x7f]/g, '')); i = aj; continue;
+        }
+        if (ch === '\r') { this.cr(); i++; continue; }
+        if (ch === '\n') { this.lf(); i++; continue; }
+        if (ch === '\x08') { this.bs(); i++; continue; }
+        if (ch === '\t') { var t = 8 - (this.cx % 8); for (var k = 0; k < t; k++) this.putChar(' '); i++; continue; }
+        var j = i; while (j < text.length && text[j] !== '\x1b' && '\r\n\x08\t'.indexOf(text[j]) < 0) j++;
+        var run = text.slice(i, j).replace(/[\x00-\x07\x0b\x0c\x0e-\x1f\x7f]/g, '');
+        for (var p = 0; p < run.length; p++) this.putChar(run[p]); i = j;
+    }
+    this.view = 0;   // new output snaps to the bottom
+    this.paint();
+};
+// The cell grid currently visible in the viewport (alt grid, or scrollback window).
+CanvasRenderer.prototype.viewRows = function () {
+    if (this.alt && this.grid) return this.grid.cells;
+    var start = Math.max(0, this.lines.length - this.rows - this.view), out = [];
+    for (var r = 0; r < this.rows; r++) out.push(this.lines[start + r] || null);
+    return out;
+};
+CanvasRenderer.prototype.fullRepaint = function () { this.painted = []; this.paint(); };
+CanvasRenderer.prototype.paint = function () {
+    if (!this.ctx || !this.canvas.width) return;
+    var self = this;
+    if (this._raf) return;
+    this._raf = (window.requestAnimationFrame || function (f) { return setTimeout(f, 16); })(function () { self._raf = 0; self._paintNow(); });
+};
+CanvasRenderer.prototype._paintNow = function () {
+    var rows = this.viewRows(), ctx = this.ctx, cw = this.cw, ch = this.chh;
+    ctx.font = '13px ' + (getComputedStyle(this.screen).getPropertyValue('--mono') || 'monospace');
+    for (var r = 0; r < this.rows; r++) {
+        var row = rows[r], prow = this.painted[r];
+        for (var c = 0; c < this.cols; c++) {
+            var cell = (row && row[c]) ? row[c] : blankCell();
+            var pc = prow && prow[c];
+            if (pc && cellEq(pc, cell) && !this._inSel(r, c) && !this._wasSel(r, c)) continue;   // unchanged
+            var fg = cell.fg || this.fg, bg = cell.bg || this.bg;
+            if (cell.reverse) { var tmp = fg; fg = bg; bg = tmp; }
+            if (this._inSel(r, c)) { var t2 = fg; fg = this.bg; bg = '#2f6feb'; }   // selection highlight
+            var x = c * cw, y = r * ch;
+            ctx.fillStyle = bg; ctx.fillRect(x, y, cw + 0.5, ch + 0.5);
+            if (cell.ch !== ' ') {
+                ctx.fillStyle = fg;
+                ctx.font = (cell.italic ? 'italic ' : '') + (cell.bold ? 'bold ' : '') + Math.round(ch * 0.78) + 'px ' + ((getComputedStyle(this.screen).getPropertyValue('--mono') || '').trim() || 'monospace');
+                ctx.globalAlpha = cell.dim ? 0.6 : 1;
+                ctx.fillText(cell.ch, x + 1, y + 1);
+                ctx.globalAlpha = 1;
+                if (cell.underline) ctx.fillRect(x, y + ch - 1.5, cw, 1);
+            }
+        }
+    }
+    // snapshot
+    this.painted = []; this._selPainted = this.sel ? this._normSel() : null;
+    for (var rr = 0; rr < this.rows; rr++) { var pr = []; var src = rows[rr]; for (var cc = 0; cc < this.cols; cc++) { var s = (src && src[cc]) ? src[cc] : blankCell(); pr.push({ ch: s.ch, fg: s.fg, bg: s.bg, bold: s.bold, dim: s.dim, italic: s.italic, underline: s.underline, reverse: s.reverse }); } this.painted.push(pr); }
+};
+// ---- selection + copy ----
+CanvasRenderer.prototype._normSel = function () {
+    if (!this.sel) return null;
+    var a = this.sel.a, b = this.sel.b;
+    if (a.r > b.r || (a.r === b.r && a.c > b.c)) { var t = a; a = b; b = t; }
+    return { a: a, b: b };
+};
+CanvasRenderer.prototype._inSel = function (r, c) {
+    var s = this._normSel(); if (!s) return false;
+    if (r < s.a.r || r > s.b.r) return false;
+    if (r === s.a.r && c < s.a.c) return false;
+    if (r === s.b.r && c > s.b.c) return false;
+    return true;
+};
+CanvasRenderer.prototype._wasSel = function (r, c) {
+    var s = this._selPainted; if (!s) return false;
+    if (r < s.a.r || r > s.b.r) return false;
+    if (r === s.a.r && c < s.a.c) return false;
+    if (r === s.b.r && c > s.b.c) return false;
+    return true;
+};
+CanvasRenderer.prototype.selectionText = function () {
+    var s = this._normSel(); if (!s) return '';
+    var rows = this.viewRows(), out = [];
+    for (var r = s.a.r; r <= s.b.r; r++) {
+        var row = rows[r] || [], a = r === s.a.r ? s.a.c : 0, b = r === s.b.r ? s.b.c : this.cols - 1, line = '';
+        for (var c = a; c <= b; c++) line += (row[c] ? row[c].ch : ' ');
+        out.push(line.replace(/\s+$/, ''));
+    }
+    return out.join('\n');
+};
+CanvasRenderer.prototype._xyToCell = function (e) {
+    var rect = this.canvas.getBoundingClientRect();
+    return { r: Math.max(0, Math.min(this.rows - 1, Math.floor((e.clientY - rect.top) / this.chh))), c: Math.max(0, Math.min(this.cols - 1, Math.floor((e.clientX - rect.left) / this.cw))) };
+};
+CanvasRenderer.prototype._bindMouse = function () {
+    var self = this, dragging = false;
+    this.canvas.addEventListener('mousedown', function (e) { if (e.button !== 0) return; dragging = true; var p = self._xyToCell(e); self.sel = { a: p, b: p }; self.paint(); });
+    window.addEventListener('mousemove', function (e) { if (!dragging) return; self.sel.b = self._xyToCell(e); self.paint(); });
+    window.addEventListener('mouseup', function () { if (!dragging) return; dragging = false; var t = self.selectionText(); if (t && navigator.clipboard) try { navigator.clipboard.writeText(t); } catch (x) {} });
+    this.canvas.addEventListener('wheel', function (e) {
+        if (self.alt) return;
+        var max = Math.max(0, self.lines.length - self.rows);
+        self.view = Math.max(0, Math.min(max, self.view + (e.deltaY > 0 ? -3 : 3)));
+        e.preventDefault(); self.fullRepaint();
+    }, { passive: false });
+};
+
 // Map a browser keydown to the byte sequence a real terminal would send, so the
 // pty (and the raw-mode ollamadev CLI inside it) gets live keystrokes.
 function keyToBytes(e) {
@@ -363,6 +567,12 @@ Terminal.prototype.mount = function (host) {
     });
     this.screen.onclick = function () { self.screen.focus(); };
     this.alt = false; this.grid = null; this.gridEl = null;   // alt screen never survives a remount
+    // Opt-in GPU-composited canvas renderer (App.canvasTerm). Default is the DOM
+    // renderer, untouched — so this can never regress the working terminal.
+    if (this.canvasR) { this.canvasR.dispose(); this.canvasR = null; }
+    if (window.App && App.canvasTerm) {
+        try { this.canvasR = new CanvasRenderer(this.screen, { fg: '#c9d1d9', bg: '#0d1117' }); } catch (e) { this.canvasR = null; }
+    }
     if (!this.polling) this.poll();
     setTimeout(function () { self.screen.focus(); self.fit(); }, 0);   // size the pty once laid out
 };
@@ -435,6 +645,7 @@ Terminal.prototype.renderGrid = function () {
 };
 Terminal.prototype.write = function (text) {
     if (!this.screen) return;
+    if (this.canvasR) { this.canvasR.write(text); return; }   // canvas mode: paint, skip the DOM path
     var bottom = this.screen.scrollHeight - this.screen.scrollTop - this.screen.clientHeight < 50;
     var i = 0;
     while (i < text.length) {
@@ -500,6 +711,7 @@ Terminal.prototype.fit = function () {
     if (cols === this._cols && rows === this._rows) return;
     this._cols = cols; this._rows = rows;
     try { window.termResize(this.id, cols, rows); } catch (e) {}
+    if (this.canvasR) this.canvasR.resize(cols, rows, m.cw, m.ch, window.devicePixelRatio || 1);
     if (this.alt && this.grid) { this.grid.resize(cols, rows); this.renderGrid(); }
 };
 Terminal.prototype.poll = function () {
@@ -531,10 +743,11 @@ Terminal.prototype._pollLoop = function () {
     tick();
 };
 Terminal.prototype._closeStream = function () { if (this._es) { try { this._es.close(); } catch (e) {} this._es = null; } };
-Terminal.prototype.close = function () { this.polling = false; this._closeStream(); try { window.termKill(this.id); } catch (e) {} };
+Terminal.prototype._disposeCanvas = function () { if (this.canvasR) { try { this.canvasR.dispose(); } catch (e) {} this.canvasR = null; } };
+Terminal.prototype.close = function () { this.polling = false; this._closeStream(); this._disposeCanvas(); try { window.termKill(this.id); } catch (e) {} };
 // Detach the UI but KEEP the backend pty alive (used when switching workspaces),
 // so re-attaching later resumes the same running session.
-Terminal.prototype.detach = function () { this.polling = false; this._closeStream(); };
+Terminal.prototype.detach = function () { this.polling = false; this._closeStream(); this._disposeCanvas(); };
 
 function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 
@@ -1622,6 +1835,10 @@ var App = {
         // Free is the default; only an explicit 'tiled' choice opts back into the grid.
         try { self.termLayout = localStorage.getItem('ade.termLayout') === 'tiled' ? 'tiled' : 'free'; } catch (e) {}
         if (ta) ta.textContent = self.termLayout === 'free' ? '⮻ Free' : '⊞ Tiled';
+        // Opt-in GPU/canvas terminal renderer (off by default; DOM renderer is the safe default).
+        try { self.canvasTerm = localStorage.getItem('ade.canvasTerm') === 'on'; } catch (e) { self.canvasTerm = false; }
+        var tc = $('#termCanvas');
+        if (tc) { tc.textContent = self.canvasTerm ? '🖼 Canvas' : '🖼 DOM'; tc.onclick = function () { self.setCanvasTerm(!self.canvasTerm); }; }
         $('#layoutBtn').onclick = function () { self.cycleLayout(); };
         // Open-folder modal
         var ofb = $('#openFolderBtn'); if (ofb) ofb.onclick = function () { self.openFolderModal(false); };
@@ -2405,6 +2622,15 @@ var App = {
         });
     },
     // ---- Free-floating layout: drag the header, resize the corner, overlap freely ----
+    // Toggle the GPU/canvas terminal renderer. Re-renders so open terminals remount
+    // with the chosen renderer; the pty keeps running, only the view is rebuilt.
+    setCanvasTerm: function (on) {
+        this.canvasTerm = !!on;
+        try { localStorage.setItem('ade.canvasTerm', on ? 'on' : 'off'); } catch (e) {}
+        var btn = $('#termCanvas'); if (btn) btn.textContent = on ? '🖼 Canvas' : '🖼 DOM';
+        banner(on ? 'canvas renderer on (GPU-composited) — DOM is the default' : 'DOM renderer on', 'ok');
+        this.render();
+    },
     setTermLayout: function (mode) {
         this.termLayout = (mode === 'free') ? 'free' : 'tiled';
         try { localStorage.setItem('ade.termLayout', this.termLayout); } catch (e) {}   // reopen here next time

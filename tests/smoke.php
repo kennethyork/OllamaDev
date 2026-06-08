@@ -832,6 +832,15 @@ ok('terminal sizes the pty to the screen (termResize)',
     strpos($ajs, 'window.termResize(this.id, cols, rows)') !== false &&
     strpos($ajs, 'Terminal.prototype.fit') !== false && strpos($ajs, 'Terminal.prototype.measure') !== false &&
     strpos($bind, 'function termResize(') !== false && strpos($brg, 'termResize') !== false);
+// Opt-in GPU-composited canvas terminal renderer (DOM stays the default).
+ok('opt-in canvas (GPU) terminal renderer present', strpos($ajs, 'function CanvasRenderer(') !== false &&
+    strpos($ajs, 'getContext(\'2d\'') !== false && strpos($ajs, 'CanvasRenderer.prototype.selectionText') !== false &&
+    strpos($ajs, 'CanvasRenderer.prototype._paintNow') !== false);
+ok('canvas renderer is opt-in; DOM is the default', strpos($ajs, "App.canvasTerm)") !== false &&
+    strpos($ajs, 'if (this.canvasR) { this.canvasR.write(text); return; }') !== false &&
+    strpos($ajs, "localStorage.getItem('ade.canvasTerm') === 'on'") !== false &&
+    strpos($ajs, 'setCanvasTerm: function') !== false);
+ok('canvas renderer toggle in the UI', strpos((string)@file_get_contents($adeDir . '/public/index.html'), 'id="termCanvas"') !== false);
 // The pty daemon honors resize by setting the pts window size → SIGWINCH (backend).
 ok('pty daemon applies resize via stty on the pts', strpos($src, "stty -F ' . escapeshellarg(\$pts)") !== false &&
     strpos($src, 'pty-size') !== false);

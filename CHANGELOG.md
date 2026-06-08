@@ -1,5 +1,13 @@
 # Changelog
 
+## v4.8.58 (2026-06-07) — opt-in GPU/canvas terminal renderer
+
+### Added
+- **GPU-composited canvas terminal renderer** (desktop + web), opt-in via the **🖼 DOM / 🖼 Canvas** toggle. Instead of thousands of `<div>`/`<span>` nodes, it keeps a scrollback cell buffer and paints the visible viewport into a single `<canvas>` — one hardware-composited layer, constant memory, **dirty-cell repaint** — so it stays fast under firehose output where the DOM renderer slows down. Includes HiDPI scaling, wheel scrollback, and drag-to-select + copy. Alt-screen TUIs reuse the `TermGrid` model. Pure vanilla Canvas 2D — no xterm.js, no WebGL, no dependency.
+- **The DOM renderer remains the default** — the canvas path is a clean, separate opt-in, so it can't regress the working terminal.
+
+_The renderer's pure logic (cell buffer, scrollback, alt-screen, selection, dirty-diff) is unit-tested headlessly via node; the visual result (crispness, selection feel) is best spot-checked in a browser — hence the opt-in toggle. A WebGL renderer (true single-draw-call GPU) remains a future option for extreme throughput._
+
 ## v4.8.57 (2026-06-07) — small-model tool-calling reliability
 
 The biggest real-world limiter for a local agent isn't the harness — it's whether a small model's tool calls actually land. Two fixes for the two most common failure modes, **measured on the eval suite**:
