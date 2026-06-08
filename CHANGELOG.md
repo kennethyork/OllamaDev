@@ -1,5 +1,17 @@
 # Changelog
 
+## v4.8.64 (2026-06-08) — the Workspace is now one infinite, pannable canvas
+
+### Changed
+- **The Workspace is now a single infinite canvas — everything is a draggable pane on it: terminals, the editor, the board, the graph, the browser.** Replaces the old Workspace/Board/Graph/Browser tab nav (removed) and the editor-above-terminals split.
+  - **Pan** by dragging empty canvas space (or middle-drag anywhere); the canvas extends infinitely in every direction. A faint dot grid shows you're moving across it.
+  - **Add panes continuously** — **right-click empty canvas** (or the **＋ Add** toolbar button) to drop a Terminal, Editor, Board, Graph, or Browser pane where you clicked. Each non-terminal view is a singleton (add it once; ＋ Add focuses it if it's already open).
+  - **The editor is a pane too** — opening a file drops (or focuses) an editor pane on the canvas.
+  - **⊕ Center** re-centers the canvas to bring every pane back into view.
+  - Each pane drags by its header, resizes from the corner, and **Focus (⤢)** zooms it full-screen — same as before. Closing a view pane (**×**) parks it (state preserved — graph layout, browser page, editor tabs); re-add any time.
+  - Which panes are open, their geometry, and the pan offset **persist** across restarts.
+- 100% vanilla — one CSS `transform` pans the whole canvas; views are moved (not re-rendered) between a hidden store and their pane, so state is never lost. No dependency, engine untouched.
+
 ## v4.8.63 (2026-06-08) — fix: popped-out pane now actually appears in the Workspace
 
 ### Fixed

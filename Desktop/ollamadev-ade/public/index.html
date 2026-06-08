@@ -40,7 +40,8 @@
         <button id="webToggle" title="Web access for the agent (search, fetch, remote git). Off = air-gapped. Applies to new runs.">🌐 Web</button>
         <button id="searchToggle" title="Web search on/off (leaves fetch &amp; remote git alone). Applies to new runs.">🔍 Search</button>
         <button id="sttHistoryBtn" title="Voice transcription history" hidden>🎙 History</button>
-        <button id="layoutBtn" title="Cycle layout: split / terminals / editor">Split</button>
+        <button id="addPaneBtn" title="Add a pane to the canvas (also: right-click empty canvas)">＋ Add</button>
+        <button id="canvasResetBtn" title="Re-center the canvas (bring all panes into view)">⊕ Center</button>
         <span id="cwd" class="dim"></span>
     </header>
 
@@ -82,59 +83,69 @@
         </aside>
 
         <section id="workspace">
-            <div id="wsTabs">
-                <button class="ws-tab active" data-view="code">Workspace</button>
-                <button class="ws-tab" data-view="board">Board</button>
-                <button class="ws-tab" data-view="graph">Graph</button>
-                <button class="ws-tab" data-view="browser">Browser</button>
-                <button id="popCurrentBtn" title="Pop this tab out into a pane with your terminals" hidden>⤴ Pop out</button>
+            <!-- The whole workspace is one infinite, pannable canvas. Everything —
+                 terminals, the editor, board, graph, browser — lives on it as a draggable
+                 pane. Drag empty space to pan; right-click empty space (or ＋ Add) to add a
+                 pane. #codeView is kept as the canvas wrapper (the zoom code targets it). -->
+            <div id="codeView" class="ws-view">
+                <section id="terminals"></section>
             </div>
 
-            <div id="codeView" class="ws-view">
-                <section id="editorPane">
+            <!-- Parking home for the singleton view panes. Their elements are moved out of
+                 here into a canvas pane when added, and back here (hidden) when closed —
+                 so each view keeps all its state (graph layout, browser page, editor tabs). -->
+            <div id="paneStore" hidden>
+                <section id="editorPane" class="ws-view">
                     <div id="editorTabs"></div>
                     <div id="editorBody">
                         <div id="editorEmpty" class="dim">Select a file from the sidebar to edit it.</div>
                     </div>
                 </section>
-                <div id="vsplit" class="vsplit" title="Drag to resize editor / terminals"></div>
-                <section id="terminals"></section>
+
+                <div id="boardView" class="ws-view">
+                    <div id="directorBar" hidden>
+                        <span class="dir-label">🧭 Director</span>
+                        <input id="directorMsg" class="field" placeholder='Steer ("2: focus on tests"), broadcast ("all: ..."), or swap a model ("2: model llama3.3:70b")'>
+                        <button id="directorSend">Send</button>
+                    </div>
+                    <div id="crewPanes" hidden></div>
+                    <div id="board"></div>
+                </div>
+
+                <div id="graphView" class="ws-view">
+                    <div id="graphBar">
+                        <span class="dim">Project memory graph — notes linked with [[wiki-links]].</span>
+                        <span id="graphStat" class="dim"></span>
+                        <button id="graphRefresh" title="Reload the graph">↻ Refresh</button>
+                    </div>
+                    <canvas id="graphCanvas"></canvas>
+                    <div id="graphEmpty" class="dim" hidden>No memories yet. The agent saves them with the <code>remember</code> tool, or run <code>ollamadev memory new &lt;title&gt;</code>.</div>
+                </div>
+
+                <div id="browserView" class="ws-view">
+                    <div id="browserBar">
+                        <button id="brBack" title="Back" disabled>←</button>
+                        <button id="brFwd" title="Forward" disabled>→</button>
+                        <button id="brReload" title="Reload">⟳</button>
+                        <input id="brUrl" type="text" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="localhost:3000  ·  or a full URL">
+                        <button id="brGo" class="primary">Go</button>
+                        <span id="brPorts"></span>
+                        <button id="brExt" title="Open in your real browser">↗</button>
+                    </div>
+                    <div id="browserBody">
+                        <iframe id="brFrame" referrerpolicy="no-referrer" title="Local preview"></iframe>
+                        <div id="brEmpty" class="dim">Preview a local app you're building — enter a URL or pick a port. Localhost loads instantly; some external sites refuse to embed (use ↗ to open them in your real browser).</div>
+                    </div>
+                </div>
             </div>
 
-            <div id="boardView" class="ws-view" hidden>
-                <div id="directorBar" hidden>
-                    <span class="dir-label">🧭 Director</span>
-                    <input id="directorMsg" class="field" placeholder='Steer ("2: focus on tests"), broadcast ("all: ..."), or swap a model ("2: model llama3.3:70b")'>
-                    <button id="directorSend">Send</button>
-                </div>
-                <div id="crewPanes" hidden></div>
-                <div id="board"></div>
-            </div>
-
-            <div id="graphView" class="ws-view" hidden>
-                <div id="graphBar">
-                    <span class="dim">Project memory graph — notes linked with [[wiki-links]].</span>
-                    <span id="graphStat" class="dim"></span>
-                    <button id="graphRefresh" title="Reload the graph">↻ Refresh</button>
-                </div>
-                <canvas id="graphCanvas"></canvas>
-                <div id="graphEmpty" class="dim" hidden>No memories yet. The agent saves them with the <code>remember</code> tool, or run <code>ollamadev memory new &lt;title&gt;</code>.</div>
-            </div>
-
-            <div id="browserView" class="ws-view" hidden>
-                <div id="browserBar">
-                    <button id="brBack" title="Back" disabled>←</button>
-                    <button id="brFwd" title="Forward" disabled>→</button>
-                    <button id="brReload" title="Reload">⟳</button>
-                    <input id="brUrl" type="text" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="localhost:3000  ·  or a full URL">
-                    <button id="brGo" class="primary">Go</button>
-                    <span id="brPorts"></span>
-                    <button id="brExt" title="Open in your real browser">↗</button>
-                </div>
-                <div id="browserBody">
-                    <iframe id="brFrame" referrerpolicy="no-referrer" title="Local preview"></iframe>
-                    <div id="brEmpty" class="dim">Preview a local app you're building — enter a URL or pick a port. Localhost loads instantly; some external sites refuse to embed (use ↗ to open them in your real browser).</div>
-                </div>
+            <!-- Right-click / ＋ Add menu for dropping a new pane on the canvas. -->
+            <div id="canvasMenu" class="canvas-menu" hidden>
+                <button data-add="terminal">＋ Terminal</button>
+                <button data-add="editor">📝 Editor</button>
+                <button data-add="board">📋 Board</button>
+                <button data-add="graph">🕸 Graph</button>
+                <button data-add="browser">🌐 Browser</button>
             </div>
         </section>
     </main>

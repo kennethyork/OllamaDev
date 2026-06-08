@@ -803,6 +803,7 @@ var Editor = {
     cur: function () { return this.active >= 0 ? this.tabs[this.active] : null; },
     open: function (path, name) {
         var self = this;
+        if (window.App && App.ensurePane) App.ensurePane('editor');   // editor is a canvas pane
         var i = this.tabs.findIndex(function (t) { return t.path === path; });
         if (i >= 0) { this.active = i; this.render(); App.markActiveFile(path); return; }
         Promise.resolve(window.readFile(path)).then(function (r) {
@@ -1115,7 +1116,7 @@ var Graph = {
         });
         window.addEventListener('mouseup', function () { self.dragging = null; });
         var rb = $('#graphRefresh'); if (rb) rb.onclick = function () { self.load(); };
-        window.addEventListener('resize', function () { if (App.view === 'graph') { self.resize(); if (!self.anim) self.draw(); } });
+        window.addEventListener('resize', function () { if (App.popped && App.popped.graph) { self.resize(); if (!self.anim) self.draw(); } });
     }
 };
 
@@ -1871,13 +1872,15 @@ var Stt = {
 
 var App = {
     terminals: [], cwd: '.', layout: 'split', termLayout: 'free', zoomed: null, view: 'code', panel: 'files', crewBoard: null, crewPoll: null,
-    // Workspace views that can be "popped out" of their tab and docked as a pane among
-    // the terminals (and popped back to their tab). `popped` maps view -> geometry; the
-    // real .ws-view element is physically moved into the pane, so its state is preserved.
+    // The workspace is one infinite, pannable canvas. `panX/panY` is its scroll offset;
+    // panes are positioned at (world x + panX, world y + panY). Singleton "view" panes
+    // (editor/board/graph/browser) live in `popped` (view -> geometry); their real element
+    // is moved onto the canvas so all state is preserved.
+    panX: 0, panY: 0,
     popped: {},
-    POP_VIEWS: ['board', 'graph', 'browser'],
-    POP_SEL: { board: '#boardView', graph: '#graphView', browser: '#browserView' },
-    POP_TITLE: { board: '📋 Board', graph: '🕸 Graph', browser: '🌐 Browser' },
+    POP_VIEWS: ['editor', 'board', 'graph', 'browser'],
+    POP_SEL: { editor: '#editorPane', board: '#boardView', graph: '#graphView', browser: '#browserView' },
+    POP_TITLE: { editor: '📝 Editor', board: '📋 Board', graph: '🕸 Graph', browser: '🌐 Browser' },
     // PTYs spawned this session, by id. Survives detach (workspace switch) so we
     // can RE-attach a still-running terminal; gone after a restart → respawn fresh.
     live: {},
@@ -1895,8 +1898,7 @@ var App = {
         try { self.canvasTerm = localStorage.getItem('ade.canvasTerm') === 'on'; } catch (e) { self.canvasTerm = false; }
         var tc = $('#termCanvas');
         if (tc) { tc.textContent = self.canvasTerm ? '🖼 Canvas' : '🖼 DOM'; tc.onclick = function () { self.setCanvasTerm(!self.canvasTerm); }; }
-        // Popped-out views (board/graph/browser docked among the terminals) — restore
-        // each one's geometry and wire the per-view "⤴ Pop out" buttons.
+        // Restore which view panes were on the canvas (+ their geometry) and the pan offset.
         try {
             var pop = JSON.parse(localStorage.getItem('ade.popped') || '{}') || {};
             self.POP_VIEWS.forEach(function (view) {
@@ -1904,9 +1906,11 @@ var App = {
                 if (g && typeof g.x === 'number') self.popped[view] = { id: '__pop_' + view + '__', view: view, x: g.x, y: g.y, w: g.w, h: g.h, z: 0 };
             });
         } catch (e) {}
-        document.querySelectorAll('[data-pop]').forEach(function (btn) { btn.onclick = function () { self.togglePopView(btn.dataset.pop); }; });
-        var pcb = $('#popCurrentBtn'); if (pcb) pcb.onclick = function () { self.togglePopView(self.view); };
-        $('#layoutBtn').onclick = function () { self.cycleLayout(); };
+        try { var pan = JSON.parse(localStorage.getItem('ade.pan') || 'null'); if (pan) { self.panX = pan.x || 0; self.panY = pan.y || 0; } } catch (e) {}
+        // Add-pane menu: the ＋ Add toolbar button and right-click on empty canvas.
+        var addBtn = $('#addPaneBtn'); if (addBtn) addBtn.onclick = function (e) { self.showCanvasMenu(e.clientX, e.clientY); };
+        var ctrBtn = $('#canvasResetBtn'); if (ctrBtn) ctrBtn.onclick = function () { self.centerCanvas(); };
+        this.bindCanvas();
         // Open-folder modal
         var ofb = $('#openFolderBtn'); if (ofb) ofb.onclick = function () { self.openFolderModal(false); };
         var fok = $('#folderOpen'); if (fok) fok.onclick = function () { self.submitFolder(); };
@@ -1935,10 +1939,6 @@ var App = {
         document.querySelectorAll('.rail-btn').forEach(function (b) {
             b.onclick = function () { self.setPanel(b.dataset.panel); };
         });
-        // Workspace view tabs: Workspace (code) vs Board (kanban) vs Graph (memory).
-        document.querySelectorAll('.ws-tab').forEach(function (t) {
-            t.onclick = function () { self.setView(t.dataset.view); };
-        });
         Graph.bind();
         Workspaces.bind();
         Roles.bind();
@@ -1966,7 +1966,6 @@ var App = {
             if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); Editor.save(); }
         });
         Tasks.load(); Tasks.render();
-        this.setLayout('term'); // CLI/terminal is the focus by default; editor on demand
         Promise.resolve(window.cliPath ? window.cliPath() : 'ollamadev').then(function (p) { self.cli = p || 'ollamadev'; }).catch(function () { self.cli = 'ollamadev'; });
         Promise.resolve(window.homeDir ? window.homeDir() : '').then(function (h) { window.HOME_DIR = h || ''; }).catch(function () {});
         this.loadModels().then(function () {
@@ -2088,37 +2087,12 @@ var App = {
         var sp = $('#searchPanel'); if (sp) sp.hidden = p !== 'search';
         if (p === 'search') CodeSearch.onShow();
     },
+    // There are no tabs anymore — the canvas is always shown. setView is kept for the
+    // callers that "jump to" a view: a view name just opens (or focuses) that pane on
+    // the canvas; 'code' is a no-op (the canvas, with the terminals, is always present).
     setView: function (v) {
-        this.view = v;
-        var self = this;
-        document.querySelectorAll('.ws-tab').forEach(function (t) { t.classList.toggle('active', t.dataset.view === v); });
-        $('#codeView').hidden = v !== 'code';
-        // A popped-out view's element lives in a pane (always visible there) — never show
-        // it in the workspace. Its tab instead shows a "popped out" placeholder.
-        this.POP_VIEWS.forEach(function (view) {
-            var el = $(self.POP_SEL[view]); if (!el) return;
-            el.hidden = self.popped[view] ? (el.parentNode === $('#workspace')) : (v !== view);
-        });
-        this._showPlaceholder(v);
-        // The tab-row "Pop out" button: shown only on a poppable tab that isn't already popped.
-        var pcb = $('#popCurrentBtn'); if (pcb) pcb.hidden = !(this.POP_SEL[v] && !this.popped[v]);
-        // Load hooks are safe even when popped — the elements exist (in their panes).
-        if (v === 'board') { this.startCrewPoll(); Tasks.render(); CrewPanes.sync(this.crewBoard); }
-        if (v === 'graph') Graph.load();
-        if (v === 'browser') Browser.onShow();
-    },
-    // When the current tab's view is popped out, show a placeholder card in the
-    // workspace with a "pop back here" button; otherwise hide it.
-    _showPlaceholder: function (v) {
-        var ph = $('#popPlaceholder');
-        if (!ph) { ph = document.createElement('div'); ph.id = 'popPlaceholder'; ph.className = 'ws-view'; $('#workspace').appendChild(ph); }
-        if (this.popped[v]) {
-            var self = this;
-            ph.hidden = false;
-            ph.innerHTML = '<div class="pop-note"><span>' + this.POP_TITLE[v] + ' is popped out into a pane with your terminals.</span>' +
-                '<button id="popBackHere" class="primary">⤵ Pop it back here</button></div>';
-            ph.querySelector('#popBackHere').onclick = function () { self.popBackView(v); };
-        } else { ph.hidden = true; ph.innerHTML = ''; }
+        this.view = v || 'code';
+        if (v && this.POP_SEL[v]) this.popView(v);
     },
     // Hand a task title to an agent terminal's CLI (create one if none exist).
     runTaskInAgent: function (title) {
@@ -2138,36 +2112,10 @@ var App = {
             });
         }
     },
-    setLayout: function (name) {
-        this.layout = name;
-        var cv = $('#codeView');
-        if (cv) cv.className = 'ws-view ' + (name === 'term' ? 'focus-term' : name === 'editor' ? 'focus-editor' : '');
-        // Drag-sizing only applies in split; clear it so the focus modes fill fully.
-        if (name !== 'split') { var ep = $('#editorPane'), tm = $('#terminals'); if (ep) ep.style.flex = ''; if (tm) tm.style.flex = ''; }
-        var btn = $('#layoutBtn');
-        if (btn) btn.textContent = name === 'term' ? 'Terminals' : name === 'editor' ? 'Editor' : 'Split';
-        this.render();
-    },
-    // Draggable divider: in split mode, drag to give terminals more/less height.
-    initSplitter: function () {
-        var split = $('#vsplit'), cv = $('#codeView'), ep = $('#editorPane'), tm = $('#terminals');
-        if (!split || !cv || !ep || !tm) return;
-        var dragging = false;
-        var self = this;
-        split.addEventListener('mousedown', function (e) { if (self.layout !== 'split') return; dragging = true; document.body.style.userSelect = 'none'; e.preventDefault(); });
-        document.addEventListener('mousemove', function (e) {
-            if (!dragging) return;
-            var r = cv.getBoundingClientRect();
-            var top = e.clientY - r.top - 4;            // editor height under the cursor
-            top = Math.max(60, Math.min(r.height - 90, top)); // keep both panes usable
-            ep.style.flex = '0 0 ' + top + 'px';
-            tm.style.flex = '1 1 0';
-        });
-        document.addEventListener('mouseup', function () { if (dragging) { dragging = false; document.body.style.userSelect = ''; } });
-    },
-    cycleLayout: function () {
-        this.setLayout(this.layout === 'split' ? 'term' : this.layout === 'term' ? 'editor' : 'split');
-    },
+    // Layout is now always the canvas; kept as tolerant no-ops for legacy callers.
+    setLayout: function (name) { this.layout = name || 'split'; },
+    initSplitter: function () { /* the editor/terminals split is gone — editor is a pane now */ },
+    cycleLayout: function () { },
     // Recommended fast coder models, in preference order, for the crew run.
     CREW_PREFERRED: ['qwen2.5-coder', 'qwen3-coder', 'codestral', 'deepseek-coder', 'mistral', 'llama3.1'],
     // Setup templates (BridgeSpace-style) — prefill the task + suggested config.
@@ -2468,9 +2416,8 @@ var App = {
                     }
                 }
                 self.crewBoard = (b && b.subtasks) ? b : self.crewBoard;
-                // Refresh the board on the Board view AND when it's popped out into a pane.
-                if (self.view === 'board' || self.popped.board) Tasks.render();
-                if (self.view === 'board') CrewPanes.sync(self.crewBoard);
+                // Refresh the board whenever it's open as a pane on the canvas.
+                if (self.popped.board) { Tasks.render(); CrewPanes.sync(self.crewBoard); }
                 // Stop polling a while after the run goes inactive — but keep it alive
                 // while the board is popped out so a fresh crew run shows up there live.
                 if (b && b.active === false && !self.popped.board) { if (++idle > 6) { clearInterval(self.crewPoll); self.crewPoll = null; } }
@@ -2594,6 +2541,8 @@ var App = {
         var id = rid();
         var isShell = (model === 'shell');   // the "shell" entry at the top of the model list
         var t = new Terminal(id, model, dir); if (isShell) t.kind = 'shell';
+        // Right-click "Terminal" drops the pane at the cursor (canvas-world coords).
+        if (this._spawnGeom) { t.x = this._spawnGeom.x; t.y = this._spawnGeom.y; t.w = 540; t.h = 340; t.z = ++this._zTop; this._spawnGeom = null; }
         var self = this;
         Promise.resolve(window.termCreate(id, model, dir)).then(function () {
             self.live[id] = true;
@@ -2761,31 +2710,110 @@ var App = {
         wrap.style.setProperty('--tfs', '13px');
         var cv = $('#codeView'); if (cv) cv.classList.remove('term-zoom');
         wrap.innerHTML = '';
-        this.terminals.forEach(function (t, i) {
-            if (typeof t.x !== 'number') self.applyGeom(t, i);
+        // One transformed inner layer holds every pane; panning = translating it once
+        // (cheap, and the canvas extends infinitely in every direction).
+        var inner = document.createElement('div');
+        inner.className = 'canvas-inner';
+        inner.style.transform = 'translate(' + this.panX + 'px,' + this.panY + 'px)';
+        wrap.appendChild(inner);
+        this._inner = inner;
+        var mountPane = function (t, isView) {
+            if (typeof t.x !== 'number') self.applyGeom(t, self.terminals.indexOf(t));
             var pane = document.createElement('div');
             pane.className = 'term-pane';
             pane.style.left = t.x + 'px'; pane.style.top = t.y + 'px';
             pane.style.width = t.w + 'px'; pane.style.height = t.h + 'px';
             pane.style.zIndex = t.z || 1;
-            wrap.appendChild(pane);
-            t.mount(pane);
+            inner.appendChild(pane);
+            if (isView) self.mountPoppedPane(pane, t); else t.mount(pane);
             var rh = document.createElement('div'); rh.className = 'term-resize'; pane.appendChild(rh);
             self.wireFree(t, pane, rh);
-        });
-        // Each popped-out view floats with the terminals, dragged/resized by the same code.
+        };
+        this.terminals.forEach(function (t) { mountPane(t, false); });
         this._poppedPanes().forEach(function (b) {
             if (typeof b.x !== 'number') { b.x = 280; b.y = 24; b.w = 520; b.h = 400; b.z = ++self._zTop; }
-            var bpane = document.createElement('div');
-            bpane.className = 'term-pane';
-            bpane.style.left = b.x + 'px'; bpane.style.top = b.y + 'px';
-            bpane.style.width = b.w + 'px'; bpane.style.height = b.h + 'px';
-            bpane.style.zIndex = b.z || 1;
-            wrap.appendChild(bpane);
-            self.mountPoppedPane(bpane, b);
-            var brh = document.createElement('div'); brh.className = 'term-resize'; bpane.appendChild(brh);
-            self.wireFree(b, bpane, brh);
+            mountPane(b, true);
         });
+    },
+    // ---- Infinite canvas: pan by dragging empty space; right-click to add a pane ----
+    bindCanvas: function () {
+        var self = this, wrap = $('#terminals');
+        if (!wrap || wrap._canvasBound) return;
+        wrap._canvasBound = true;
+        // Pan: press on empty canvas (not a pane) and drag. Middle-button drags anywhere.
+        wrap.addEventListener('mousedown', function (e) {
+            var onPane = e.target.closest && e.target.closest('.term-pane');
+            if (self.termLayout !== 'free') return;
+            if (e.button === 1 || (e.button === 0 && !onPane)) {
+                e.preventDefault();
+                var sx = e.clientX, sy = e.clientY, ox = self.panX, oy = self.panY;
+                document.body.style.userSelect = 'none';
+                function mv(ev) {
+                    self.panX = ox + ev.clientX - sx; self.panY = oy + ev.clientY - sy;
+                    if (self._inner) self._inner.style.transform = 'translate(' + self.panX + 'px,' + self.panY + 'px)';
+                }
+                function up() {
+                    document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up);
+                    document.body.style.userSelect = '';
+                    try { localStorage.setItem('ade.pan', JSON.stringify({ x: self.panX, y: self.panY })); } catch (x) {}
+                }
+                document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
+            }
+        });
+        wrap.addEventListener('contextmenu', function (e) {
+            if (e.target.closest && e.target.closest('.term-pane')) return;   // pane has its own context
+            e.preventDefault(); self.showCanvasMenu(e.clientX, e.clientY);
+        });
+        // Click anywhere else closes the add menu.
+        document.addEventListener('mousedown', function (e) {
+            var m = $('#canvasMenu');
+            if (m && !m.hidden && !m.contains(e.target) && e.target.id !== 'addPaneBtn') m.hidden = true;
+        });
+        var menu = $('#canvasMenu');
+        if (menu) menu.querySelectorAll('[data-add]').forEach(function (btn) {
+            btn.onclick = function () {
+                var pt = menu._spawnAt || { x: 60, y: 60 };
+                menu.hidden = true;
+                self.addPane(btn.dataset.add, pt.x, pt.y);
+            };
+        });
+    },
+    // Show the add-pane menu at a screen point; remember the canvas-world point to drop at.
+    showCanvasMenu: function (clientX, clientY) {
+        var menu = $('#canvasMenu'), wrap = $('#terminals'); if (!menu || !wrap) return;
+        var r = wrap.getBoundingClientRect();
+        menu._spawnAt = { x: clientX - r.left - this.panX, y: clientY - r.top - this.panY };
+        menu.style.left = Math.min(clientX, window.innerWidth - 180) + 'px';
+        menu.style.top = Math.min(clientY, window.innerHeight - 220) + 'px';
+        menu.hidden = false;
+    },
+    // Add a pane at canvas-world coords (wx,wy). 'terminal' spawns a new pty; the rest
+    // open that singleton view pane (or just focus it if already open).
+    addPane: function (kind, wx, wy) {
+        if (kind === 'terminal') { this._spawnGeom = { x: wx, y: wy }; this.spawnTerminal(); return; }
+        if (this.POP_SEL[kind]) {
+            if (this.popped[kind]) { this.focusPane(this.popped[kind].id); return; }
+            this.popView(kind, wx, wy);
+        }
+    },
+    focusPane: function (id) {
+        var p = this._poppedPanes().filter(function (x) { return x.id === id; })[0] ||
+            this.terminals.filter(function (t) { return t.id === id; })[0];
+        if (p) { p.z = ++this._zTop; this.render(); }
+    },
+    // Re-center the canvas so the bounding box of all panes is brought into view.
+    centerCanvas: function () {
+        var all = this.terminals.concat(this._poppedPanes()).filter(function (p) { return typeof p.x === 'number'; });
+        var wrap = $('#terminals'); if (!wrap) return;
+        if (!all.length) { this.panX = 0; this.panY = 0; }
+        else {
+            var minX = Math.min.apply(null, all.map(function (p) { return p.x; }));
+            var minY = Math.min.apply(null, all.map(function (p) { return p.y; }));
+            this.panX = 24 - minX; this.panY = 24 - minY;
+        }
+        try { localStorage.setItem('ade.pan', JSON.stringify({ x: this.panX, y: this.panY })); } catch (e) {}
+        if (this._inner) this._inner.style.transform = 'translate(' + this.panX + 'px,' + this.panY + 'px)';
+        banner('canvas re-centered', 'ok');
     },
     // Popped-view geometry entries (also valid zoom/focus targets alongside terminals).
     _poppedPanes: function () {
@@ -2800,7 +2828,9 @@ var App = {
     applyGeom: function (t, i) {
         var g = (this._geomById && this._geomById[t.id]) || (this._geomQueue && this._geomQueue[i]) || null;
         if (g && typeof g.x === 'number') { t.x = g.x; t.y = g.y; t.w = g.w; t.h = g.h; t.z = g.z || ++this._zTop; }
-        else { t.x = 24 + (i * 30) % 240; t.y = 24 + (i * 30) % 170; t.w = 540; t.h = 340; t.z = ++this._zTop; }
+        // Cascade into the CURRENTLY VISIBLE area (subtract pan), so a new pane never
+        // spawns off-screen when the canvas is panned far away.
+        else { i = i < 0 ? 0 : i; t.x = (24 - this.panX) + (i * 30) % 240; t.y = (24 - this.panY) + (i * 30) % 170; t.w = 540; t.h = 340; t.z = ++this._zTop; }
     },
     _zTop: 1,
     bringFront: function (t, pane) { t.z = ++this._zTop; pane.style.zIndex = t.z; },
@@ -2808,45 +2838,43 @@ var App = {
         var self = this; clearTimeout(this._geomSave);
         this._geomSave = setTimeout(function () { self.savePopped(); if (Workspaces && Workspaces.saveCurrentState) Workspaces.saveCurrentState(); }, 400);
     },
-    // ---- Pop a workspace view (board/graph/browser) out into a pane with the terminals ----
-    togglePopView: function (view) { if (this.popped[view]) this.popBackView(view); else this.popView(view); },
-    popView: function (view) {
+    // ---- Open a view (editor/board/graph/browser) as a pane on the canvas ----
+    // Idempotent: opens the pane if it isn't already on the canvas.
+    ensurePane: function (view) { if (this.POP_SEL[view] && !this.popped[view]) this.popView(view); },
+    popView: function (view, wx, wy) {
         if (!this.POP_SEL[view] || this.popped[view]) return;
-        this.popped[view] = { id: '__pop_' + view + '__', view: view, x: 280, y: 24, w: 520, h: 400, z: ++this._zTop };
+        var x = (typeof wx === 'number') ? wx : 280 - this.panX, y = (typeof wy === 'number') ? wy : 24 - this.panY;
+        this.popped[view] = { id: '__pop_' + view + '__', view: view, x: x, y: y, w: 520, h: 400, z: ++this._zTop };
         this.savePopped();
-        // Switch to the Workspace (where the terminals live) so the floating pane is
-        // visible, THEN re-render #terminals to actually mount it. Its old tab now
-        // shows a "pop back" placeholder.
-        this.setView('code');
         this.render();
         if (view === 'board') { this.startCrewPoll(); Tasks.render(); }
-        banner(this.POP_TITLE[view] + ' popped out into the Workspace — drag the header, resize the corner', 'ok');
+        banner(this.POP_TITLE[view] + ' added to the canvas — drag the header, resize the corner', 'ok');
     },
-    popBackView: function (view) {
+    // Close a view pane (its element parks back in #paneStore, keeping all its state;
+    // re-add it any time from ＋ Add / right-click).
+    closePaneView: function (view) {
         if (!this.popped[view]) return;
         if (this.zoomed === this.popped[view].id) this.zoomed = null;
         delete this.popped[view];
         this.savePopped();
-        // Move its element home BEFORE re-rendering, or wrap.innerHTML='' would destroy it.
-        var el = $(this.POP_SEL[view]), ws = $('#workspace');
-        if (el && el.parentNode !== ws) { el.hidden = true; ws.appendChild(el); }
+        // Move its element home BEFORE re-rendering, or innerHTML='' would destroy it.
+        var el = $(this.POP_SEL[view]), store = $('#paneStore');
+        if (el && store && el.parentNode !== store) { el.hidden = true; store.appendChild(el); }
         this.render();
-        this.setView(view);        // land back on its own tab, where it was before
-        banner(this.POP_TITLE[view] + ' docked back to its tab', 'ok');
     },
     savePopped: function () {
         var out = {}, self = this;
         this.POP_VIEWS.forEach(function (v) { var b = self.popped[v]; if (b) out[v] = { x: b.x, y: b.y, w: b.w, h: b.h }; });
         try { localStorage.setItem('ade.popped', JSON.stringify(out)); } catch (e) {}
     },
-    // Move every popped view's real element back to #workspace (hidden), so a pending
-    // wrap.innerHTML='' can't destroy it. Re-mounted into its pane right after.
+    // Park each open view's real element back in #paneStore (hidden) before a pending
+    // innerHTML='' so it can't be destroyed; re-mounted into its pane right after.
     _parkPopped: function () {
-        var ws = $('#workspace'), self = this;
+        var store = $('#paneStore'), self = this;
         this.POP_VIEWS.forEach(function (view) {
             if (!self.popped[view]) return;
             var el = $(self.POP_SEL[view]);
-            if (el && el.parentNode !== ws) { el.hidden = true; ws.appendChild(el); }
+            if (el && store && el.parentNode !== store) { el.hidden = true; store.appendChild(el); }
         });
     },
     // Wrap a popped view in terminal-style chrome and move its real element into the
@@ -2857,23 +2885,24 @@ var App = {
         host.classList.add('pop-pane');
         host.innerHTML =
             '<div class="term-head"><span class="nm">' + this.POP_TITLE[view] + '</span>' +
-            '<button class="popback" title="Pop back to its tab">⤵</button>' +
-            '<button class="zoom" title="' + (focused ? 'Restore' : 'Focus (make this bigger)') + '">' + (focused ? '⤡' : '⤢') + '</button>' +
-            '<button class="x" title="Pop back to its tab">&times;</button></div>' +
+            '<button class="zoom" title="' + (focused ? 'Restore' : 'Focus (make this bigger)') + '" style="margin-left:auto">' + (focused ? '⤡' : '⤢') + '</button>' +
+            '<button class="x" title="Close (re-add any time from ＋ Add)">&times;</button></div>' +
             '<div class="pop-pane-body"></div>';
         var el = $(this.POP_SEL[view]);
         if (el) { el.hidden = false; host.querySelector('.pop-pane-body').appendChild(el); }
-        host.querySelector('.popback').onclick = function (e) { e.stopPropagation(); self.popBackView(view); };
-        host.querySelector('.x').onclick = function (e) { e.stopPropagation(); self.popBackView(view); };
+        host.querySelector('.x').onclick = function (e) { e.stopPropagation(); self.closePaneView(view); };
         host.querySelector('.zoom').onclick = function (e) { e.stopPropagation(); self.toggleZoom(b.id); };
         host.querySelector('.term-head').ondblclick = function (e) {
-            if (e.target.closest('.x, .zoom, .popback')) return;
+            if (e.target.closest('.x, .zoom')) return;
             self.toggleZoom(b.id);
         };
-        // Refresh live content now that the element is in the pane.
-        if (view === 'board') Tasks.renderInto($('#board'));
-        if (view === 'graph') Graph.load();
-        if (view === 'browser' && window.Browser && Browser.onShow) Browser.onShow();
+        // Refresh live content once the pane has its real size (next frame), so the
+        // graph canvas etc. measure correctly instead of off a 0-width host.
+        setTimeout(function () {
+            if (view === 'board') Tasks.renderInto($('#board'));
+            else if (view === 'graph') { if (Graph.resize) Graph.resize(); Graph.load(); }
+            else if (view === 'browser' && window.Browser && Browser.onShow) Browser.onShow();
+        }, 0);
     },
     wireFree: function (t, pane, rh) {
         var self = this;
