@@ -2593,9 +2593,15 @@ var App = {
     },
     // Snapshot the current window so a workspace can be restored exactly.
     captureState: function () {
+        var self = this, panes = {};
+        this.POP_VIEWS.forEach(function (v) { var b = self.popped[v]; if (b) panes[v] = { x: b.x, y: b.y, w: b.w, h: b.h }; });
         return {
             terminals: this.terminals.map(function (t) { return { id: t.id, model: t.model, kind: t.kind || '', cwd: t.cwd || '', x: t.x, y: t.y, w: t.w, h: t.h, z: t.z }; }),
             editorTabs: Editor.tabs.map(function (t) { return { path: t.path, name: t.name }; }),
+            // The canvas layout is now per-project: which view panes are open (+ geometry)
+            // and the pan offset travel with the workspace, like the terminals do.
+            panes: panes,
+            pan: { x: this.panX, y: this.panY },
             layout: this.layout,
             view: this.view,
             zoomed: this.zoomed || null
@@ -2606,7 +2612,22 @@ var App = {
     restoreState: function (state) {
         state = state || {};
         var self = this;
+        // Reset the canvas to this project's saved layout: park any open view panes,
+        // then rebuild the open set + pan offset from the workspace state.
+        this._parkPopped();
+        this.popped = {};
+        this.panX = (state.pan && state.pan.x) || 0;
+        this.panY = (state.pan && state.pan.y) || 0;
+        if (state.panes) Object.keys(state.panes).forEach(function (v) {
+            if (!self.POP_SEL[v]) return;
+            var g = state.panes[v];
+            self.popped[v] = { id: '__pop_' + v + '__', view: v, x: g.x, y: g.y, w: g.w, h: g.h, z: ++self._zTop };
+        });
+        this.savePopped();
+        try { localStorage.setItem('ade.pan', JSON.stringify({ x: this.panX, y: this.panY })); } catch (e) {}
         Editor.closeAll();
+        // Opening a file auto-adds an editor pane; only force one when the project had
+        // open files but no saved editor pane (otherwise honor the saved layout exactly).
         (state.editorTabs || []).forEach(function (t) { Editor.open(t.path, t.name); });
         var terms = state.terminals || [];
         // Free-layout: the MODE is global (set in init from localStorage); here we only
@@ -2631,7 +2652,10 @@ var App = {
         });
         if (!terms.length && !this.terminals.length) this.spawnTerminal();
         if (state.layout) this.setLayout(state.layout);
-        if (state.view) this.setView(state.view);
+        // Legacy migration only: older states (no `panes`) used a single active view —
+        // open it as a pane. New states fully describe the canvas via `panes`.
+        if (!state.panes && state.view && this.POP_SEL[state.view]) this.setView(state.view);
+        else this.render();   // ensure the restored view panes + pan are painted
     },
     render: function () {
         var wrap = $('#terminals');

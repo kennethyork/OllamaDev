@@ -1,5 +1,11 @@
 # Changelog
 
+## v4.8.65 (2026-06-08) — canvas layout is per-project (multiple workspaces, like before)
+
+### Changed
+- **Each project (workspace) now remembers its own canvas** — which view panes are open, their positions/sizes, and the pan offset travel with the workspace, exactly like the terminals and editor tabs already did. Switching projects in the **Projects** sidebar restores that project's canvas; closing/reopening the app resumes it.
+- Older saved workspaces (from before the canvas) migrate cleanly: their single active view opens as a pane.
+
 ## v4.8.64 (2026-06-08) — the Workspace is now one infinite, pannable canvas
 
 ### Changed
