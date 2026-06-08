@@ -2569,18 +2569,19 @@ var App = {
             }).catch(function () {});
         }, 1500);
     },
-    // Mobile (web mode): the sidebar is an off-canvas drawer. The rail opens it;
-    // tapping the workspace, hitting Esc, or picking a file closes it. No-ops on
-    // desktop where the sidebar is always docked.
+    // The rail + Projects sidebar are an overlay drawer (☰) at every size, so the canvas
+    // is full-bleed by default. Opening a window, picking a file/project, clicking the
+    // canvas, or Esc closes it again. Works the same on desktop and mobile (web).
     initResponsive: function () {
-        var small = function () { return window.matchMedia('(max-width: 820px)').matches; };
-        var open = function () { if (small()) document.body.classList.add('nav-open'); };
         var close = function () { document.body.classList.remove('nav-open'); };
-        var rail = $('#rail'); if (rail) rail.addEventListener('click', open);
-        var ws = $('#workspace'); if (ws) ws.addEventListener('click', close);
+        var nt = $('#navToggle'); if (nt) nt.onclick = function () { document.body.classList.toggle('nav-open'); };
+        var ws = $('#workspace'); if (ws) ws.addEventListener('mousedown', function () { if (document.body.classList.contains('nav-open')) close(); });
         document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
         var sb = $('#sidebar'); if (sb) sb.addEventListener('click', function (e) {
-            if (e.target.closest('.tree-item')) setTimeout(close, 60); // file picked → reveal the editor
+            if (e.target.closest('.tree-item, .ws-tab-item, .ws-bar-add')) setTimeout(close, 80); // picked a file/project → reveal the canvas
+        });
+        var rail = $('#rail'); if (rail) rail.addEventListener('click', function (e) {
+            if (e.target.closest('.rail-btn')) setTimeout(close, 80); // opened a window → reveal the canvas
         });
     },
     toggleZoom: function (id) {
@@ -2925,25 +2926,39 @@ var App = {
         if (!wrap || wrap._canvasBound) return;
         wrap._canvasBound = true;
         // Pan: press on empty canvas (not a pane) and drag. Middle-button drags anywhere.
+        // A shared driver runs for both mouse and touch so the canvas pans on phones too.
+        var startPan = function (px, py, moveEvt, endEvt, getPt) {
+            var ox = self.panX, oy = self.panY;
+            document.body.style.userSelect = 'none';
+            function mv(ev) {
+                var p = getPt(ev); if (!p) return;
+                self.panX = ox + p.x - px; self.panY = oy + p.y - py;
+                if (self._inner) self._inner.style.transform = 'translate(' + self.panX + 'px,' + self.panY + 'px)';
+            }
+            function up() {
+                document.removeEventListener(moveEvt, mv); document.removeEventListener(endEvt, up);
+                document.body.style.userSelect = '';
+                try { localStorage.setItem('ade.pan', JSON.stringify({ x: self.panX, y: self.panY })); } catch (x) {}
+            }
+            document.addEventListener(moveEvt, mv); document.addEventListener(endEvt, up);
+        };
         wrap.addEventListener('mousedown', function (e) {
+            if (document.body.classList.contains('nav-open')) return;   // let the canvas click close the drawer
             var onPane = e.target.closest && e.target.closest('.term-pane');
             if (self.termLayout !== 'free') return;
             if (e.button === 1 || (e.button === 0 && !onPane)) {
                 e.preventDefault();
-                var sx = e.clientX, sy = e.clientY, ox = self.panX, oy = self.panY;
-                document.body.style.userSelect = 'none';
-                function mv(ev) {
-                    self.panX = ox + ev.clientX - sx; self.panY = oy + ev.clientY - sy;
-                    if (self._inner) self._inner.style.transform = 'translate(' + self.panX + 'px,' + self.panY + 'px)';
-                }
-                function up() {
-                    document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up);
-                    document.body.style.userSelect = '';
-                    try { localStorage.setItem('ade.pan', JSON.stringify({ x: self.panX, y: self.panY })); } catch (x) {}
-                }
-                document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
+                startPan(e.clientX, e.clientY, 'mousemove', 'mouseup', function (ev) { return { x: ev.clientX, y: ev.clientY }; });
             }
         });
+        wrap.addEventListener('touchstart', function (e) {
+            if (self.termLayout !== 'free' || e.touches.length !== 1) return;
+            if (e.target.closest && e.target.closest('.term-pane')) return;   // let panes scroll/select
+            var t = e.touches[0];
+            startPan(t.clientX, t.clientY, 'touchmove', 'touchend', function (ev) {
+                var u = ev.touches[0] || (ev.changedTouches && ev.changedTouches[0]); return u ? { x: u.clientX, y: u.clientY } : null;
+            });
+        }, { passive: true });
         wrap.addEventListener('contextmenu', function (e) {
             if (e.target.closest && e.target.closest('.term-pane')) return;   // pane has its own context
             e.preventDefault(); self.showCanvasMenu(e.clientX, e.clientY);

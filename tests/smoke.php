@@ -853,7 +853,7 @@ ok('web mode stays vanilla (no deps in web/)', !is_file($adeDir . '/web/package.
 ok('composer serve script wired', strpos((string)@file_get_contents($adeDir . '/composer.json'), '"serve"') !== false);
 $adeCss = (string)@file_get_contents($adeDir . '/public/app.css');
 ok('ADE app is responsive (mobile media query)', strpos($adeCss, '@media (max-width: 820px)') !== false && strpos($adeCss, 'nav-open') !== false);
-ok('mobile sidebar drawer wired in JS', strpos($ade, 'initResponsive') !== false && strpos($ade, "matchMedia('(max-width: 820px)')") !== false);
+ok('sidebar/projects drawer (☰) wired in JS for the full-canvas layout', strpos($ade, 'initResponsive') !== false && strpos($ade, "nav-open") !== false && strpos($ade, "'#navToggle'") !== false);
 ok('terminal has a touch input + key bar', strpos($ade, 'term-touch') !== false && strpos($ade, 'term-input') !== false && strpos($ade, 'var KEYS = {') !== false && strpos($ade, 'data-k="cc"') !== false);
 ok('touch input bar hidden on desktop, shown on mobile', strpos($adeCss, '.term-touch { display: none;') !== false && strpos($adeCss, '.term-touch { display: flex; }') !== false);
 

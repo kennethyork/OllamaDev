@@ -1,5 +1,12 @@
 # Changelog
 
+## v4.8.69 (2026-06-08) — full-bleed canvas: the rail + Projects become a ☰ drawer
+
+### Changed
+- **The canvas now fills the entire window.** The left rail and Projects sidebar are an overlay **drawer** toggled by a **☰** button (top-left) instead of permanently occupying the left edge — so the canvas spans full width.
+- Opening a window from the rail, picking a file or project, clicking the canvas, or pressing Esc closes the drawer again to reveal the full canvas.
+- Works the same on **desktop and mobile** (web), and the canvas now **pans with one-finger touch**, not just mouse drag.
+
 ## v4.8.68 (2026-06-08) — Voice control window: press-to-talk to open windows or drive the CLI
 
 ### Added
