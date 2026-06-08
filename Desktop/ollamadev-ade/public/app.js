@@ -287,25 +287,35 @@ CanvasRenderer.prototype.readTheme = function () {
     var bg = cs.backgroundColor;
     this.bg = (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') ? bg : (cs.getPropertyValue('--bg2') || '#0d1117').trim();
     this.fontPx = parseFloat(cs.fontSize) || 13;
-    this.fontFam = (cs.fontFamily || cs.getPropertyValue('--mono') || 'monospace').trim() || 'monospace';
+    var fam = (cs.fontFamily || cs.getPropertyValue('--mono') || 'monospace').trim() || 'monospace';
+    // Append an emoji fallback so glyphs like 🧭 render instead of tofu (□□).
+    if (!/emoji/i.test(fam)) fam += ', "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", monospace';
+    this.fontFam = fam;
     this.lineH = parseFloat(cs.lineHeight) || (this.fontPx * 1.45);
 };
 CanvasRenderer.prototype.dispose = function () {
     if (this.screen && this._padSave !== undefined) this.screen.style.padding = this._padSave;   // restore DOM padding
     if (this.canvas && this.canvas.parentNode) this.canvas.parentNode.removeChild(this.canvas);
 };
-// Resize: set the canvas backing store (×dpr for crisp text) and remember geometry.
+// Resize: fill the screen, derive cols/rows from the LIVE container size (the
+// authoritative measurement — avoids a stale clientWidth shrinking the canvas),
+// and clear to the theme bg. Returns {cols, rows} so the pty can be sized to match.
 CanvasRenderer.prototype.resize = function (cols, rows, cw, ch, dpr) {
     this.readTheme();   // re-read in case the theme/font changed
-    this.cols = Math.max(2, cols | 0); this.rows = Math.max(2, rows | 0);
     this.cw = cw || this.cw; this.chh = ch || this.chh; this.dpr = dpr || this.dpr || 1;
-    var W = Math.ceil(this.cols * this.cw), H = Math.ceil(this.rows * this.chh);
+    // Fill the container; the canvas CSS is 100%×100%, so use the live pixel size.
+    var W = this.screen.clientWidth || Math.ceil((cols || 80) * this.cw);
+    var H = this.screen.clientHeight || Math.ceil((rows || 24) * this.chh);
+    this.cols = Math.max(2, Math.floor(W / this.cw));
+    this.rows = Math.max(2, Math.floor(H / this.chh));
     this.canvas.style.width = W + 'px'; this.canvas.style.height = H + 'px';
     this.canvas.width = Math.ceil(W * this.dpr); this.canvas.height = Math.ceil(H * this.dpr);
     this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     this.ctx.textBaseline = 'top';
+    this.ctx.fillStyle = this.bg; this.ctx.fillRect(0, 0, W, H);   // paint the whole backdrop
     if (this.alt && this.grid) this.grid.resize(this.cols, this.rows);
     this.painted = []; this.fullRepaint();
+    return { cols: this.cols, rows: this.rows };
 };
 // Active (bottom) screen rows of the scrollback buffer.
 CanvasRenderer.prototype.base = function () { return Math.max(0, this.lines.length - this.rows); };
@@ -599,6 +609,12 @@ Terminal.prototype.mount = function (host) {
     }
     if (!this.polling) this.poll();
     setTimeout(function () { self.screen.focus(); self.fit(); }, 0);   // size the pty once laid out
+    // Re-fit whenever the pane's actual size changes (mount settle, free-pane drag,
+    // zoom, window resize) — no timing guesswork. Fixes a canvas sized off a stale
+    // clientWidth. Works for the DOM renderer too (keeps the pty cols/rows correct).
+    if (window.ResizeObserver) {
+        try { if (this._ro) this._ro.disconnect(); this._ro = new ResizeObserver(function () { self.fit(); }); this._ro.observe(this.screen); } catch (e) {}
+    }
 };
 Terminal.prototype.setStatus = function (s) {
     this.status = s;
@@ -730,12 +746,18 @@ Terminal.prototype.measure = function () {
 Terminal.prototype.fit = function () {
     if (!this.screen || !this.screen.clientWidth) return;
     var m = this.measure();
+    // Canvas mode: the renderer fills the container and derives cols/rows itself
+    // (authoritative). Size the pty to whatever it actually fit.
+    if (this.canvasR) {
+        var g = this.canvasR.resize(0, 0, m.cw, m.ch, window.devicePixelRatio || 1);
+        if (g && (g.cols !== this._cols || g.rows !== this._rows)) { this._cols = g.cols; this._rows = g.rows; try { window.termResize(this.id, g.cols, g.rows); } catch (e) {} }
+        return;
+    }
     var cols = Math.max(20, Math.floor((this.screen.clientWidth - 6) / m.cw));
     var rows = Math.max(6, Math.floor((this.screen.clientHeight - 4) / m.ch));
     if (cols === this._cols && rows === this._rows) return;
     this._cols = cols; this._rows = rows;
     try { window.termResize(this.id, cols, rows); } catch (e) {}
-    if (this.canvasR) this.canvasR.resize(cols, rows, m.cw, m.ch, window.devicePixelRatio || 1);
     if (this.alt && this.grid) { this.grid.resize(cols, rows); this.renderGrid(); }
 };
 Terminal.prototype.poll = function () {
@@ -767,7 +789,7 @@ Terminal.prototype._pollLoop = function () {
     tick();
 };
 Terminal.prototype._closeStream = function () { if (this._es) { try { this._es.close(); } catch (e) {} this._es = null; } };
-Terminal.prototype._disposeCanvas = function () { if (this.canvasR) { try { this.canvasR.dispose(); } catch (e) {} this.canvasR = null; } };
+Terminal.prototype._disposeCanvas = function () { if (this.canvasR) { try { this.canvasR.dispose(); } catch (e) {} this.canvasR = null; } if (this._ro) { try { this._ro.disconnect(); } catch (e) {} this._ro = null; } };
 Terminal.prototype.close = function () { this.polling = false; this._closeStream(); this._disposeCanvas(); try { window.termKill(this.id); } catch (e) {} };
 // Detach the UI but KEEP the backend pty alive (used when switching workspaces),
 // so re-attaching later resumes the same running session.

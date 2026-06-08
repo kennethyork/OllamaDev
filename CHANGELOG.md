@@ -1,5 +1,11 @@
 # Changelog
 
+## v4.8.60 (2026-06-07) — canvas terminal: fill the pane + emoji
+
+### Fixed
+- **The canvas renderer now fills the whole pane.** It was sized from a stale `clientWidth` (measured before a free-floating pane reached its real size), so it rendered into a small box in the corner with text clipped off the right. It now fills the container, derives cols/rows from the live pixel size, and re-fits via a **ResizeObserver** whenever the pane actually changes size (mount, drag-resize, zoom, window resize) — no timing guesswork. The ResizeObserver also keeps the DOM renderer's pty cols/rows correct.
+- **Emoji no longer render as `□□` tofu** — the canvas font stack now includes an emoji fallback (Noto/Apple/Segoe emoji), so glyphs like 🧭 render.
+
 ## v4.8.59 (2026-06-07) — free-mode focus + canvas/DOM terminal parity
 
 ### Fixed
