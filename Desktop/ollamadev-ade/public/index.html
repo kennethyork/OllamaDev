@@ -54,31 +54,12 @@
 
         <aside id="sidebar">
             <!-- Project workspaces — a vertical list at the top of the left pane.
-                 One row per project; click to switch, ＋ opens another. -->
+                 One row per project; click to switch, ＋ opens another. Files / Search /
+                 Tasks now live on the canvas as windows (open them from the rail or ＋ Add). -->
             <div id="wsBar">
                 <div class="side-title">Projects</div>
                 <div id="wsStrip" class="ws-strip"></div>
                 <button id="wsBarAdd" class="ws-bar-add" title="Open another project as a new tab">＋ Open project</button>
-            </div>
-            <div id="filesPanel" class="panel">
-                <div class="side-title">Files</div>
-                <div id="breadcrumb" class="dim"></div>
-                <div id="fileTree"></div>
-            </div>
-            <div id="searchPanel" class="panel" hidden>
-                <div class="side-title">Code search</div>
-                <div class="task-add">
-                    <input id="codeSearchInput" class="field" placeholder="Find code by meaning… (Enter)">
-                </div>
-                <div id="codeSearchHint" class="dim">Semantic search over this project (local embeddings).</div>
-                <div id="codeSearchResults"></div>
-            </div>
-            <div id="tasksPanel" class="panel" hidden>
-                <div class="side-title">Tasks</div>
-                <div class="task-add">
-                    <input id="taskInput" class="field" placeholder="New task… (Enter)">
-                </div>
-                <div id="taskHint" class="dim">Tasks live on the Board. Press Run to hand one to an agent terminal.</div>
             </div>
         </aside>
 
@@ -95,6 +76,27 @@
                  here into a canvas pane when added, and back here (hidden) when closed —
                  so each view keeps all its state (graph layout, browser page, editor tabs). -->
             <div id="paneStore" hidden>
+                <div id="filesPanel" class="panel ws-view">
+                    <div class="side-title">Files</div>
+                    <div id="breadcrumb" class="dim"></div>
+                    <div id="fileTree"></div>
+                </div>
+                <div id="searchPanel" class="panel ws-view">
+                    <div class="side-title">Code search</div>
+                    <div class="task-add">
+                        <input id="codeSearchInput" class="field" placeholder="Find code by meaning… (Enter)">
+                    </div>
+                    <div id="codeSearchHint" class="dim">Semantic search over this project (local embeddings).</div>
+                    <div id="codeSearchResults"></div>
+                </div>
+                <div id="tasksPanel" class="panel ws-view">
+                    <div class="side-title">Tasks</div>
+                    <div class="task-add">
+                        <input id="taskInput" class="field" placeholder="New task… (Enter)">
+                    </div>
+                    <div id="taskHint" class="dim">Tasks live on the Board. Press Run to hand one to an agent terminal.</div>
+                </div>
+
                 <section id="editorPane" class="ws-view">
                     <div id="editorTabs"></div>
                     <div id="editorBody">
@@ -143,6 +145,9 @@
             <div id="canvasMenu" class="canvas-menu" hidden>
                 <button data-add="terminal">＋ Terminal</button>
                 <button data-add="editor">📝 Editor</button>
+                <button data-add="files">▤ Files</button>
+                <button data-add="search">🔎 Code search</button>
+                <button data-add="tasks">▦ Tasks</button>
                 <button data-add="board">📋 Board</button>
                 <button data-add="graph">🕸 Graph</button>
                 <button data-add="browser">🌐 Browser</button>

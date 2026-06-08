@@ -1,5 +1,13 @@
 # Changelog
 
+## v4.8.66 (2026-06-08) — every window lives on the canvas (Files / Search / Tasks too)
+
+### Changed
+- **Files, Code search, and Tasks are now canvas windows too** — they left the fixed left sidebar and join the editor / board / graph / browser / terminals as draggable, resizable panes on the infinite canvas. The sidebar now holds only the **Projects** switcher.
+- The **rail buttons** (▤ 🔎 ▦) and **＋ Add** / right-click menu open or focus each window on the canvas; an open window's rail button shows active.
+- A **Files** window opens automatically the first time a project lands on the canvas (so the tree is right there). Each window's open state + position travels per-project, as before.
+- Still 100% vanilla — the panels are moved (not duplicated) between a hidden store and their pane, so state is preserved.
+
 ## v4.8.65 (2026-06-08) — canvas layout is per-project (multiple workspaces, like before)
 
 ### Changed

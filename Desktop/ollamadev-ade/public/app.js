@@ -1878,9 +1878,16 @@ var App = {
     // is moved onto the canvas so all state is preserved.
     panX: 0, panY: 0,
     popped: {},
-    POP_VIEWS: ['editor', 'board', 'graph', 'browser'],
-    POP_SEL: { editor: '#editorPane', board: '#boardView', graph: '#graphView', browser: '#browserView' },
-    POP_TITLE: { editor: '📝 Editor', board: '📋 Board', graph: '🕸 Graph', browser: '🌐 Browser' },
+    POP_VIEWS: ['files', 'search', 'tasks', 'editor', 'board', 'graph', 'browser'],
+    POP_SEL: { files: '#filesPanel', search: '#searchPanel', tasks: '#tasksPanel', editor: '#editorPane', board: '#boardView', graph: '#graphView', browser: '#browserView' },
+    POP_TITLE: { files: '▤ Files', search: '🔎 Code search', tasks: '▦ Tasks', editor: '📝 Editor', board: '📋 Board', graph: '🕸 Graph', browser: '🌐 Browser' },
+    // Sensible default size/spot (canvas-world coords) when a window is first opened.
+    POP_DEFAULT: {
+        files: { x: 16, y: 16, w: 290, h: 460 }, search: { x: 16, y: 16, w: 320, h: 460 },
+        tasks: { x: 16, y: 16, w: 300, h: 340 }, editor: { x: 326, y: 16, w: 640, h: 460 },
+        board: { x: 16, y: 16, w: 580, h: 430 }, graph: { x: 16, y: 16, w: 640, h: 470 },
+        browser: { x: 16, y: 16, w: 720, h: 500 }
+    },
     // PTYs spawned this session, by id. Survives detach (workspace switch) so we
     // can RE-attach a still-running terminal; gone after a restart → respawn fresh.
     live: {},
@@ -2079,13 +2086,16 @@ var App = {
         document.body.dataset.theme = t;
         try { localStorage.setItem('ade.theme', t); } catch (e) {}
     },
+    // The rail buttons now open (or focus) that window on the canvas.
     setPanel: function (p) {
         this.panel = p;
-        document.querySelectorAll('.rail-btn').forEach(function (b) { b.classList.toggle('active', b.dataset.panel === p); });
-        $('#filesPanel').hidden = p !== 'files';
-        $('#tasksPanel').hidden = p !== 'tasks';
-        var sp = $('#searchPanel'); if (sp) sp.hidden = p !== 'search';
-        if (p === 'search') CodeSearch.onShow();
+        this.addPane(p);
+        this._syncRail();
+    },
+    // Mark a rail button active when its window is open on the canvas.
+    _syncRail: function () {
+        var self = this;
+        document.querySelectorAll('.rail-btn').forEach(function (b) { b.classList.toggle('active', !!self.popped[b.dataset.panel]); });
     },
     // There are no tabs anymore — the canvas is always shown. setView is kept for the
     // callers that "jump to" a view: a view name just opens (or focuses) that pane on
@@ -2623,6 +2633,9 @@ var App = {
             var g = state.panes[v];
             self.popped[v] = { id: '__pop_' + v + '__', view: v, x: g.x, y: g.y, w: g.w, h: g.h, z: ++self._zTop };
         });
+        // First time on the canvas (no saved layout): open a Files window so the file
+        // tree is right there — otherwise the tree would have nowhere to show.
+        if (!state.panes) { var df = this.POP_DEFAULT.files; this.popped.files = { id: '__pop_files__', view: 'files', x: df.x, y: df.y, w: df.w, h: df.h, z: ++this._zTop }; }
         this.savePopped();
         try { localStorage.setItem('ade.pan', JSON.stringify({ x: this.panX, y: this.panY })); } catch (e) {}
         Editor.closeAll();
@@ -2690,6 +2703,7 @@ var App = {
             if (t.view) self.mountPoppedPane(pane, t);
             else t.mount(pane);
         });
+        this._syncRail();
     },
     // ---- Free-floating layout: drag the header, resize the corner, overlap freely ----
     // Toggle the GPU/canvas terminal renderer. Re-renders so open terminals remount
@@ -2752,12 +2766,14 @@ var App = {
             if (isView) self.mountPoppedPane(pane, t); else t.mount(pane);
             var rh = document.createElement('div'); rh.className = 'term-resize'; pane.appendChild(rh);
             self.wireFree(t, pane, rh);
+            return pane;
         };
         this.terminals.forEach(function (t) { mountPane(t, false); });
         this._poppedPanes().forEach(function (b) {
             if (typeof b.x !== 'number') { b.x = 280; b.y = 24; b.w = 520; b.h = 400; b.z = ++self._zTop; }
             mountPane(b, true);
         });
+        this._syncRail();
     },
     // ---- Infinite canvas: pan by dragging empty space; right-click to add a pane ----
     bindCanvas: function () {
@@ -2867,8 +2883,9 @@ var App = {
     ensurePane: function (view) { if (this.POP_SEL[view] && !this.popped[view]) this.popView(view); },
     popView: function (view, wx, wy) {
         if (!this.POP_SEL[view] || this.popped[view]) return;
-        var x = (typeof wx === 'number') ? wx : 280 - this.panX, y = (typeof wy === 'number') ? wy : 24 - this.panY;
-        this.popped[view] = { id: '__pop_' + view + '__', view: view, x: x, y: y, w: 520, h: 400, z: ++this._zTop };
+        var d = this.POP_DEFAULT[view] || { x: 280, y: 24, w: 520, h: 400 };
+        var x = (typeof wx === 'number') ? wx : d.x - this.panX, y = (typeof wy === 'number') ? wy : d.y - this.panY;
+        this.popped[view] = { id: '__pop_' + view + '__', view: view, x: x, y: y, w: d.w, h: d.h, z: ++this._zTop };
         this.savePopped();
         this.render();
         if (view === 'board') { this.startCrewPoll(); Tasks.render(); }
@@ -2926,6 +2943,7 @@ var App = {
             if (view === 'board') Tasks.renderInto($('#board'));
             else if (view === 'graph') { if (Graph.resize) Graph.resize(); Graph.load(); }
             else if (view === 'browser' && window.Browser && Browser.onShow) Browser.onShow();
+            else if (view === 'search' && window.CodeSearch && CodeSearch.onShow) CodeSearch.onShow();
         }, 0);
     },
     wireFree: function (t, pane, rh) {

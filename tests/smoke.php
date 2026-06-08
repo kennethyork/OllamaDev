@@ -1433,8 +1433,8 @@ ok('Boson + web bridge expose the code-search bindings', strpos($idxPhp, "\$b->b
     strpos($bridgeJs, "'codeSearch', 'codeIndexStatus', 'codeIndexBuild'") !== false);
 ok('search panel + rail button in the UI', strpos($idxHtml2, 'id="searchPanel"') !== false &&
     strpos($idxHtml2, 'data-panel="search"') !== false && strpos($idxHtml2, 'id="codeSearchInput"') !== false);
-ok('app.js has a CodeSearch module wired into setPanel', strpos($appjs, 'var CodeSearch = {') !== false &&
-    strpos($appjs, 'CodeSearch.bind()') !== false && strpos($appjs, "if (p === 'search') CodeSearch.onShow()") !== false);
+ok('app.js has a CodeSearch module wired for the canvas search window', strpos($appjs, 'var CodeSearch = {') !== false &&
+    strpos($appjs, 'CodeSearch.bind()') !== false && strpos($appjs, "view === 'search' && window.CodeSearch && CodeSearch.onShow") !== false);
 // Landing cards repurposed (no new cards added) to surface the new features.
 $land = (string)@file_get_contents($repoRoot . '/docs/index.html');
 ok('landing card surfaces local semantic search', strpos($land, 'local semantic code search') !== false || strpos($land, 'semantic code search') !== false);
