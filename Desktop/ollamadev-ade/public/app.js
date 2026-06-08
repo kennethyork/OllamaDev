@@ -59,6 +59,124 @@ var Voice = {
     }
 };
 
+// Voice CONTROL — a press-to-talk window that runs your speech as a command (open
+// windows, new terminal, center, …) or pipes it straight to a CLI terminal. Reuses
+// the same local STT as dictation; nothing leaves the machine.
+var VoiceCtl = {
+    rec: null, mode: 'auto',
+    bind: function () {
+        var b = $('#voicePTT'); if (b) b.onclick = function () { VoiceCtl.toggle(); };
+        document.querySelectorAll('input[name="voiceMode"]').forEach(function (r) {
+            r.onchange = function () { if (r.checked) VoiceCtl.mode = r.value; };
+        });
+    },
+    refreshTarget: function () {
+        var el = $('#voiceTarget'); if (!el) return;
+        var t = App.activeTerminal();
+        el.textContent = t ? ('→ CLI target: ' + (t.model || 'terminal') + ' · ' + t.id.slice(-4)) : '→ CLI target: (open a terminal first)';
+    },
+    log: function (msg, kind) {
+        var box = $('#voiceLog'); if (!box) return;
+        var row = document.createElement('div');
+        row.className = 'vlog-row' + (kind ? ' ' + kind : '');
+        row.textContent = msg;
+        box.insertBefore(row, box.firstChild);
+        while (box.children.length > 8) box.removeChild(box.lastChild);
+    },
+    toggle: function () {
+        var btn = $('#voicePTT'); if (!btn) return;
+        if (this.rec) { try { this.rec.stop(); } catch (e) {} return; }
+        if (!window.sttTranscribe) { banner('no local STT engine configured', 'err'); this.log('no STT engine configured', 'err'); return; }
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') {
+            banner('this build has no microphone access', 'err'); return;
+        }
+        var self = this;
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+            var chunks = [], rec = new MediaRecorder(stream);
+            rec.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+            rec.onstop = function () {
+                stream.getTracks().forEach(function (t) { t.stop(); });
+                self.rec = null; btn.classList.remove('rec'); var l = btn.querySelector('.vlabel'); if (l) l.textContent = 'Press to talk';
+                var fr = new FileReader();
+                fr.onload = function () {
+                    var b64 = String(fr.result).split(',')[1] || '';
+                    if (!b64) { banner('no audio captured', 'err'); return; }
+                    banner('transcribing…');
+                    Promise.resolve(window.sttTranscribe(b64, 'webm')).then(function (text) { self.handle((text || '').trim()); })
+                        .catch(function () { banner('transcription failed', 'err'); self.log('transcription failed', 'err'); });
+                };
+                fr.readAsDataURL(new Blob(chunks, { type: 'audio/webm' }));
+            };
+            self.rec = rec; rec.start();
+            btn.classList.add('rec'); var l = btn.querySelector('.vlabel'); if (l) l.textContent = 'Listening… tap to stop';
+            banner('listening…');
+        }).catch(function () { banner('microphone permission denied', 'err'); });
+    },
+    handle: function (raw) {
+        var h = $('#voiceHeard'); if (h) h.textContent = raw ? ('“' + raw + '”') : '';
+        if (!raw) { banner('no transcription', 'err'); return; }
+        var lc = raw.toLowerCase().replace(/[.!?,]+$/, '');
+        // Explicit dictation: "type/say/send/tell … <text>" → straight to the CLI.
+        var pre = lc.match(/^(type|say|send|tell|dictate|prompt)\b[:,]?\s*/);
+        if (pre && this.mode !== 'cmd') { this.toCli(raw.slice(pre[0].length)); return; }
+        if (this.mode !== 'cli' && this.tryCommand(lc)) return;
+        if (this.mode === 'cmd') { this.log('no command matched: ' + raw, 'err'); banner('no matching command', 'err'); return; }
+        this.toCli(raw);   // Auto fallthrough / "To CLI" mode
+    },
+    tryCommand: function (lc) {
+        if (/\b(re-?center|center|fit|recenter)\b/.test(lc)) { App.centerCanvas(); this.log('centered the canvas'); return true; }
+        if (/\b(tiled?|grid)\b/.test(lc)) { App.setTermLayout('tiled'); this.log('tiled layout'); return true; }
+        if (/\b(free|canvas mode|float)\b/.test(lc)) { App.setTermLayout('free'); this.log('free canvas'); return true; }
+        if (/\bnew terminal\b|\b(add|open|another) (a )?terminal\b|\bnew (ollamadev|cli|agent)\b/.test(lc)) { App.spawnTerminal(); this.log('opened a new ollamadev CLI terminal', 'ok'); return true; }
+        var m = lc.match(/\b(open|show|add|launch|bring up|go to|switch to)\b\s+(.+)$/);
+        if (m) { var v = this.matchView(m[2]); if (v) { this.openView(v); this.log('opened ' + this.label(v), 'ok'); return true; } }
+        m = lc.match(/\b(close|hide|dismiss)\b\s+(.+)$/);
+        if (m) { var c = this.matchView(m[2]); if (c) { App.closePaneView(c); this.log('closed ' + this.label(c), 'ok'); return true; } }
+        var bare = this.matchView(lc); if (bare) { this.openView(bare); this.log('opened ' + this.label(bare), 'ok'); return true; }
+        return false;
+    },
+    matchView: function (s) {
+        s = (s || '').toLowerCase();
+        if (/\bterminal|shell|\bterm\b|cli|agent\b/.test(s)) return 'terminal';
+        if (/editor|code editor/.test(s)) return 'editor';
+        if (/\bfiles?\b|file tree|explorer/.test(s)) return 'files';
+        if (/search/.test(s)) return 'search';
+        if (/task/.test(s)) return 'tasks';
+        if (/board|kanban/.test(s)) return 'board';
+        if (/graph|memory|notes/.test(s)) return 'graph';
+        if (/browser|preview|web ?view/.test(s)) return 'browser';
+        if (/crew|team|director/.test(s)) return 'crew';
+        if (/review|diff|changes/.test(s)) return 'diff';
+        if (/roles?/.test(s)) return 'roles';
+        if (/skills?/.test(s)) return 'skills';
+        if (/hooks?/.test(s)) return 'hooks';
+        if (/voice/.test(s)) return 'voice';
+        return null;
+    },
+    label: function (v) { return (App.POP_TITLE[v] || v).replace(/^\S+\s/, ''); },
+    openView: function (v) {
+        if (v === 'terminal') { App.spawnTerminal(); return; }
+        if (v === 'crew') { App.openCrew(); return; }
+        if (v === 'diff') { Diff.open(); return; }
+        if (v === 'roles') { Roles.open(); return; }
+        if (v === 'skills') { SkillMgr.open(); return; }
+        if (v === 'hooks') { HookMgr.open(); return; }
+        App.addPane(v);   // files/search/tasks/editor/board/graph/browser/voice
+    },
+    toCli: function (text) {
+        text = (text || '').trim();
+        var t = App.activeTerminal();
+        if (!t) { this.log('no terminal — say “new terminal” first', 'err'); banner('no terminal open', 'err'); return; }
+        var lc = text.toLowerCase().replace(/[.!?,]+$/, '');
+        if (/^(enter|press enter|submit|run it|send it|go ahead)$/.test(lc)) { App.sendToTerminal(t, '\n'); this.log('↵ enter → ' + t.id.slice(-4)); return; }
+        if (/^(control c|ctrl c|cancel|stop it|interrupt)$/.test(lc)) { App.sendToTerminal(t, '\x03'); this.log('^C → ' + t.id.slice(-4)); return; }
+        if (/^(clear|control l)$/.test(lc)) { App.sendToTerminal(t, '\x0c'); this.log('clear → ' + t.id.slice(-4)); return; }
+        if (!text) return;
+        App.sendToTerminal(t, text + '\n');
+        this.log('→ CLI: ' + text, 'ok'); banner('sent to terminal', 'ok');
+    }
+};
+
 // Tidy a long absolute path for a narrow label: collapse $HOME to ~ and keep the
 // meaningful tail (last segments) instead of the start, e.g.
 //   /home/me/Documents/OllamaDev/Desktop/ollamadev-ade  ->  ~/…/Desktop/ollamadev-ade
@@ -599,7 +717,8 @@ Terminal.prototype.mount = function (host) {
         var t = (e.clipboardData || window.clipboardData).getData('text');
         if (t) { e.preventDefault(); try { window.termWrite(self.id, strToB64(t)); } catch (err) {} }
     });
-    this.screen.onclick = function () { self.screen.focus(); };
+    this.screen.onclick = function () { self.screen.focus(); if (window.App) App.lastActiveTerm = self.id; };
+    this.screen.addEventListener('focus', function () { if (window.App) App.lastActiveTerm = self.id; });
     this.alt = false; this.grid = null; this.gridEl = null;   // alt screen never survives a remount
     // Opt-in GPU-composited canvas renderer (App.canvasTerm). Default is the DOM
     // renderer, untouched — so this can never regress the working terminal.
@@ -1879,17 +1998,17 @@ var App = {
     panX: 0, panY: 0,
     popped: {},
     // Persistent content windows (saved per-project, in the rail + Add menu).
-    POP_VIEWS: ['files', 'search', 'tasks', 'editor', 'board', 'graph', 'browser'],
+    POP_VIEWS: ['files', 'search', 'tasks', 'voice', 'editor', 'board', 'graph', 'browser'],
     // Tool dialogs — now canvas windows too, but transient (not persisted across restart).
     DIALOG_VIEWS: ['crew', 'roles', 'skills', 'hooks', 'diff'],
     POP_SEL: {
         files: '#filesPanel', search: '#searchPanel', tasks: '#tasksPanel', editor: '#editorPane',
-        board: '#boardView', graph: '#graphView', browser: '#browserView',
+        board: '#boardView', graph: '#graphView', browser: '#browserView', voice: '#voicePanel',
         crew: '#crewModal', roles: '#rolesModal', skills: '#skillsModal', hooks: '#hooksModal', diff: '#diffModal'
     },
     POP_TITLE: {
         files: '▤ Files', search: '🔎 Code search', tasks: '▦ Tasks', editor: '📝 Editor',
-        board: '📋 Board', graph: '🕸 Graph', browser: '🌐 Browser',
+        board: '📋 Board', graph: '🕸 Graph', browser: '🌐 Browser', voice: '🎙 Voice',
         crew: '👥 Crew', roles: '🎭 Roles', skills: '🧩 Skills', hooks: '🪝 Hooks', diff: '⇄ Review'
     },
     // Sensible default size/spot (canvas-world coords) when a window is first opened.
@@ -1897,7 +2016,7 @@ var App = {
         files: { x: 16, y: 16, w: 290, h: 460 }, search: { x: 16, y: 16, w: 320, h: 460 },
         tasks: { x: 16, y: 16, w: 300, h: 340 }, editor: { x: 326, y: 16, w: 640, h: 460 },
         board: { x: 16, y: 16, w: 580, h: 430 }, graph: { x: 16, y: 16, w: 640, h: 470 },
-        browser: { x: 16, y: 16, w: 720, h: 500 },
+        browser: { x: 16, y: 16, w: 720, h: 500 }, voice: { x: 16, y: 16, w: 320, h: 420 },
         crew: { x: 80, y: 24, w: 700, h: 580 }, roles: { x: 100, y: 36, w: 620, h: 520 },
         skills: { x: 100, y: 36, w: 640, h: 540 }, hooks: { x: 100, y: 36, w: 640, h: 540 },
         diff: { x: 48, y: 20, w: 860, h: 640 }
@@ -1973,6 +2092,7 @@ var App = {
             fitTimer = setTimeout(function () { (self.terminals || []).forEach(function (t) { if (t.screen) t.fit(); }); }, 120);
         });
         Net.bind(); Net.load();
+        VoiceCtl.bind();
         Browser.bind();
         CodeSearch.bind();
         Diff.bind();
@@ -2587,6 +2707,16 @@ var App = {
         var i = this.terminals.findIndex(function (t) { return t.id === id; });
         if (i >= 0) { this.terminals[i].close(); delete this.live[id]; this.terminals.splice(i, 1); this.render(); }
     },
+    // The terminal voice/commands target: the last one you focused, else the first.
+    activeTerminal: function () {
+        var self = this, t = this.lastActiveTerm && this.terminals.filter(function (x) { return x.id === self.lastActiveTerm; })[0];
+        return t || this.terminals[0] || null;
+    },
+    sendToTerminal: function (t, s) {
+        if (!t) return;
+        try { window.termWrite(t.id, strToB64(s)); } catch (e) {}
+        if (t.setStatus) { t.setStatus('running'); t.lastData = Date.now(); }
+    },
     // Keep the active workspace's window state persisted so reopening the app
     // RESUMES it. Previously state was only saved when switching away from a
     // workspace, so working in one project and just closing the app lost the
@@ -2965,6 +3095,7 @@ var App = {
             else if (view === 'graph') { if (Graph.resize) Graph.resize(); Graph.load(); }
             else if (view === 'browser' && window.Browser && Browser.onShow) Browser.onShow();
             else if (view === 'search' && window.CodeSearch && CodeSearch.onShow) CodeSearch.onShow();
+            else if (view === 'voice' && window.VoiceCtl) VoiceCtl.refreshTarget();
         }, 0);
     },
     wireFree: function (t, pane, rh) {

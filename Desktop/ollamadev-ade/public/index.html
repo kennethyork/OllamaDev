@@ -76,6 +76,19 @@
                  here into a canvas pane when added, and back here (hidden) when closed —
                  so each view keeps all its state (graph layout, browser page, editor tabs). -->
             <div id="paneStore" hidden>
+                <div id="voicePanel" class="panel ws-view voice-panel">
+                    <div class="side-title">🎙 Voice control</div>
+                    <button id="voicePTT" class="voice-ptt" type="button"><span class="vmic">🎤</span><span class="vlabel">Press to talk</span></button>
+                    <div class="voice-mode">
+                        <label><input type="radio" name="voiceMode" value="auto" checked> Auto</label>
+                        <label><input type="radio" name="voiceMode" value="cmd"> Commands</label>
+                        <label><input type="radio" name="voiceMode" value="cli"> To CLI</label>
+                    </div>
+                    <div id="voiceTarget" class="dim"></div>
+                    <div id="voiceHeard" class="voice-heard dim"></div>
+                    <div id="voiceLog" class="voice-log"></div>
+                    <div class="voice-help dim">Try: “open board”, “new terminal”, “show graph”, “review”, “center”, “tile”. Or dictate to the CLI: “type add tests to the signup form”, then “enter”. (“Commands” = only open windows · “To CLI” = always send to the terminal.)</div>
+                </div>
                 <div id="filesPanel" class="panel ws-view">
                     <div class="side-title">Files</div>
                     <div id="breadcrumb" class="dim"></div>
@@ -144,6 +157,7 @@
             <!-- Right-click / ＋ Add menu for dropping a new pane on the canvas. -->
             <div id="canvasMenu" class="canvas-menu" hidden>
                 <button data-add="terminal">＋ Terminal</button>
+                <button data-add="voice">🎙 Voice control</button>
                 <button data-add="editor">📝 Editor</button>
                 <button data-add="files">▤ Files</button>
                 <button data-add="search">🔎 Code search</button>

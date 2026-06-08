@@ -1,5 +1,15 @@
 # Changelog
 
+## v4.8.68 (2026-06-08) — Voice control window: press-to-talk to open windows or drive the CLI
+
+### Added
+- **A 🎙 Voice control window** (right-click canvas / ＋ Add → Voice control). Press-to-talk, and your speech either **runs as a command** or is **piped to a CLI terminal**:
+  - **Open / control windows by voice** — “new terminal” (opens a fresh ollamadev CLI), “open board”, “show graph”, “review”, “open files / search / tasks / browser / editor / crew / roles / skills / hooks”, “close graph”, “center”, “tile”, “free”.
+  - **Dictate to the CLI** — say “type add input validation to the signup form”, then “enter” to run it. “control c” interrupts, “clear” clears. It targets the terminal you last focused.
+  - **Three modes** — *Auto* (a command if it matches one, otherwise sent to the CLI), *Commands* (only window/canvas actions), *To CLI* (always send to the terminal).
+  - Uses the same local STT engine as dictation — nothing leaves the machine. Shows what it heard and a short action log.
+- Pure vanilla — reuses the existing `MediaRecorder` + `sttTranscribe` plumbing and the canvas-window machinery.
+
 ## v4.8.67 (2026-06-08) — tool dialogs are canvas windows too (Crew / Review / Roles / Skills / Hooks)
 
 ### Changed
