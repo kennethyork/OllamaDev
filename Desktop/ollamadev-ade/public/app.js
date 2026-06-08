@@ -124,6 +124,9 @@ var VoiceCtl = {
         this.toCli(raw);   // Auto fallthrough / "To CLI" mode
     },
     tryCommand: function (lc) {
+        if (/\bzoom in\b|\bzoom closer\b/.test(lc)) { App.zoomBy(1.2); this.log('zoomed in'); return true; }
+        if (/\bzoom out\b|\bzoom away\b/.test(lc)) { App.zoomBy(1 / 1.2); this.log('zoomed out'); return true; }
+        if (/\b(reset zoom|zoom reset|actual size|hundred percent|100 ?%)\b/.test(lc)) { App.resetZoom(); this.log('zoom reset'); return true; }
         if (/\b(re-?center|center|fit|recenter)\b/.test(lc)) { App.centerCanvas(); this.log('centered the canvas'); return true; }
         if (/\b(tiled?|grid)\b/.test(lc)) { App.setTermLayout('tiled'); this.log('tiled layout'); return true; }
         if (/\b(free|canvas mode|float)\b/.test(lc)) { App.setTermLayout('free'); this.log('free canvas'); return true; }
@@ -1995,7 +1998,7 @@ var App = {
     // panes are positioned at (world x + panX, world y + panY). Singleton "view" panes
     // (editor/board/graph/browser) live in `popped` (view -> geometry); their real element
     // is moved onto the canvas so all state is preserved.
-    panX: 0, panY: 0,
+    panX: 0, panY: 0, zoom: 1,
     popped: {},
     // Persistent content windows (saved per-project, in the rail + Add menu).
     POP_VIEWS: ['files', 'search', 'tasks', 'voice', 'editor', 'board', 'graph', 'browser'],
@@ -2046,7 +2049,7 @@ var App = {
                 if (g && typeof g.x === 'number') self.popped[view] = { id: '__pop_' + view + '__', view: view, x: g.x, y: g.y, w: g.w, h: g.h, z: 0 };
             });
         } catch (e) {}
-        try { var pan = JSON.parse(localStorage.getItem('ade.pan') || 'null'); if (pan) { self.panX = pan.x || 0; self.panY = pan.y || 0; } } catch (e) {}
+        try { var pan = JSON.parse(localStorage.getItem('ade.pan') || 'null'); if (pan) { self.panX = pan.x || 0; self.panY = pan.y || 0; if (pan.zoom) self.zoom = pan.zoom; } } catch (e) {}
         // Add-pane menu: the ＋ Add toolbar button and right-click on empty canvas.
         var addBtn = $('#addPaneBtn'); if (addBtn) addBtn.onclick = function (e) { self.showCanvasMenu(e.clientX, e.clientY); };
         var ctrBtn = $('#canvasResetBtn'); if (ctrBtn) ctrBtn.onclick = function () { self.centerCanvas(); };
@@ -2897,9 +2900,9 @@ var App = {
         // (cheap, and the canvas extends infinitely in every direction).
         var inner = document.createElement('div');
         inner.className = 'canvas-inner';
-        inner.style.transform = 'translate(' + this.panX + 'px,' + this.panY + 'px)';
         wrap.appendChild(inner);
         this._inner = inner;
+        inner.style.transform = 'translate(' + this.panX + 'px,' + this.panY + 'px) scale(' + this.zoom + ')';
         var mountPane = function (t, isView) {
             if (typeof t.x !== 'number') self.applyGeom(t, self.terminals.indexOf(t));
             var pane = document.createElement('div');
@@ -2933,12 +2936,12 @@ var App = {
             function mv(ev) {
                 var p = getPt(ev); if (!p) return;
                 self.panX = ox + p.x - px; self.panY = oy + p.y - py;
-                if (self._inner) self._inner.style.transform = 'translate(' + self.panX + 'px,' + self.panY + 'px)';
+                if (self._inner) self._inner.style.transform = 'translate(' + self.panX + 'px,' + self.panY + 'px) scale(' + self.zoom + ')';
             }
             function up() {
                 document.removeEventListener(moveEvt, mv); document.removeEventListener(endEvt, up);
                 document.body.style.userSelect = '';
-                try { localStorage.setItem('ade.pan', JSON.stringify({ x: self.panX, y: self.panY })); } catch (x) {}
+                self._saveView();
             }
             document.addEventListener(moveEvt, mv); document.addEventListener(endEvt, up);
         };
@@ -2959,6 +2962,14 @@ var App = {
                 var u = ev.touches[0] || (ev.changedTouches && ev.changedTouches[0]); return u ? { x: u.clientX, y: u.clientY } : null;
             });
         }, { passive: true });
+        // Zoom: Ctrl/⌘ + wheel, or a trackpad pinch (which the browser reports as
+        // ctrl+wheel). Zooms toward the cursor. Plain wheel is left to scroll panes.
+        wrap.addEventListener('wheel', function (e) {
+            if (self.termLayout !== 'free') return;
+            if (!(e.ctrlKey || e.metaKey)) return;
+            e.preventDefault();
+            self.zoomBy(e.deltaY < 0 ? 1.1 : 0.9, e.clientX, e.clientY);
+        }, { passive: false });
         wrap.addEventListener('contextmenu', function (e) {
             if (e.target.closest && e.target.closest('.term-pane')) return;   // pane has its own context
             e.preventDefault(); self.showCanvasMenu(e.clientX, e.clientY);
@@ -2969,37 +2980,95 @@ var App = {
             if (m && !m.hidden && !m.contains(e.target) && e.target.id !== 'addPaneBtn') m.hidden = true;
         });
         var menu = $('#canvasMenu');
-        if (menu) menu.querySelectorAll('[data-add]').forEach(function (btn) {
+        if (menu) {
+            menu.querySelectorAll('[data-add]').forEach(function (btn) {
+                btn.onclick = function () {
+                    var pt = menu._spawnAt || { x: 60, y: 60 };
+                    menu.hidden = true;
+                    self.addPane(btn.dataset.add, pt.x, pt.y);
+                };
+            });
+            menu.querySelectorAll('[data-cmd]').forEach(function (btn) {
+                btn.onclick = function () { menu.hidden = true; self.runCmd(btn.dataset.cmd); };
+            });
+        }
+        // Floating zoom control (− 100% +)
+        var zc = $('#zoomCtl');
+        if (zc) zc.querySelectorAll('[data-zoom]').forEach(function (btn) {
             btn.onclick = function () {
-                var pt = menu._spawnAt || { x: 60, y: 60 };
-                menu.hidden = true;
-                self.addPane(btn.dataset.add, pt.x, pt.y);
+                var k = btn.dataset.zoom;
+                if (k === 'in') self.zoomBy(1.15); else if (k === 'out') self.zoomBy(1 / 1.15); else self.resetZoom();
             };
         });
+        // Update the % label once at startup.
+        var zl = $('#zoomLevel'); if (zl) zl.textContent = Math.round(this.zoom * 100) + '%';
     },
-    // Show the add-pane menu at a screen point; remember the canvas-world point to drop at.
+    // Show the add/command menu at a screen point; remember the canvas-world point to
+    // drop at, and refresh the toggle labels so they show current state.
     showCanvasMenu: function (clientX, clientY) {
         var menu = $('#canvasMenu'), wrap = $('#terminals'); if (!menu || !wrap) return;
         var r = wrap.getBoundingClientRect();
-        menu._spawnAt = { x: clientX - r.left - this.panX, y: clientY - r.top - this.panY };
-        menu.style.left = Math.min(clientX, window.innerWidth - 180) + 'px';
-        menu.style.top = Math.min(clientY, window.innerHeight - 220) + 'px';
+        menu._spawnAt = { x: (clientX - r.left - this.panX) / this.zoom, y: (clientY - r.top - this.panY) / this.zoom };
+        var lbl = function (cmd, text) { var b = menu.querySelector('[data-cmd="' + cmd + '"]'); if (b) b.textContent = text; };
+        lbl('web', (window.Net && Net.on) ? '🌐 Web access: on' : '🌐 Web access: off');
+        lbl('search-toggle', (window.Net && Net.search) ? '🔍 Web search: on' : '🔍 Web search: off');
+        lbl('layout', this.termLayout === 'free' ? '⊞ Switch to Tiled' : '⮻ Switch to Free');
+        lbl('renderer', this.canvasTerm ? '🖼 Renderer: Canvas → DOM' : '🖼 Renderer: DOM → Canvas');
+        var mw = menu.offsetWidth || 190, mh = menu.offsetHeight || 360;
+        menu.style.left = Math.max(4, Math.min(clientX, window.innerWidth - mw - 6)) + 'px';
+        menu.style.top = Math.max(4, Math.min(clientY, window.innerHeight - mh - 6)) + 'px';
         menu.hidden = false;
     },
-    // Add a pane at canvas-world coords (wx,wy). 'terminal' spawns a new pty; the rest
-    // open that singleton view pane (or just focus it if already open).
+    // Add a pane at canvas-world coords (wx,wy). 'terminal' spawns a new pty; tool dialogs
+    // run their richer opener (loads their data); the rest open/focus a singleton window.
     addPane: function (kind, wx, wy) {
         if (kind === 'terminal') { this._spawnGeom = { x: wx, y: wy }; this.spawnTerminal(); return; }
+        var openers = { crew: this.openCrew, diff: function () { Diff.open(); }, roles: function () { Roles.open(); }, skills: function () { SkillMgr.open(); }, hooks: function () { HookMgr.open(); } };
+        if (openers[kind]) { openers[kind].call(this); return; }
         if (this.POP_SEL[kind]) {
             if (this.popped[kind]) { this.focusPane(this.popped[kind].id); return; }
             this.popView(kind, wx, wy);
         }
+    },
+    // Run a menu command (the actions that used to be toolbar buttons).
+    runCmd: function (cmd) {
+        if (cmd === 'open-project') this.openFolderModal(false);
+        else if (cmd === 'web') { if (window.Net) Net.toggleWeb(); }
+        else if (cmd === 'search-toggle') { if (window.Net) Net.toggleSearch(); }
+        else if (cmd === 'layout') this.setTermLayout(this.termLayout === 'free' ? 'tiled' : 'free');
+        else if (cmd === 'renderer') this.setCanvasTerm(!this.canvasTerm);
+        else if (cmd === 'center') this.centerCanvas();
+        else if (cmd === 'history') { if (window.Stt && Stt.openHistory) Stt.openHistory(); }
     },
     focusPane: function (id) {
         var p = this._poppedPanes().filter(function (x) { return x.id === id; })[0] ||
             this.terminals.filter(function (t) { return t.id === id; })[0];
         if (p) { p.z = ++this._zTop; this.render(); }
     },
+    // The single source of truth for the canvas transform: pan (screen px) then zoom.
+    _applyTransform: function () {
+        if (this._inner) this._inner.style.transform = 'translate(' + this.panX + 'px,' + this.panY + 'px) scale(' + this.zoom + ')';
+        this._saveView();
+        var zl = $('#zoomLevel'); if (zl) zl.textContent = Math.round(this.zoom * 100) + '%';
+    },
+    _saveView: function () { try { localStorage.setItem('ade.pan', JSON.stringify({ x: this.panX, y: this.panY, zoom: this.zoom })); } catch (e) {} },
+    // Set the zoom, keeping the canvas-world point under (cx,cy) screen px fixed (zoom
+    // toward the cursor). Defaults to the viewport center.
+    setZoom: function (z, cx, cy) {
+        var wrap = $('#terminals'); if (!wrap) return;
+        z = Math.max(0.2, Math.min(3, z));
+        var r = wrap.getBoundingClientRect();
+        if (typeof cx !== 'number') { cx = r.left + r.width / 2; cy = r.top + r.height / 2; }
+        var sx = cx - r.left, sy = cy - r.top;
+        // world point under the cursor before the change
+        var wxp = (sx - this.panX) / this.zoom, wyp = (sy - this.panY) / this.zoom;
+        this.zoom = z;
+        // re-anchor pan so that same world point stays under the cursor
+        this.panX = sx - wxp * z; this.panY = sy - wyp * z;
+        this._applyTransform();
+    },
+    zoomBy: function (factor, cx, cy) { this.setZoom(this.zoom * factor, cx, cy); },
+    resetZoom: function () { this.setZoom(1); banner('zoom 100%', 'ok'); },
     // Re-center the canvas so the bounding box of all panes is brought into view.
     centerCanvas: function () {
         var all = this.terminals.concat(this._poppedPanes()).filter(function (p) { return typeof p.x === 'number'; });
@@ -3008,10 +3077,9 @@ var App = {
         else {
             var minX = Math.min.apply(null, all.map(function (p) { return p.x; }));
             var minY = Math.min.apply(null, all.map(function (p) { return p.y; }));
-            this.panX = 24 - minX; this.panY = 24 - minY;
+            this.panX = (24 - minX) * this.zoom; this.panY = (24 - minY) * this.zoom;
         }
-        try { localStorage.setItem('ade.pan', JSON.stringify({ x: this.panX, y: this.panY })); } catch (e) {}
-        if (this._inner) this._inner.style.transform = 'translate(' + this.panX + 'px,' + this.panY + 'px)';
+        this._applyTransform();
         banner('canvas re-centered', 'ok');
     },
     // Every open window entry (content windows + tool dialogs) — valid zoom/focus
@@ -3030,7 +3098,7 @@ var App = {
         if (g && typeof g.x === 'number') { t.x = g.x; t.y = g.y; t.w = g.w; t.h = g.h; t.z = g.z || ++this._zTop; }
         // Cascade into the CURRENTLY VISIBLE area (subtract pan), so a new pane never
         // spawns off-screen when the canvas is panned far away.
-        else { i = i < 0 ? 0 : i; t.x = (24 - this.panX) + (i * 30) % 240; t.y = (24 - this.panY) + (i * 30) % 170; t.w = 540; t.h = 340; t.z = ++this._zTop; }
+        else { i = i < 0 ? 0 : i; t.x = (24 - this.panX) / this.zoom + (i * 30) % 240; t.y = (24 - this.panY) / this.zoom + (i * 30) % 170; t.w = 540; t.h = 340; t.z = ++this._zTop; }
     },
     _zTop: 1,
     bringFront: function (t, pane) { t.z = ++this._zTop; pane.style.zIndex = t.z; },
@@ -3051,7 +3119,7 @@ var App = {
     popView: function (view, wx, wy) {
         if (!this.POP_SEL[view] || this.popped[view]) return;
         var d = this.POP_DEFAULT[view] || { x: 280, y: 24, w: 520, h: 400 };
-        var x = (typeof wx === 'number') ? wx : d.x - this.panX, y = (typeof wy === 'number') ? wy : d.y - this.panY;
+        var x = (typeof wx === 'number') ? wx : (d.x - this.panX) / this.zoom, y = (typeof wy === 'number') ? wy : (d.y - this.panY) / this.zoom;
         this.popped[view] = { id: '__pop_' + view + '__', view: view, x: x, y: y, w: d.w, h: d.h, z: ++this._zTop };
         this.savePopped();
         this.render();
@@ -3121,7 +3189,8 @@ var App = {
             if (e.target.closest('.zoom, .x, .popback, .term-cd, .term-cd-edit, .badge')) return;   // let buttons work
             e.preventDefault();
             var sx = e.clientX, sy = e.clientY, ox = t.x, oy = t.y;
-            function mv(ev) { t.x = Math.max(0, ox + ev.clientX - sx); t.y = Math.max(0, oy + ev.clientY - sy); pane.style.left = t.x + 'px'; pane.style.top = t.y + 'px'; }
+            // Divide client deltas by the canvas zoom so the pane tracks the cursor 1:1.
+            function mv(ev) { var z = self.zoom || 1; t.x = ox + (ev.clientX - sx) / z; t.y = oy + (ev.clientY - sy) / z; pane.style.left = t.x + 'px'; pane.style.top = t.y + 'px'; }
             function up() { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); document.body.style.userSelect = ''; self.saveGeomSoon(); }
             document.body.style.userSelect = 'none';
             document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
@@ -3129,7 +3198,7 @@ var App = {
         rh.addEventListener('mousedown', function (e) {
             e.preventDefault(); e.stopPropagation();
             var sx = e.clientX, sy = e.clientY, ow = t.w, oh = t.h;
-            function mv(ev) { t.w = Math.max(240, ow + ev.clientX - sx); t.h = Math.max(130, oh + ev.clientY - sy); pane.style.width = t.w + 'px'; pane.style.height = t.h + 'px'; }
+            function mv(ev) { var z = self.zoom || 1; t.w = Math.max(240, ow + (ev.clientX - sx) / z); t.h = Math.max(130, oh + (ev.clientY - sy) / z); pane.style.width = t.w + 'px'; pane.style.height = t.h + 'px'; }
             function up() { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); document.body.style.userSelect = ''; self.saveGeomSoon(); }
             document.body.style.userSelect = 'none';
             document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);

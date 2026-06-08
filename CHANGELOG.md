@@ -1,5 +1,13 @@
 # Changelog
 
+## v4.8.70 (2026-06-08) — canvas zoom + the top-bar actions move into the ＋ Add / right-click menu
+
+### Added
+- **Canvas zoom.** Zoom with **Ctrl/⌘ + scroll** or a **trackpad pinch** (zooms toward the cursor), or the floating **− 100% +** control bottom-right of the canvas. Voice too: “zoom in / zoom out / reset zoom”. Pane dragging/resizing and drop positions are all zoom-aware; the zoom level persists per project.
+
+### Changed
+- **The top-bar action buttons now live in the ＋ Add / right-click menu** (Open project, Web access, Web search, Tiled/Free, Renderer DOM/Canvas, Center, Voice history) plus the window types (Terminal, Editor, Files, Search, Tasks, Board, Graph, Browser, Crew, Review, Voice). The toggles show their current state. The top bar is now a **slim strip**: ☰, the model/temperature/STT/theme pickers, connection status, and **＋ Add**.
+
 ## v4.8.69 (2026-06-08) — full-bleed canvas: the rail + Projects become a ☰ drawer
 
 ### Changed

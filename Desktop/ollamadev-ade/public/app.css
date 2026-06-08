@@ -181,6 +181,7 @@ textarea.field { min-height: 84px; resize: vertical; line-height: 1.5; }
 .ws-tab:hover { color: var(--fg); }
 .ws-tab.active { color: var(--fg); background: var(--bg2); box-shadow: inset 0 -2px 0 var(--accent); }
 .ws-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+#codeView { position: relative; }   /* anchor the floating zoom control */
 .ws-view[hidden] { display: none; }
 
 /* code view = editor (top) + terminals (bottom) */
@@ -228,6 +229,14 @@ textarea.field { min-height: 84px; resize: vertical; line-height: 1.5; }
 .canvas-menu[hidden] { display: none; }
 .canvas-menu button { text-align: left; background: none; border: none; color: var(--fg); padding: 8px 11px; font-size: 13px; cursor: pointer; border-radius: var(--r-sm); }
 .canvas-menu button:hover { background: var(--accent-soft, rgba(88,166,255,.14)); color: var(--accent); }
+.canvas-menu .cm-group { font-size: 10px; letter-spacing: 1px; font-weight: 800; text-transform: uppercase; color: var(--faint); padding: 8px 11px 4px; }
+.canvas-menu .cm-group:first-child { padding-top: 4px; }
+.canvas-menu { max-height: 86vh; overflow: auto; }
+/* Floating zoom control (bottom-right of the canvas) */
+.zoom-ctl { position: absolute; right: 14px; bottom: 14px; z-index: 35; display: flex; align-items: center; gap: 2px; background: var(--elev, var(--bg2)); border: 1px solid var(--border); border-radius: 999px; box-shadow: var(--shadow); padding: 3px; }
+.zoom-ctl button { background: none; border: none; color: var(--dim); cursor: pointer; font-size: 15px; line-height: 1; padding: 5px 9px; border-radius: 999px; }
+.zoom-ctl button:hover { color: var(--accent); background: var(--bg3); }
+.zoom-ctl #zoomLevel { font-size: 12px; min-width: 46px; font-variant-numeric: tabular-nums; font-family: var(--mono); }
 #terminals.free .term-pane { position: absolute; box-shadow: var(--shadow); }
 #terminals.free .term-head { cursor: move; }
 #terminals.free .term-resize { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; z-index: 6;

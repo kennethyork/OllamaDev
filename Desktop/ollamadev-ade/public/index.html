@@ -32,18 +32,22 @@
             <option value="turbo">🎙 turbo · fast+</option>
         </select>
         <select id="themeSelect" title="Theme"></select>
-        <button id="openFolderBtn" title="Open another folder (adds it as a workspace)">📂 Open</button>
-        <button id="newTermBtn" class="primary">+ Terminal</button>
-        <button id="termArrange" title="Toggle free-floating window layout (drag & resize)">⊞ Tiled</button>
-        <button id="termCanvas" title="Terminal renderer: DOM (default) or GPU-composited canvas (faster under heavy output)">🖼 DOM</button>
-        <button id="crewBtn" title="OllamaDev Crew — a team of agents (Director / Coders / Auditor)">👥 Crew</button>
-        <button id="diffBtn" title="Review the agent's working-tree changes (read-only git diff)">⇄ Review</button>
-        <button id="webToggle" title="Web access for the agent (search, fetch, remote git). Off = air-gapped. Applies to new runs.">🌐 Web</button>
-        <button id="searchToggle" title="Web search on/off (leaves fetch &amp; remote git alone). Applies to new runs.">🔍 Search</button>
-        <button id="sttHistoryBtn" title="Voice transcription history" hidden>🎙 History</button>
-        <button id="addPaneBtn" title="Add a pane to the canvas (also: right-click empty canvas)">＋ Add</button>
-        <button id="canvasResetBtn" title="Re-center the canvas (bring all panes into view)">⊕ Center</button>
+        <button id="addPaneBtn" class="primary" title="Add a window or run an action (also: right-click the empty canvas)">＋ Add ▾</button>
         <span id="cwd" class="dim"></span>
+        <!-- The old toolbar actions now live in the ＋ Add / right-click menu; these stay
+             in the DOM (hidden) so their existing wiring + state updates keep working. -->
+        <span class="topbar-stash" hidden>
+            <button id="openFolderBtn"></button>
+            <button id="newTermBtn"></button>
+            <button id="termArrange">⊞ Tiled</button>
+            <button id="termCanvas">🖼 DOM</button>
+            <button id="crewBtn"></button>
+            <button id="diffBtn"></button>
+            <button id="webToggle">🌐 Web</button>
+            <button id="searchToggle">🔍 Search</button>
+            <button id="sttHistoryBtn" hidden>🎙 History</button>
+            <button id="canvasResetBtn"></button>
+        </span>
     </header>
 
     <main id="main">
@@ -71,6 +75,11 @@
                  pane. #codeView is kept as the canvas wrapper (the zoom code targets it). -->
             <div id="codeView" class="ws-view">
                 <section id="terminals"></section>
+                <div id="zoomCtl" class="zoom-ctl">
+                    <button data-zoom="out" title="Zoom out (Ctrl/⌘ + scroll, or pinch)">−</button>
+                    <button id="zoomLevel" data-zoom="reset" title="Reset to 100%">100%</button>
+                    <button data-zoom="in" title="Zoom in (Ctrl/⌘ + scroll, or pinch)">＋</button>
+                </div>
             </div>
 
             <!-- Parking home for the singleton view panes. Their elements are moved out of
@@ -157,6 +166,7 @@
 
             <!-- Right-click / ＋ Add menu for dropping a new pane on the canvas. -->
             <div id="canvasMenu" class="canvas-menu" hidden>
+                <div class="cm-group">Add window</div>
                 <button data-add="terminal">＋ Terminal</button>
                 <button data-add="voice">🎙 Voice control</button>
                 <button data-add="editor">📝 Editor</button>
@@ -166,6 +176,16 @@
                 <button data-add="board">📋 Board</button>
                 <button data-add="graph">🕸 Graph</button>
                 <button data-add="browser">🌐 Browser</button>
+                <button data-add="crew">👥 Crew</button>
+                <button data-add="diff">⇄ Review</button>
+                <div class="cm-group">Actions</div>
+                <button data-cmd="open-project">📂 Open project…</button>
+                <button data-cmd="web">🌐 Web access</button>
+                <button data-cmd="search-toggle">🔍 Web search</button>
+                <button data-cmd="layout">⊞ Tiled / Free</button>
+                <button data-cmd="renderer">🖼 Renderer</button>
+                <button data-cmd="center">⊕ Center canvas</button>
+                <button data-cmd="history">🎙 Voice history</button>
             </div>
         </section>
     </main>
