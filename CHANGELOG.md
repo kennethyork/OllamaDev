@@ -1,5 +1,16 @@
 # Changelog
 
+## v4.8.62 (2026-06-08) — pop any workspace tab out into a pane with the terminals
+
+### Added
+- **Any workspace tab — Board, Graph, or Browser — can now be popped out into a pane right where your terminals are, and popped back into its tab.** Generalizes v4.8.61 (which was board-only) to every view, each independently: pop out one, several, or none.
+  - **⤴ Pop out** button on the tab row pops the current tab into a floating/tiled pane among the terminals. Its old tab shows a **⤵ Pop it back here** placeholder; the pane header has a **⤵** pop-back and **×** (both return it to its tab).
+  - The pane drags by its header, resizes from the corner, and **Focus (⤢)** zooms it full-area — identical to a terminal pane (it reuses the same free/tiled layout code).
+  - The view's **real element is moved** into the pane (not re-rendered), so its live state is preserved — the graph keeps its layout, the browser keeps its page, the board stays live.
+  - Which tabs are popped + their geometry **persist** across restarts.
+- The crew poll keeps the board live while it's popped out, even when you're on another tab.
+- Pure vanilla — no dependency; the panes reuse the existing terminal pane machinery and a DOM move/park.
+
 ## v4.8.61 (2026-06-08) — dock the task board as a pane among your terminals
 
 ### Added

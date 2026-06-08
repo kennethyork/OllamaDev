@@ -904,17 +904,11 @@ var Tasks = {
     run: function (id) { var t = this.items.find(function (x) { return x.id === id; }); if (!t) return; this.move(id, 'doing'); App.runTaskInAgent(t.title); },
     // Map a crew subtask state to a board column (held shows in Doing, flagged).
     crewCol: function (state) { return state === 'done' ? 'done' : (state === 'todo' ? 'todo' : 'doing'); },
-    // The same board can live in several hosts at once: the full Board view AND any
-    // number of board panes docked among the terminals. Render builds the columns
-    // once per host and wires each independently. (Same live data, same drag/run.)
     render: function () {
         // Separate Director: show the steering bar only while a run is active.
         var dbar = $('#directorBar'); if (dbar) dbar.hidden = !(App.crewBoard && App.crewBoard.active);
         this.wireDirector();
-        var self = this, hosts = [];
-        var main = $('#board'); if (main) hosts.push(main);
-        document.querySelectorAll('.pane-board').forEach(function (el) { hosts.push(el); });
-        hosts.forEach(function (h) { self.renderInto(h); });
+        this.renderInto($('#board'));
     },
     renderInto: function (board) {
         if (!board) return;
@@ -1877,9 +1871,13 @@ var Stt = {
 
 var App = {
     terminals: [], cwd: '.', layout: 'split', termLayout: 'free', zoomed: null, view: 'code', panel: 'files', crewBoard: null, crewPoll: null,
-    // Optional task-board pane docked among the terminals (null = off). Geometry mirrors
-    // a free-floating terminal so the same drag/resize/zoom code drives it.
-    boardPane: null,
+    // Workspace views that can be "popped out" of their tab and docked as a pane among
+    // the terminals (and popped back to their tab). `popped` maps view -> geometry; the
+    // real .ws-view element is physically moved into the pane, so its state is preserved.
+    popped: {},
+    POP_VIEWS: ['board', 'graph', 'browser'],
+    POP_SEL: { board: '#boardView', graph: '#graphView', browser: '#browserView' },
+    POP_TITLE: { board: '📋 Board', graph: '🕸 Graph', browser: '🌐 Browser' },
     // PTYs spawned this session, by id. Survives detach (workspace switch) so we
     // can RE-attach a still-running terminal; gone after a restart → respawn fresh.
     live: {},
@@ -1897,10 +1895,17 @@ var App = {
         try { self.canvasTerm = localStorage.getItem('ade.canvasTerm') === 'on'; } catch (e) { self.canvasTerm = false; }
         var tc = $('#termCanvas');
         if (tc) { tc.textContent = self.canvasTerm ? '🖼 Canvas' : '🖼 DOM'; tc.onclick = function () { self.setCanvasTerm(!self.canvasTerm); }; }
-        // Optional docked board pane — restore its on/off + geometry, wire the toggle.
-        try { var bp = JSON.parse(localStorage.getItem('ade.boardPane') || 'null'); if (bp && bp.on) self.boardPane = { id: '__board__', x: bp.x, y: bp.y, w: bp.w, h: bp.h, z: 0 }; } catch (e) {}
-        var tb = $('#termBoard');
-        if (tb) { tb.classList.toggle('on', !!self.boardPane); tb.onclick = function () { self.toggleBoardPane(); }; }
+        // Popped-out views (board/graph/browser docked among the terminals) — restore
+        // each one's geometry and wire the per-view "⤴ Pop out" buttons.
+        try {
+            var pop = JSON.parse(localStorage.getItem('ade.popped') || '{}') || {};
+            self.POP_VIEWS.forEach(function (view) {
+                var g = pop[view];
+                if (g && typeof g.x === 'number') self.popped[view] = { id: '__pop_' + view + '__', view: view, x: g.x, y: g.y, w: g.w, h: g.h, z: 0 };
+            });
+        } catch (e) {}
+        document.querySelectorAll('[data-pop]').forEach(function (btn) { btn.onclick = function () { self.togglePopView(btn.dataset.pop); }; });
+        var pcb = $('#popCurrentBtn'); if (pcb) pcb.onclick = function () { self.togglePopView(self.view); };
         $('#layoutBtn').onclick = function () { self.cycleLayout(); };
         // Open-folder modal
         var ofb = $('#openFolderBtn'); if (ofb) ofb.onclick = function () { self.openFolderModal(false); };
@@ -2085,14 +2090,35 @@ var App = {
     },
     setView: function (v) {
         this.view = v;
+        var self = this;
         document.querySelectorAll('.ws-tab').forEach(function (t) { t.classList.toggle('active', t.dataset.view === v); });
         $('#codeView').hidden = v !== 'code';
-        $('#boardView').hidden = v !== 'board';
-        $('#graphView').hidden = v !== 'graph';
-        $('#browserView').hidden = v !== 'browser';
+        // A popped-out view's element lives in a pane (always visible there) — never show
+        // it in the workspace. Its tab instead shows a "popped out" placeholder.
+        this.POP_VIEWS.forEach(function (view) {
+            var el = $(self.POP_SEL[view]); if (!el) return;
+            el.hidden = self.popped[view] ? (el.parentNode === $('#workspace')) : (v !== view);
+        });
+        this._showPlaceholder(v);
+        // The tab-row "Pop out" button: shown only on a poppable tab that isn't already popped.
+        var pcb = $('#popCurrentBtn'); if (pcb) pcb.hidden = !(this.POP_SEL[v] && !this.popped[v]);
+        // Load hooks are safe even when popped — the elements exist (in their panes).
         if (v === 'board') { this.startCrewPoll(); Tasks.render(); CrewPanes.sync(this.crewBoard); }
         if (v === 'graph') Graph.load();
         if (v === 'browser') Browser.onShow();
+    },
+    // When the current tab's view is popped out, show a placeholder card in the
+    // workspace with a "pop back here" button; otherwise hide it.
+    _showPlaceholder: function (v) {
+        var ph = $('#popPlaceholder');
+        if (!ph) { ph = document.createElement('div'); ph.id = 'popPlaceholder'; ph.className = 'ws-view'; $('#workspace').appendChild(ph); }
+        if (this.popped[v]) {
+            var self = this;
+            ph.hidden = false;
+            ph.innerHTML = '<div class="pop-note"><span>' + this.POP_TITLE[v] + ' is popped out into a pane with your terminals.</span>' +
+                '<button id="popBackHere" class="primary">⤵ Pop it back here</button></div>';
+            ph.querySelector('#popBackHere').onclick = function () { self.popBackView(v); };
+        } else { ph.hidden = true; ph.innerHTML = ''; }
     },
     // Hand a task title to an agent terminal's CLI (create one if none exist).
     runTaskInAgent: function (title) {
@@ -2442,12 +2468,12 @@ var App = {
                     }
                 }
                 self.crewBoard = (b && b.subtasks) ? b : self.crewBoard;
-                // Refresh the board on the Board view AND in a docked board pane.
-                if (self.view === 'board' || self.boardPane) Tasks.render();
+                // Refresh the board on the Board view AND when it's popped out into a pane.
+                if (self.view === 'board' || self.popped.board) Tasks.render();
                 if (self.view === 'board') CrewPanes.sync(self.crewBoard);
                 // Stop polling a while after the run goes inactive — but keep it alive
-                // while a board pane is docked so a fresh crew run shows up there live.
-                if (b && b.active === false && !self.boardPane) { if (++idle > 6) { clearInterval(self.crewPoll); self.crewPoll = null; } }
+                // while the board is popped out so a fresh crew run shows up there live.
+                if (b && b.active === false && !self.popped.board) { if (++idle > 6) { clearInterval(self.crewPoll); self.crewPoll = null; } }
                 else idle = 0;
             }).catch(function () {});
         }, 1500);
@@ -2668,9 +2694,10 @@ var App = {
         var self = this;
         var z = this.zoomed;
         if (z && !this._paneExists(z)) { this.zoomed = null; z = null; }
-        // Panes = terminals + an optional board pane; the board tiles like any terminal.
-        var all = this.terminals.slice();
-        if (this.boardPane) all.push(this.boardPane);
+        // Panes = terminals + any popped-out views (board/graph/browser); each tiles
+        // like a terminal. Park popped views home first so innerHTML='' can't destroy them.
+        this._parkPopped();
+        var all = this.terminals.slice().concat(this._poppedPanes());
         var list = z ? all.filter(function (t) { return t.id === z; }) : all;
         var n = list.length;
         // Fit all panes; shrink the font as the count rises so code stays legible.
@@ -2687,7 +2714,7 @@ var App = {
             var pane = document.createElement('div');
             pane.className = 'term-pane';
             wrap.appendChild(pane);
-            if (t === self.boardPane) self.mountBoardPane(pane);
+            if (t.view) self.mountPoppedPane(pane, t);
             else t.mount(pane);
         });
     },
@@ -2715,6 +2742,8 @@ var App = {
         // off restores the free layout — each pane's saved geometry is untouched.
         var z = this.zoomed;
         if (z && !this._paneExists(z)) { this.zoomed = null; z = null; }
+        // Park popped views home before clearing so innerHTML='' can't destroy them.
+        this._parkPopped();
         if (z) {
             wrap.className = 'zoomed';
             wrap.style.gridTemplateColumns = 'repeat(1, minmax(0, 1fr))';
@@ -2722,7 +2751,8 @@ var App = {
             var cvz = $('#codeView'); if (cvz) cvz.classList.add('term-zoom');
             wrap.innerHTML = '';
             var fp = document.createElement('div'); fp.className = 'term-pane'; wrap.appendChild(fp);
-            if (this.boardPane && z === this.boardPane.id) this.mountBoardPane(fp);
+            var zp = this._poppedPanes().filter(function (p) { return p.id === z; })[0];
+            if (zp) this.mountPoppedPane(fp, zp);
             else this.terminals.filter(function (t) { return t.id === z; })[0].mount(fp);
             return;
         }
@@ -2743,25 +2773,28 @@ var App = {
             var rh = document.createElement('div'); rh.className = 'term-resize'; pane.appendChild(rh);
             self.wireFree(t, pane, rh);
         });
-        // The docked board pane floats with the terminals, dragged/resized by the same code.
-        if (this.boardPane) {
-            var b = this.boardPane;
-            if (typeof b.x !== 'number') { b.x = 280; b.y = 24; b.w = 460; b.h = 360; b.z = ++this._zTop; }
+        // Each popped-out view floats with the terminals, dragged/resized by the same code.
+        this._poppedPanes().forEach(function (b) {
+            if (typeof b.x !== 'number') { b.x = 280; b.y = 24; b.w = 520; b.h = 400; b.z = ++self._zTop; }
             var bpane = document.createElement('div');
             bpane.className = 'term-pane';
             bpane.style.left = b.x + 'px'; bpane.style.top = b.y + 'px';
             bpane.style.width = b.w + 'px'; bpane.style.height = b.h + 'px';
             bpane.style.zIndex = b.z || 1;
             wrap.appendChild(bpane);
-            this.mountBoardPane(bpane);
+            self.mountPoppedPane(bpane, b);
             var brh = document.createElement('div'); brh.className = 'term-resize'; bpane.appendChild(brh);
-            this.wireFree(b, bpane, brh);
-        }
+            self.wireFree(b, bpane, brh);
+        });
     },
-    // The board pane id is a valid zoom/focus target alongside the terminals.
+    // Popped-view geometry entries (also valid zoom/focus targets alongside terminals).
+    _poppedPanes: function () {
+        var self = this;
+        return this.POP_VIEWS.filter(function (v) { return self.popped[v]; }).map(function (v) { return self.popped[v]; });
+    },
     _paneExists: function (id) {
-        if (this.boardPane && id === this.boardPane.id) return true;
-        return this.terminals.some(function (t) { return t.id === id; });
+        return this._poppedPanes().some(function (p) { return p.id === id; }) ||
+            this.terminals.some(function (t) { return t.id === id; });
     },
     // Pick a starting geometry: a saved one (by index, from restore) or a cascade.
     applyGeom: function (t, i) {
@@ -2773,55 +2806,79 @@ var App = {
     bringFront: function (t, pane) { t.z = ++this._zTop; pane.style.zIndex = t.z; },
     saveGeomSoon: function () {
         var self = this; clearTimeout(this._geomSave);
-        this._geomSave = setTimeout(function () { self.saveBoardPaneGeom(); if (Workspaces && Workspaces.saveCurrentState) Workspaces.saveCurrentState(); }, 400);
+        this._geomSave = setTimeout(function () { self.savePopped(); if (Workspaces && Workspaces.saveCurrentState) Workspaces.saveCurrentState(); }, 400);
     },
-    // ---- Board pane: the task board docked among the terminals ----
-    toggleBoardPane: function () {
-        if (this.boardPane) return this.closeBoardPane();
-        this.boardPane = { id: '__board__', x: 280, y: 24, w: 460, h: 360, z: ++this._zTop };
-        this.saveBoardPaneGeom();
-        var tb = $('#termBoard'); if (tb) tb.classList.add('on');
+    // ---- Pop a workspace view (board/graph/browser) out into a pane with the terminals ----
+    togglePopView: function (view) { if (this.popped[view]) this.popBackView(view); else this.popView(view); },
+    popView: function (view) {
+        if (!this.POP_SEL[view] || this.popped[view]) return;
+        this.popped[view] = { id: '__pop_' + view + '__', view: view, x: 280, y: 24, w: 520, h: 400, z: ++this._zTop };
+        this.savePopped();
+        // Leaving the popped view's tab: switch to the Workspace so the floating pane
+        // is visible among the terminals; its old tab now shows a "pop back" placeholder.
+        if (this.view === view) this.setView('code'); else this.render();
+        if (view === 'board') { this.startCrewPoll(); Tasks.render(); }
+        banner(this.POP_TITLE[view] + ' popped out — drag the header, resize the corner', 'ok');
+    },
+    popBackView: function (view) {
+        if (!this.popped[view]) return;
+        if (this.zoomed === this.popped[view].id) this.zoomed = null;
+        delete this.popped[view];
+        this.savePopped();
+        // Move its element home BEFORE re-rendering, or wrap.innerHTML='' would destroy it.
+        var el = $(this.POP_SEL[view]), ws = $('#workspace');
+        if (el && el.parentNode !== ws) { el.hidden = true; ws.appendChild(el); }
         this.render();
-        this.startCrewPoll();   // keep the docked board live even outside the Board view
-        Tasks.render();
-        banner('board docked as a pane — drag the header, resize the corner', 'ok');
+        this.setView(view);        // land back on its own tab, where it was before
+        banner(this.POP_TITLE[view] + ' docked back to its tab', 'ok');
     },
-    closeBoardPane: function () {
-        if (this.zoomed === '__board__') this.zoomed = null;
-        this.boardPane = null;
-        try { localStorage.setItem('ade.boardPane', 'null'); } catch (e) {}
-        var tb = $('#termBoard'); if (tb) tb.classList.remove('on');
-        this.render();
+    savePopped: function () {
+        var out = {}, self = this;
+        this.POP_VIEWS.forEach(function (v) { var b = self.popped[v]; if (b) out[v] = { x: b.x, y: b.y, w: b.w, h: b.h }; });
+        try { localStorage.setItem('ade.popped', JSON.stringify(out)); } catch (e) {}
     },
-    saveBoardPaneGeom: function () {
-        var b = this.boardPane;
-        try { localStorage.setItem('ade.boardPane', b ? JSON.stringify({ on: true, x: b.x, y: b.y, w: b.w, h: b.h }) : 'null'); } catch (e) {}
+    // Move every popped view's real element back to #workspace (hidden), so a pending
+    // wrap.innerHTML='' can't destroy it. Re-mounted into its pane right after.
+    _parkPopped: function () {
+        var ws = $('#workspace'), self = this;
+        this.POP_VIEWS.forEach(function (view) {
+            if (!self.popped[view]) return;
+            var el = $(self.POP_SEL[view]);
+            if (el && el.parentNode !== ws) { el.hidden = true; ws.appendChild(el); }
+        });
     },
-    // Build a board pane's chrome (matches the terminal header so drag/zoom/close
-    // are identical) wrapping a live board host. Tasks.render() fills .pane-board.
-    mountBoardPane: function (host) {
-        var self = this, b = this.boardPane;
-        var focused = this.zoomed === '__board__';
-        host.classList.add('board-pane');
+    // Wrap a popped view in terminal-style chrome and move its real element into the
+    // pane body (preserving all its state). `b` is the geometry entry from this.popped.
+    mountPoppedPane: function (host, b) {
+        var self = this, view = b.view;
+        var focused = this.zoomed === b.id;
+        host.classList.add('pop-pane');
         host.innerHTML =
-            '<div class="term-head"><span class="nm">📋 Board</span>' +
+            '<div class="term-head"><span class="nm">' + this.POP_TITLE[view] + '</span>' +
+            '<button class="popback" title="Pop back to its tab">⤵</button>' +
             '<button class="zoom" title="' + (focused ? 'Restore' : 'Focus (make this bigger)') + '">' + (focused ? '⤡' : '⤢') + '</button>' +
-            '<button class="x" title="Close board pane">&times;</button></div>' +
-            '<div class="board-pane-body"><div class="board pane-board"></div></div>';
-        host.querySelector('.zoom').onclick = function (e) { e.stopPropagation(); self.toggleZoom('__board__'); };
-        host.querySelector('.x').onclick = function (e) { e.stopPropagation(); self.closeBoardPane(); };
+            '<button class="x" title="Pop back to its tab">&times;</button></div>' +
+            '<div class="pop-pane-body"></div>';
+        var el = $(this.POP_SEL[view]);
+        if (el) { el.hidden = false; host.querySelector('.pop-pane-body').appendChild(el); }
+        host.querySelector('.popback').onclick = function (e) { e.stopPropagation(); self.popBackView(view); };
+        host.querySelector('.x').onclick = function (e) { e.stopPropagation(); self.popBackView(view); };
+        host.querySelector('.zoom').onclick = function (e) { e.stopPropagation(); self.toggleZoom(b.id); };
         host.querySelector('.term-head').ondblclick = function (e) {
-            if (e.target.classList.contains('x') || e.target.classList.contains('zoom')) return;
-            self.toggleZoom('__board__');
+            if (e.target.closest('.x, .zoom, .popback')) return;
+            self.toggleZoom(b.id);
         };
-        Tasks.renderInto(host.querySelector('.pane-board'));
+        // Refresh live content now that the element is in the pane.
+        if (view === 'board') Tasks.renderInto($('#board'));
+        if (view === 'graph') Graph.load();
+        if (view === 'browser' && window.Browser && Browser.onShow) Browser.onShow();
     },
     wireFree: function (t, pane, rh) {
         var self = this;
         pane.addEventListener('mousedown', function () { self.bringFront(t, pane); });
         var head = pane.querySelector('.term-head');
         if (head) head.addEventListener('mousedown', function (e) {
-            if (e.target.closest('.zoom, .x, .term-cd, .term-cd-edit, .badge')) return;   // let buttons work
+            if (e.target.closest('.zoom, .x, .popback, .term-cd, .term-cd-edit, .badge')) return;   // let buttons work
             e.preventDefault();
             var sx = e.clientX, sy = e.clientY, ox = t.x, oy = t.y;
             function mv(ev) { t.x = Math.max(0, ox + ev.clientX - sx); t.y = Math.max(0, oy + ev.clientY - sy); pane.style.left = t.x + 'px'; pane.style.top = t.y + 'px'; }
