@@ -904,15 +904,24 @@ var Tasks = {
     run: function (id) { var t = this.items.find(function (x) { return x.id === id; }); if (!t) return; this.move(id, 'doing'); App.runTaskInAgent(t.title); },
     // Map a crew subtask state to a board column (held shows in Doing, flagged).
     crewCol: function (state) { return state === 'done' ? 'done' : (state === 'todo' ? 'todo' : 'doing'); },
+    // The same board can live in several hosts at once: the full Board view AND any
+    // number of board panes docked among the terminals. Render builds the columns
+    // once per host and wires each independently. (Same live data, same drag/run.)
     render: function () {
-        var board = $('#board'); if (!board) return;
+        // Separate Director: show the steering bar only while a run is active.
+        var dbar = $('#directorBar'); if (dbar) dbar.hidden = !(App.crewBoard && App.crewBoard.active);
+        this.wireDirector();
+        var self = this, hosts = [];
+        var main = $('#board'); if (main) hosts.push(main);
+        document.querySelectorAll('.pane-board').forEach(function (el) { hosts.push(el); });
+        hosts.forEach(function (h) { self.renderInto(h); });
+    },
+    renderInto: function (board) {
+        if (!board) return;
         var self = this;
         var crew = (App.crewBoard && Array.isArray(App.crewBoard.subtasks)) ? App.crewBoard.subtasks : [];
         // Crew's auto-suggested next steps (ideas) land in To-do as 💡 cards.
         var ideas = (App.crewBoard && Array.isArray(App.crewBoard.ideas)) ? App.crewBoard.ideas : [];
-        // Separate Director: show the steering bar only while a run is active.
-        var dbar = $('#directorBar'); if (dbar) dbar.hidden = !(App.crewBoard && App.crewBoard.active);
-        this.wireDirector();
         board.innerHTML = this.COLS.map(function (c) {
             // Director's plan as live, read-only crew cards.
             var crewInCol = crew.filter(function (s) { return self.crewCol(s.state) === c[0]; });
@@ -1868,6 +1877,9 @@ var Stt = {
 
 var App = {
     terminals: [], cwd: '.', layout: 'split', termLayout: 'free', zoomed: null, view: 'code', panel: 'files', crewBoard: null, crewPoll: null,
+    // Optional task-board pane docked among the terminals (null = off). Geometry mirrors
+    // a free-floating terminal so the same drag/resize/zoom code drives it.
+    boardPane: null,
     // PTYs spawned this session, by id. Survives detach (workspace switch) so we
     // can RE-attach a still-running terminal; gone after a restart → respawn fresh.
     live: {},
@@ -1885,6 +1897,10 @@ var App = {
         try { self.canvasTerm = localStorage.getItem('ade.canvasTerm') === 'on'; } catch (e) { self.canvasTerm = false; }
         var tc = $('#termCanvas');
         if (tc) { tc.textContent = self.canvasTerm ? '🖼 Canvas' : '🖼 DOM'; tc.onclick = function () { self.setCanvasTerm(!self.canvasTerm); }; }
+        // Optional docked board pane — restore its on/off + geometry, wire the toggle.
+        try { var bp = JSON.parse(localStorage.getItem('ade.boardPane') || 'null'); if (bp && bp.on) self.boardPane = { id: '__board__', x: bp.x, y: bp.y, w: bp.w, h: bp.h, z: 0 }; } catch (e) {}
+        var tb = $('#termBoard');
+        if (tb) { tb.classList.toggle('on', !!self.boardPane); tb.onclick = function () { self.toggleBoardPane(); }; }
         $('#layoutBtn').onclick = function () { self.cycleLayout(); };
         // Open-folder modal
         var ofb = $('#openFolderBtn'); if (ofb) ofb.onclick = function () { self.openFolderModal(false); };
@@ -2426,9 +2442,12 @@ var App = {
                     }
                 }
                 self.crewBoard = (b && b.subtasks) ? b : self.crewBoard;
-                if (self.view === 'board') { Tasks.render(); CrewPanes.sync(self.crewBoard); }
-                // Stop polling a while after the run goes inactive.
-                if (b && b.active === false) { if (++idle > 6) { clearInterval(self.crewPoll); self.crewPoll = null; } }
+                // Refresh the board on the Board view AND in a docked board pane.
+                if (self.view === 'board' || self.boardPane) Tasks.render();
+                if (self.view === 'board') CrewPanes.sync(self.crewBoard);
+                // Stop polling a while after the run goes inactive — but keep it alive
+                // while a board pane is docked so a fresh crew run shows up there live.
+                if (b && b.active === false && !self.boardPane) { if (++idle > 6) { clearInterval(self.crewPoll); self.crewPoll = null; } }
                 else idle = 0;
             }).catch(function () {});
         }, 1500);
@@ -2646,9 +2665,13 @@ var App = {
         // grid fits as many readable-width panes as possible and scrolls for more.
         // Hoist zoomed into a local: the callbacks below must not read `this`
         // (a bare .filter/.some callback runs with this===undefined in strict mode).
+        var self = this;
         var z = this.zoomed;
-        if (z && !this.terminals.some(function (t) { return t.id === z; })) { this.zoomed = null; z = null; }
-        var list = z ? this.terminals.filter(function (t) { return t.id === z; }) : this.terminals;
+        if (z && !this._paneExists(z)) { this.zoomed = null; z = null; }
+        // Panes = terminals + an optional board pane; the board tiles like any terminal.
+        var all = this.terminals.slice();
+        if (this.boardPane) all.push(this.boardPane);
+        var list = z ? all.filter(function (t) { return t.id === z; }) : all;
         var n = list.length;
         // Fit all panes; shrink the font as the count rises so code stays legible.
         var cols = z || n <= 1 ? 1 : Math.min(4, Math.ceil(Math.sqrt(n)));
@@ -2664,7 +2687,8 @@ var App = {
             var pane = document.createElement('div');
             pane.className = 'term-pane';
             wrap.appendChild(pane);
-            t.mount(pane);
+            if (t === self.boardPane) self.mountBoardPane(pane);
+            else t.mount(pane);
         });
     },
     // ---- Free-floating layout: drag the header, resize the corner, overlap freely ----
@@ -2690,15 +2714,16 @@ var App = {
         // whole work area (over the editor), exactly like tiled zoom. Toggling it
         // off restores the free layout — each pane's saved geometry is untouched.
         var z = this.zoomed;
-        if (z && !this.terminals.some(function (t) { return t.id === z; })) { this.zoomed = null; z = null; }
+        if (z && !this._paneExists(z)) { this.zoomed = null; z = null; }
         if (z) {
             wrap.className = 'zoomed';
             wrap.style.gridTemplateColumns = 'repeat(1, minmax(0, 1fr))';
             wrap.style.setProperty('--tfs', '13px');
             var cvz = $('#codeView'); if (cvz) cvz.classList.add('term-zoom');
             wrap.innerHTML = '';
-            var ft = this.terminals.filter(function (t) { return t.id === z; })[0];
-            var fp = document.createElement('div'); fp.className = 'term-pane'; wrap.appendChild(fp); ft.mount(fp);
+            var fp = document.createElement('div'); fp.className = 'term-pane'; wrap.appendChild(fp);
+            if (this.boardPane && z === this.boardPane.id) this.mountBoardPane(fp);
+            else this.terminals.filter(function (t) { return t.id === z; })[0].mount(fp);
             return;
         }
         wrap.className = 'free';
@@ -2718,6 +2743,25 @@ var App = {
             var rh = document.createElement('div'); rh.className = 'term-resize'; pane.appendChild(rh);
             self.wireFree(t, pane, rh);
         });
+        // The docked board pane floats with the terminals, dragged/resized by the same code.
+        if (this.boardPane) {
+            var b = this.boardPane;
+            if (typeof b.x !== 'number') { b.x = 280; b.y = 24; b.w = 460; b.h = 360; b.z = ++this._zTop; }
+            var bpane = document.createElement('div');
+            bpane.className = 'term-pane';
+            bpane.style.left = b.x + 'px'; bpane.style.top = b.y + 'px';
+            bpane.style.width = b.w + 'px'; bpane.style.height = b.h + 'px';
+            bpane.style.zIndex = b.z || 1;
+            wrap.appendChild(bpane);
+            this.mountBoardPane(bpane);
+            var brh = document.createElement('div'); brh.className = 'term-resize'; bpane.appendChild(brh);
+            this.wireFree(b, bpane, brh);
+        }
+    },
+    // The board pane id is a valid zoom/focus target alongside the terminals.
+    _paneExists: function (id) {
+        if (this.boardPane && id === this.boardPane.id) return true;
+        return this.terminals.some(function (t) { return t.id === id; });
     },
     // Pick a starting geometry: a saved one (by index, from restore) or a cascade.
     applyGeom: function (t, i) {
@@ -2729,7 +2773,48 @@ var App = {
     bringFront: function (t, pane) { t.z = ++this._zTop; pane.style.zIndex = t.z; },
     saveGeomSoon: function () {
         var self = this; clearTimeout(this._geomSave);
-        this._geomSave = setTimeout(function () { if (Workspaces && Workspaces.saveCurrentState) Workspaces.saveCurrentState(); }, 400);
+        this._geomSave = setTimeout(function () { self.saveBoardPaneGeom(); if (Workspaces && Workspaces.saveCurrentState) Workspaces.saveCurrentState(); }, 400);
+    },
+    // ---- Board pane: the task board docked among the terminals ----
+    toggleBoardPane: function () {
+        if (this.boardPane) return this.closeBoardPane();
+        this.boardPane = { id: '__board__', x: 280, y: 24, w: 460, h: 360, z: ++this._zTop };
+        this.saveBoardPaneGeom();
+        var tb = $('#termBoard'); if (tb) tb.classList.add('on');
+        this.render();
+        this.startCrewPoll();   // keep the docked board live even outside the Board view
+        Tasks.render();
+        banner('board docked as a pane — drag the header, resize the corner', 'ok');
+    },
+    closeBoardPane: function () {
+        if (this.zoomed === '__board__') this.zoomed = null;
+        this.boardPane = null;
+        try { localStorage.setItem('ade.boardPane', 'null'); } catch (e) {}
+        var tb = $('#termBoard'); if (tb) tb.classList.remove('on');
+        this.render();
+    },
+    saveBoardPaneGeom: function () {
+        var b = this.boardPane;
+        try { localStorage.setItem('ade.boardPane', b ? JSON.stringify({ on: true, x: b.x, y: b.y, w: b.w, h: b.h }) : 'null'); } catch (e) {}
+    },
+    // Build a board pane's chrome (matches the terminal header so drag/zoom/close
+    // are identical) wrapping a live board host. Tasks.render() fills .pane-board.
+    mountBoardPane: function (host) {
+        var self = this, b = this.boardPane;
+        var focused = this.zoomed === '__board__';
+        host.classList.add('board-pane');
+        host.innerHTML =
+            '<div class="term-head"><span class="nm">📋 Board</span>' +
+            '<button class="zoom" title="' + (focused ? 'Restore' : 'Focus (make this bigger)') + '">' + (focused ? '⤡' : '⤢') + '</button>' +
+            '<button class="x" title="Close board pane">&times;</button></div>' +
+            '<div class="board-pane-body"><div class="board pane-board"></div></div>';
+        host.querySelector('.zoom').onclick = function (e) { e.stopPropagation(); self.toggleZoom('__board__'); };
+        host.querySelector('.x').onclick = function (e) { e.stopPropagation(); self.closeBoardPane(); };
+        host.querySelector('.term-head').ondblclick = function (e) {
+            if (e.target.classList.contains('x') || e.target.classList.contains('zoom')) return;
+            self.toggleZoom('__board__');
+        };
+        Tasks.renderInto(host.querySelector('.pane-board'));
     },
     wireFree: function (t, pane, rh) {
         var self = this;

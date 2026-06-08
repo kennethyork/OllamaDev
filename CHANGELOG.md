@@ -1,5 +1,16 @@
 # Changelog
 
+## v4.8.61 (2026-06-08) — dock the task board as a pane among your terminals
+
+### Added
+- **The task board can now be docked as a pane right where your terminals are** — a new **📋 Board pane** toolbar toggle. It's the same live kanban as the Board tab (Director's crew cards, 💡 idea cards with ▶ Run, and your manual tasks), but it lives alongside the terminals instead of on a separate view.
+  - **Free layout:** a floating window you drag by the header and resize from the corner, overlapping terminals freely.
+  - **Tiled layout:** it takes a grid cell next to the terminals.
+  - **Focus (⤢)** and **double-click the header** zoom it full-area; **×** undocks it — identical to a terminal pane (it reuses the same free-layout drag/zoom code).
+  - Its on/off state and geometry **persist** across restarts.
+- The crew poll now refreshes the docked board even outside the Board view, and stays alive while the pane is open so a freshly-started crew run appears there live.
+- Pure vanilla — the board pane reuses `Tasks.renderInto()` and the existing pane machinery; no new dependency, no duplicated board code.
+
 ## v4.8.60 (2026-06-07) — canvas terminal: fill the pane + emoji
 
 ### Fixed

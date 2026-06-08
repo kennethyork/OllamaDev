@@ -381,6 +381,12 @@ textarea.field { min-height: 84px; resize: vertical; line-height: 1.5; }
 .cpane-badge.st-held { color: #d29922; border-color: #d29922; }
 .cpane-body { margin: 0; padding: 8px 10px; flex: 1; max-height: 240px; overflow: auto; font: 11px/1.45 ui-monospace, Menlo, Consolas, monospace; color: var(--fg); white-space: pre-wrap; word-break: break-word; }
 #board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; min-height: 100%; }
+/* The board docked as a terminal pane: a scrollable body, tighter columns. */
+.term-pane.board-pane .board-pane-body { flex: 1; min-height: 0; overflow: auto; padding: 10px; background: var(--bg); }
+.term-pane.board-pane .pane-board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; min-height: 100%; }
+.term-pane.board-pane .pane-board .col { min-height: 80px; }
+.term-pane.board-pane .pane-board .col-head { padding: 7px 9px; font-size: 10px; }
+.term-pane.board-pane .pane-board .col-body { padding: 7px; gap: 7px; }
 .col { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); display: flex; flex-direction: column; min-height: 120px; }
 .col.drag-over { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .col-head { display: flex; align-items: center; gap: 8px; padding: 11px 13px; font-size: 11px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: var(--dim); border-bottom: 1px solid var(--border); }
@@ -422,6 +428,8 @@ textarea.field { min-height: 84px; resize: vertical; line-height: 1.5; }
 .cs-snip { margin-top: 3px; font-size: 11px; line-height: 1.4; }
 /* Network toggles — off/air-gapped state */
 #webToggle.off, #searchToggle.off { color: var(--warn); border-color: var(--warn); }
+/* Board-pane toggle — accent when the board is docked among the terminals */
+#termBoard.on { color: var(--accent); border-color: var(--accent); }
 #searchToggle:disabled { opacity: .45; cursor: not-allowed; }
 /* Crew roles manager (modal) */
 .linklike { background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-decoration: underline; }
