@@ -841,6 +841,11 @@ ok('canvas renderer is opt-in; DOM is the default', strpos($ajs, "App.canvasTerm
     strpos($ajs, "localStorage.getItem('ade.canvasTerm') === 'on'") !== false &&
     strpos($ajs, 'setCanvasTerm: function') !== false);
 ok('canvas renderer toggle in the UI', strpos((string)@file_get_contents($adeDir . '/public/index.html'), 'id="termCanvas"') !== false);
+// Canvas matches the DOM terminal: pull colors/font from the theme CSS, not hardcoded.
+ok('canvas renderer reads theme colors/font (matches DOM terminal)',
+    strpos($ajs, 'CanvasRenderer.prototype.readTheme') !== false &&
+    strpos($ajs, 'cs.color') !== false && strpos($ajs, 'parseFloat(cs.fontSize)') !== false &&
+    strpos($ajs, 'cs.fontFamily') !== false && strpos($ajs, "screenEl.style.padding = '0'") !== false);
 // The pty daemon honors resize by setting the pts window size → SIGWINCH (backend).
 ok('pty daemon applies resize via stty on the pts', strpos($src, "stty -F ' . escapeshellarg(\$pts)") !== false &&
     strpos($src, 'pty-size') !== false);
@@ -1096,6 +1101,11 @@ ok('desktop has a free-floating (drag/resize) terminal layout', strpos($ajs, 're
 // Layout mode is a global preference → the app reopens in whichever mode you last used.
 ok('desktop reopens in the last-used layout mode (free/tiled)', strpos($ajs, "localStorage.setItem('ade.termLayout'") !== false &&
     strpos($ajs, "localStorage.getItem('ade.termLayout')") !== false);
+// Focus/zoom (full-screen one terminal) works in FREE mode too, not just tiled.
+ok('free layout honors focus/zoom (full-screen a pane)',
+    strpos($ajs, 'Focus also works in free mode') !== false &&
+    strpos($ajs, "wrap.className = 'zoomed';") !== false &&            // free-mode zoom branch fills the area
+    strpos($ajs, "if (this.termLayout === 'free') this.zoomed = null;") === false);   // no longer cleared on switch
 // Free is the default: a fresh user (no stored pref) lands in Free; only an
 // explicit 'tiled' choice opts back into the grid.
 ok('free layout is the default (only explicit tiled opts out)',

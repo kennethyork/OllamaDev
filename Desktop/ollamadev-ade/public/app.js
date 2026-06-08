@@ -260,7 +260,15 @@ function CanvasRenderer(screenEl, opts) {
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'term-canvas';
     this.ctx = this.canvas.getContext('2d', { alpha: false });
-    if (screenEl) screenEl.appendChild(this.canvas);
+    // Match the DOM terminal exactly: pull the live theme colors/font from the
+    // screen's computed style (so themes, font size, and family all carry over),
+    // and zero its padding so the canvas fills edge-to-edge with clean cell math.
+    if (screenEl) {
+        this._padSave = screenEl.style.padding;
+        screenEl.style.padding = '0';
+        screenEl.appendChild(this.canvas);
+        this.readTheme();
+    }
     this.lines = [this.newRow(1)];      // scrollback (each row is a growable cell array)
     this.cols = 80; this.rows = 24; this.cw = 8; this.chh = 16; this.dpr = 1;
     this.cx = 0; this.cy = 0; this.view = 0;   // view = scrollback offset from bottom
@@ -271,9 +279,24 @@ function CanvasRenderer(screenEl, opts) {
     this._bindMouse();
 }
 CanvasRenderer.prototype.newRow = function (n) { var a = []; for (var i = 0; i < (n || this.cols); i++) a.push(blankCell()); return a; };
-CanvasRenderer.prototype.dispose = function () { if (this.canvas && this.canvas.parentNode) this.canvas.parentNode.removeChild(this.canvas); };
+// Read the real terminal colors/font from the screen's CSS so the canvas matches
+// the DOM renderer (and the user's theme) instead of hardcoded values.
+CanvasRenderer.prototype.readTheme = function () {
+    var cs = getComputedStyle(this.screen);
+    this.fg = (cs.color || '#c9d1d9').trim();
+    var bg = cs.backgroundColor;
+    this.bg = (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') ? bg : (cs.getPropertyValue('--bg2') || '#0d1117').trim();
+    this.fontPx = parseFloat(cs.fontSize) || 13;
+    this.fontFam = (cs.fontFamily || cs.getPropertyValue('--mono') || 'monospace').trim() || 'monospace';
+    this.lineH = parseFloat(cs.lineHeight) || (this.fontPx * 1.45);
+};
+CanvasRenderer.prototype.dispose = function () {
+    if (this.screen && this._padSave !== undefined) this.screen.style.padding = this._padSave;   // restore DOM padding
+    if (this.canvas && this.canvas.parentNode) this.canvas.parentNode.removeChild(this.canvas);
+};
 // Resize: set the canvas backing store (×dpr for crisp text) and remember geometry.
 CanvasRenderer.prototype.resize = function (cols, rows, cw, ch, dpr) {
+    this.readTheme();   // re-read in case the theme/font changed
     this.cols = Math.max(2, cols | 0); this.rows = Math.max(2, rows | 0);
     this.cw = cw || this.cw; this.chh = ch || this.chh; this.dpr = dpr || this.dpr || 1;
     var W = Math.ceil(this.cols * this.cw), H = Math.ceil(this.rows * this.chh);
@@ -371,7 +394,8 @@ CanvasRenderer.prototype.paint = function () {
 };
 CanvasRenderer.prototype._paintNow = function () {
     var rows = this.viewRows(), ctx = this.ctx, cw = this.cw, ch = this.chh;
-    ctx.font = '13px ' + (getComputedStyle(this.screen).getPropertyValue('--mono') || 'monospace');
+    var fpx = this.fontPx || 13, fam = this.fontFam || 'monospace';
+    var ty = Math.max(0, (ch - fpx) / 2);   // vertically center the glyph in the cell
     for (var r = 0; r < this.rows; r++) {
         var row = rows[r], prow = this.painted[r];
         for (var c = 0; c < this.cols; c++) {
@@ -380,14 +404,14 @@ CanvasRenderer.prototype._paintNow = function () {
             if (pc && cellEq(pc, cell) && !this._inSel(r, c) && !this._wasSel(r, c)) continue;   // unchanged
             var fg = cell.fg || this.fg, bg = cell.bg || this.bg;
             if (cell.reverse) { var tmp = fg; fg = bg; bg = tmp; }
-            if (this._inSel(r, c)) { var t2 = fg; fg = this.bg; bg = '#2f6feb'; }   // selection highlight
+            if (this._inSel(r, c)) { fg = this.bg; bg = '#2f6feb'; }   // selection highlight
             var x = c * cw, y = r * ch;
             ctx.fillStyle = bg; ctx.fillRect(x, y, cw + 0.5, ch + 0.5);
             if (cell.ch !== ' ') {
                 ctx.fillStyle = fg;
-                ctx.font = (cell.italic ? 'italic ' : '') + (cell.bold ? 'bold ' : '') + Math.round(ch * 0.78) + 'px ' + ((getComputedStyle(this.screen).getPropertyValue('--mono') || '').trim() || 'monospace');
+                ctx.font = (cell.italic ? 'italic ' : '') + (cell.bold ? 'bold ' : '') + fpx + 'px ' + fam;
                 ctx.globalAlpha = cell.dim ? 0.6 : 1;
-                ctx.fillText(cell.ch, x + 1, y + 1);
+                ctx.fillText(cell.ch, x, y + ty);
                 ctx.globalAlpha = 1;
                 if (cell.underline) ctx.fillRect(x, y + ch - 1.5, cw, 1);
             }
@@ -2635,12 +2659,26 @@ var App = {
         this.termLayout = (mode === 'free') ? 'free' : 'tiled';
         try { localStorage.setItem('ade.termLayout', this.termLayout); } catch (e) {}   // reopen here next time
         var btn = $('#termArrange'); if (btn) btn.textContent = this.termLayout === 'free' ? '⮻ Free' : '⊞ Tiled';
-        if (this.termLayout === 'free') this.zoomed = null;   // zoom is a tiled-only concept
-        this.render();
+        this.render();   // focus/zoom now works in BOTH layouts, so it's preserved across the switch
         if (Workspaces && Workspaces.saveCurrentState) Workspaces.saveCurrentState();
     },
     renderFree: function (wrap) {
         var self = this;
+        // Focus also works in free mode: a focused terminal pops out to fill the
+        // whole work area (over the editor), exactly like tiled zoom. Toggling it
+        // off restores the free layout — each pane's saved geometry is untouched.
+        var z = this.zoomed;
+        if (z && !this.terminals.some(function (t) { return t.id === z; })) { this.zoomed = null; z = null; }
+        if (z) {
+            wrap.className = 'zoomed';
+            wrap.style.gridTemplateColumns = 'repeat(1, minmax(0, 1fr))';
+            wrap.style.setProperty('--tfs', '13px');
+            var cvz = $('#codeView'); if (cvz) cvz.classList.add('term-zoom');
+            wrap.innerHTML = '';
+            var ft = this.terminals.filter(function (t) { return t.id === z; })[0];
+            var fp = document.createElement('div'); fp.className = 'term-pane'; wrap.appendChild(fp); ft.mount(fp);
+            return;
+        }
         wrap.className = 'free';
         wrap.style.gridTemplateColumns = '';
         wrap.style.setProperty('--tfs', '13px');

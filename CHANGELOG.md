@@ -1,5 +1,11 @@
 # Changelog
 
+## v4.8.59 (2026-06-07) — free-mode focus + canvas/DOM terminal parity
+
+### Fixed
+- **Focus (full-screen one terminal) now works in Free layout too**, not just Tiled. The ⤢ focus button pops a pane out to fill the whole work area and ⤡ restores it — and the saved free-layout geometry is preserved. (Focus was previously a tiled-only concept and was silently cleared when you switched to Free.)
+- **The canvas (GPU) renderer now matches the DOM terminal.** It was using hardcoded colors and a guessed font size; it now reads the live theme from the screen's CSS — foreground/background colors, font family, and font size — and zeros the screen padding so cells align edge-to-edge. So toggling 🖼 Canvas keeps your theme and font instead of changing the terminal's look.
+
 ## v4.8.58 (2026-06-07) — opt-in GPU/canvas terminal renderer
 
 ### Added
