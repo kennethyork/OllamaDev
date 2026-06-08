@@ -1947,6 +1947,7 @@ var Stt = {
         if (!window.sttEnabled) return;
         Promise.resolve(window.sttEnabled()).then(function (on) {
             if (!on) return;
+            var fld = $('#sttField'); if (fld) fld.hidden = false;   // reveal the drawer's Voice-model field
             if (sel) {
                 sel.hidden = false;
                 if (window.sttModel) Promise.resolve(window.sttModel()).then(function (m) {

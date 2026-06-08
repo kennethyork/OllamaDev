@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.8.71 (2026-06-08) — session pickers (model / temp / voice / theme) move into the ☰ drawer
+
+### Changed
+- **The model, temperature, voice-model, and theme dropdowns moved into the ☰ drawer** (a new “Session” section under Projects), so the top bar is now just ☰ · brand · connection · ＋ Add · current folder. The ＋ Add button and the folder path stay where they were. Applies to both the desktop app and web (they share one frontend).
+
 ## v4.8.70 (2026-06-08) — canvas zoom + the top-bar actions move into the ＋ Add / right-click menu
 
 ### Added

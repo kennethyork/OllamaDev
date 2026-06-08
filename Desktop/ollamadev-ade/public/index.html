@@ -14,24 +14,6 @@
         <span class="brand">OllamaDev <span class="dim">ADE</span></span>
         <span id="conn" class="conn" title="Ollama connection">●</span>
         <div class="spacer"></div>
-        <select id="modelSelect" title="Model"></select>
-        <select id="tempSelect" title="Temperature — lower is more precise/deterministic (better tool-calling), higher is more creative">
-            <option value="0">0.0 · Exact</option>
-            <option value="0.2">0.2 · Precise</option>
-            <option value="0.3">0.3 · Balanced</option>
-            <option value="0.5">0.5 · Standard</option>
-            <option value="0.7">0.7 · Creative</option>
-            <option value="1">1.0 · Wild</option>
-        </select>
-        <select id="sttSelect" title="Voice model — speech-to-text accuracy (CPU-only, 100% local). Lower = faster, higher = more accurate." hidden>
-            <option value="tiny">🎙 tiny · fastest</option>
-            <option value="base">🎙 base · fast</option>
-            <option value="small">🎙 small · balanced</option>
-            <option value="medium">🎙 medium · accurate</option>
-            <option value="large-v3">🎙 large-v3 · best</option>
-            <option value="turbo">🎙 turbo · fast+</option>
-        </select>
-        <select id="themeSelect" title="Theme"></select>
         <button id="addPaneBtn" class="primary" title="Add a window or run an action (also: right-click the empty canvas)">＋ Add ▾</button>
         <span id="cwd" class="dim"></span>
         <!-- The old toolbar actions now live in the ＋ Add / right-click menu; these stay
@@ -65,6 +47,37 @@
                 <div class="side-title">Projects</div>
                 <div id="wsStrip" class="ws-strip"></div>
                 <button id="wsBarAdd" class="ws-bar-add" title="Open another project as a new tab">＋ Open project</button>
+            </div>
+            <!-- Session settings (model / temperature / voice model / theme) live in the
+                 drawer now, keeping the top bar slim. -->
+            <div id="sessionBar">
+                <div class="side-title">Session</div>
+                <label class="side-field">Model
+                    <select id="modelSelect" title="Model"></select>
+                </label>
+                <label class="side-field">Temperature
+                    <select id="tempSelect" title="Temperature — lower is more precise/deterministic (better tool-calling), higher is more creative">
+                        <option value="0">0.0 · Exact</option>
+                        <option value="0.2">0.2 · Precise</option>
+                        <option value="0.3">0.3 · Balanced</option>
+                        <option value="0.5">0.5 · Standard</option>
+                        <option value="0.7">0.7 · Creative</option>
+                        <option value="1">1.0 · Wild</option>
+                    </select>
+                </label>
+                <label class="side-field" id="sttField" hidden>Voice model
+                    <select id="sttSelect" title="Voice model — speech-to-text accuracy (CPU-only, 100% local). Lower = faster, higher = more accurate.">
+                        <option value="tiny">🎙 tiny · fastest</option>
+                        <option value="base">🎙 base · fast</option>
+                        <option value="small">🎙 small · balanced</option>
+                        <option value="medium">🎙 medium · accurate</option>
+                        <option value="large-v3">🎙 large-v3 · best</option>
+                        <option value="turbo">🎙 turbo · fast+</option>
+                    </select>
+                </label>
+                <label class="side-field">Theme
+                    <select id="themeSelect" title="Theme"></select>
+                </label>
             </div>
         </aside>
 
