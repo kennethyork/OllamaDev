@@ -2814,11 +2814,13 @@ var App = {
         if (!this.POP_SEL[view] || this.popped[view]) return;
         this.popped[view] = { id: '__pop_' + view + '__', view: view, x: 280, y: 24, w: 520, h: 400, z: ++this._zTop };
         this.savePopped();
-        // Leaving the popped view's tab: switch to the Workspace so the floating pane
-        // is visible among the terminals; its old tab now shows a "pop back" placeholder.
-        if (this.view === view) this.setView('code'); else this.render();
+        // Switch to the Workspace (where the terminals live) so the floating pane is
+        // visible, THEN re-render #terminals to actually mount it. Its old tab now
+        // shows a "pop back" placeholder.
+        this.setView('code');
+        this.render();
         if (view === 'board') { this.startCrewPoll(); Tasks.render(); }
-        banner(this.POP_TITLE[view] + ' popped out — drag the header, resize the corner', 'ok');
+        banner(this.POP_TITLE[view] + ' popped out into the Workspace — drag the header, resize the corner', 'ok');
     },
     popBackView: function (view) {
         if (!this.popped[view]) return;

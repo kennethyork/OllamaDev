@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.8.63 (2026-06-08) — fix: popped-out pane now actually appears in the Workspace
+
+### Fixed
+- **Popping a tab out now shows the pane in the main area with the terminals.** v4.8.62 set the view but didn't re-render `#terminals`, so the pane was never mounted (and popping a non-current tab left you on a view where the terminals aren't shown). Pop-out now switches to the Workspace and re-renders, so the floating pane appears immediately among the terminals.
+
 ## v4.8.62 (2026-06-08) — pop any workspace tab out into a pane with the terminals
 
 ### Added
