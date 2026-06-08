@@ -1,5 +1,12 @@
 # Changelog
 
+## v4.8.67 (2026-06-08) — tool dialogs are canvas windows too (Crew / Review / Roles / Skills / Hooks)
+
+### Changed
+- **The Crew, Review (diff), Roles, Skills, and Hooks dialogs are now canvas windows** instead of modal overlays — drag, resize, focus-zoom, and keep them open alongside everything else. Their buttons (👥 Crew, ⇄ Review, and the Manage… links) open them on the canvas; Cancel/Done or the window × closes them. They're transient (not persisted across restart) so they don't clutter a reopened project.
+- The real dialog content is *moved* into the window (not duplicated), so all the existing form wiring works unchanged. Folder-open and Voice-history stay as quick modals.
+- Still 100% vanilla.
+
 ## v4.8.66 (2026-06-08) — every window lives on the canvas (Files / Search / Tasks too)
 
 ### Changed

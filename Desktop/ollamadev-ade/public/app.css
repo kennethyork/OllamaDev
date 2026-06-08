@@ -399,6 +399,10 @@ textarea.field { min-height: 84px; resize: vertical; line-height: 1.5; }
 .term-pane.pop-pane .pop-pane-body > .panel { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: auto; background: var(--bg2); }
 .term-pane.pop-pane .pop-pane-body > #filesPanel #fileTree { overflow: auto; }
 .term-pane.pop-pane .pop-pane-body > .panel .side-title { padding-top: 9px; }
+/* Tool dialogs (Crew / Roles / Skills / Hooks / Review) as canvas windows: the .modal
+   fills the pane body and scrolls; its own centered-box sizing + title are dropped. */
+.term-pane.pop-pane .pop-pane-body > .modal { width: 100%; max-width: none; height: 100%; border: none; border-radius: 0; box-shadow: none; padding: 16px; overflow: auto; animation: none; }
+.term-pane.pop-pane .pop-pane-body > .modal > .modal-title { display: none; }
 .term-pane.pop-pane .term-head .popback { cursor: pointer; color: var(--faint); border: none; background: none; font-size: 14px; line-height: 1; border-radius: 4px; padding: 0 5px; margin-left: auto; }
 .term-pane.pop-pane .term-head .popback:hover { color: var(--accent); background: rgba(88,166,255,.12); }
 .term-pane.pop-pane .term-head .zoom { margin-left: 0; }

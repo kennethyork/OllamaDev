@@ -1299,17 +1299,17 @@ var Roles = {
         var save = $('#roleSave'); if (save) save.onclick = function () { self.add(); };
     },
     open: function () {
-        var ov = $('#rolesOverlay'); if (!ov) return;
+        if (!$('#rolesModal')) return;
+        App.openDialog('roles');
         // Fill the optional pinned-model dropdown from the loaded models.
         var sel = $('#roleModel'), ms = $('#modelSelect');
         if (sel && ms) {
             var opts = Array.prototype.slice.call(ms.options).map(function (o) { return o.value; }).filter(function (m) { return m !== 'shell'; });
             sel.innerHTML = '<option value="">— crew coder model —</option>' + opts.map(function (m) { return '<option>' + esc(m) + '</option>'; }).join('');
         }
-        ov.hidden = false;
         this.load();
     },
-    close: function () { var ov = $('#rolesOverlay'); if (ov) ov.hidden = true; },
+    close: function () { App.closePaneView('roles'); },
     load: function () {
         var self = this;
         if (!window.crewRoleList) { this.render({ roles: [] }); return Promise.resolve(); }
@@ -1369,8 +1369,8 @@ var SkillMgr = {
         var ov = $('#skillsOverlay'); if (ov) ov.onclick = function (e) { if (e.target === ov) self.close(); };
         var save = $('#skillSave'); if (save) save.onclick = function () { self.save(); };
     },
-    open: function () { var ov = $('#skillsOverlay'); if (!ov) return; ov.hidden = false; this.clearForm(); this.load(); },
-    close: function () { var ov = $('#skillsOverlay'); if (ov) ov.hidden = true; },
+    open: function () { if (!$('#skillsModal')) return; App.openDialog('skills'); this.clearForm(); this.load(); },
+    close: function () { App.closePaneView('skills'); },
     load: function () {
         var self = this;
         if (!window.skillsList) { this.render({ skills: [] }); return Promise.resolve(); }
@@ -1446,8 +1446,8 @@ var HookMgr = {
         var ov = $('#hooksOverlay'); if (ov) ov.onclick = function (e) { if (e.target === ov) self.close(); };
         var add = $('#hookSave'); if (add) add.onclick = function () { self.add(); };
     },
-    open: function () { var ov = $('#hooksOverlay'); if (!ov) return; ov.hidden = false; this.load(); },
-    close: function () { var ov = $('#hooksOverlay'); if (ov) ov.hidden = true; },
+    open: function () { if (!$('#hooksModal')) return; App.openDialog('hooks'); this.load(); },
+    close: function () { App.closePaneView('hooks'); },
     load: function () {
         var self = this;
         if (!window.hooksList) { this.render({ hooks: [], events: [] }); return Promise.resolve(); }
@@ -1738,8 +1738,8 @@ var Diff = {
             if (e.key === 'Escape') { var o = $('#diffOverlay'); if (o && !o.hidden) self.close(); }
         });
     },
-    open: function () { var o = $('#diffOverlay'); if (o) { o.hidden = false; this.load(); } },
-    close: function () { var o = $('#diffOverlay'); if (o) o.hidden = true; },
+    open: function () { if (!$('#diffModal')) return; App.openDialog('diff'); this.load(); },
+    close: function () { App.closePaneView('diff'); },
     load: function () {
         var body = $('#diffBody'), files = $('#diffFiles');
         if (!body) return;
@@ -1878,15 +1878,29 @@ var App = {
     // is moved onto the canvas so all state is preserved.
     panX: 0, panY: 0,
     popped: {},
+    // Persistent content windows (saved per-project, in the rail + Add menu).
     POP_VIEWS: ['files', 'search', 'tasks', 'editor', 'board', 'graph', 'browser'],
-    POP_SEL: { files: '#filesPanel', search: '#searchPanel', tasks: '#tasksPanel', editor: '#editorPane', board: '#boardView', graph: '#graphView', browser: '#browserView' },
-    POP_TITLE: { files: '▤ Files', search: '🔎 Code search', tasks: '▦ Tasks', editor: '📝 Editor', board: '📋 Board', graph: '🕸 Graph', browser: '🌐 Browser' },
+    // Tool dialogs — now canvas windows too, but transient (not persisted across restart).
+    DIALOG_VIEWS: ['crew', 'roles', 'skills', 'hooks', 'diff'],
+    POP_SEL: {
+        files: '#filesPanel', search: '#searchPanel', tasks: '#tasksPanel', editor: '#editorPane',
+        board: '#boardView', graph: '#graphView', browser: '#browserView',
+        crew: '#crewModal', roles: '#rolesModal', skills: '#skillsModal', hooks: '#hooksModal', diff: '#diffModal'
+    },
+    POP_TITLE: {
+        files: '▤ Files', search: '🔎 Code search', tasks: '▦ Tasks', editor: '📝 Editor',
+        board: '📋 Board', graph: '🕸 Graph', browser: '🌐 Browser',
+        crew: '👥 Crew', roles: '🎭 Roles', skills: '🧩 Skills', hooks: '🪝 Hooks', diff: '⇄ Review'
+    },
     // Sensible default size/spot (canvas-world coords) when a window is first opened.
     POP_DEFAULT: {
         files: { x: 16, y: 16, w: 290, h: 460 }, search: { x: 16, y: 16, w: 320, h: 460 },
         tasks: { x: 16, y: 16, w: 300, h: 340 }, editor: { x: 326, y: 16, w: 640, h: 460 },
         board: { x: 16, y: 16, w: 580, h: 430 }, graph: { x: 16, y: 16, w: 640, h: 470 },
-        browser: { x: 16, y: 16, w: 720, h: 500 }
+        browser: { x: 16, y: 16, w: 720, h: 500 },
+        crew: { x: 80, y: 24, w: 700, h: 580 }, roles: { x: 100, y: 36, w: 620, h: 520 },
+        skills: { x: 100, y: 36, w: 640, h: 540 }, hooks: { x: 100, y: 36, w: 640, h: 540 },
+        diff: { x: 48, y: 20, w: 860, h: 640 }
     },
     // PTYs spawned this session, by id. Survives detach (workspace switch) so we
     // can RE-attach a still-running terminal; gone after a restart → respawn fresh.
@@ -2142,7 +2156,8 @@ var App = {
         { id: 'blank', label: '➕ Blank', task: '', max: 2, review: true, skills: [] }
     ],
     openCrew: function () {
-        var o = $('#modalOverlay'); if (!o) return;
+        var o = $('#crewModal'); if (!o) return;
+        this.openDialog('crew');   // open as a canvas window
         // Step 1 default folder = the open project.
         var cf = $('#crewFolder'); if (cf) cf.value = (this.cwd && this.cwd !== '.') ? this.cwd : '';
         // Per-role model pickers default to your CONFIG (crew.coderModel etc.) so
@@ -2172,10 +2187,9 @@ var App = {
         this.populatePresets();
         var pl = $('#crewProjLine'); if (pl) pl.textContent = 'Runs in: ' + (this.cwd || '.') + ' · default team: Director + Researcher + 2 Coders + Auditor · review on';
         var adv = document.querySelector('.crew-adv'); if (adv) adv.open = false;
-        o.hidden = false;
         var t = $('#crewTask'); if (t) { t.focus(); }
     },
-    closeCrew: function () { var o = $('#modalOverlay'); if (o) o.hidden = true; },
+    closeCrew: function () { this.closePaneView('crew'); },
     renderTemplates: function () {
         var box = $('#crewTemplates'); if (!box) return;
         var self = this;
@@ -2855,10 +2869,11 @@ var App = {
         if (this._inner) this._inner.style.transform = 'translate(' + this.panX + 'px,' + this.panY + 'px)';
         banner('canvas re-centered', 'ok');
     },
-    // Popped-view geometry entries (also valid zoom/focus targets alongside terminals).
+    // Every open window entry (content windows + tool dialogs) — valid zoom/focus
+    // targets alongside terminals.
     _poppedPanes: function () {
         var self = this;
-        return this.POP_VIEWS.filter(function (v) { return self.popped[v]; }).map(function (v) { return self.popped[v]; });
+        return Object.keys(this.popped).map(function (v) { return self.popped[v]; });
     },
     _paneExists: function (id) {
         return this._poppedPanes().some(function (p) { return p.id === id; }) ||
@@ -2881,6 +2896,13 @@ var App = {
     // ---- Open a view (editor/board/graph/browser) as a pane on the canvas ----
     // Idempotent: opens the pane if it isn't already on the canvas.
     ensurePane: function (view) { if (this.POP_SEL[view] && !this.popped[view]) this.popView(view); },
+    // Open a tool dialog (crew/roles/skills/hooks/diff) as a canvas window — or focus
+    // it if it's already open. Returns true once it's on the canvas.
+    openDialog: function (view) {
+        if (this.popped[view]) this.focusPane(this.popped[view].id);
+        else this.popView(view);
+        return true;
+    },
     popView: function (view, wx, wy) {
         if (!this.POP_SEL[view] || this.popped[view]) return;
         var d = this.POP_DEFAULT[view] || { x: 280, y: 24, w: 520, h: 400 };
@@ -2912,8 +2934,7 @@ var App = {
     // innerHTML='' so it can't be destroyed; re-mounted into its pane right after.
     _parkPopped: function () {
         var store = $('#paneStore'), self = this;
-        this.POP_VIEWS.forEach(function (view) {
-            if (!self.popped[view]) return;
+        Object.keys(this.popped).forEach(function (view) {
             var el = $(self.POP_SEL[view]);
             if (el && store && el.parentNode !== store) { el.hidden = true; store.appendChild(el); }
         });

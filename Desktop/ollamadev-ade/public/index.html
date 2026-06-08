@@ -181,7 +181,7 @@
     </div>
 
     <div id="modalOverlay" class="modal-overlay" hidden>
-        <div class="modal">
+        <div class="modal" id="crewModal">
             <div class="modal-title">👥 OllamaDev Crew</div>
             <div class="modal-sub dim">Set up the team, then either give the Director a task now — or leave it blank to launch the crew and prompt the Director live in the terminal.</div>
 
@@ -232,7 +232,7 @@
     </div>
 
     <div id="rolesOverlay" class="modal-overlay" hidden>
-        <div class="modal">
+        <div class="modal" id="rolesModal">
             <div class="modal-title">🎭 Crew roles</div>
             <div class="modal-sub dim">The Director assigns one role to each subtask. Built-ins always exist; add your own below. Roles are shared by the terminal, desktop, and web.</div>
             <div id="rolesList" class="roles-list"></div>
@@ -259,7 +259,7 @@
     </div>
 
     <div id="skillsOverlay" class="modal-overlay" hidden>
-        <div class="modal">
+        <div class="modal" id="skillsModal">
             <div class="modal-title">🧩 Skills</div>
             <div class="modal-sub dim">Reusable instructions the agent loads on demand (the <code>skill</code> tool) and crews pick up by focus. Shared by the terminal, desktop, and web.</div>
             <div id="skillsList" class="roles-list"></div>
@@ -283,7 +283,7 @@
     </div>
 
     <div id="hooksOverlay" class="modal-overlay" hidden>
-        <div class="modal">
+        <div class="modal" id="hooksModal">
             <div class="modal-title">🪝 Hooks</div>
             <div class="modal-sub dim">Shell commands fired at lifecycle points. A <strong>PreToolUse</strong> hook that exits non-zero blocks the tool. Shared by the terminal, desktop, and web (<code>~/.ollamadev/config.json</code>).</div>
             <div id="hooksList" class="roles-list"></div>
@@ -307,7 +307,7 @@
     </div>
 
     <div id="diffOverlay" class="modal-overlay" hidden>
-        <div class="modal modal-wide">
+        <div class="modal modal-wide" id="diffModal">
             <div class="modal-title">⇄ Review changes</div>
             <div class="modal-sub dim">Read-only diff of the working tree (changed &amp; new files). Tell the agent to commit when it looks right — git stays agent-driven.</div>
             <div id="diffFiles" class="diff-files"></div>
