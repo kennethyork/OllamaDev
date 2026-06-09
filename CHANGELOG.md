@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.8.72 (2026-06-08) — cohesive ☰ drawer (rail + Projects + Session slide as one panel)
+
+### Changed
+- The rail and the Projects/Session sidebar now **slide in together as one seamless panel** (same offset + speed, no divider line between them) instead of two pieces. The **Session** pickers (model / temperature / voice / theme) are unchanged and fully wired — they still drive the app exactly as the top-bar versions did.
+
 ## v4.8.71 (2026-06-08) — session pickers (model / temp / voice / theme) move into the ☰ drawer
 
 ### Changed

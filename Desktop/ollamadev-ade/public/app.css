@@ -128,14 +128,14 @@ body {
 #main { flex: 1; display: flex; min-height: 0; position: relative; }
 /* The canvas (#workspace) fills the whole area; the rail + Projects sidebar are an
    overlay drawer toggled by ☰, so by default the canvas is full-bleed. */
-#rail { position: absolute; left: 0; top: 0; bottom: 0; width: 48px; z-index: 46; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding-top: 8px; gap: 4px; transform: translateX(-110%); transition: transform .18s ease; }
+#rail { position: absolute; left: 0; top: 0; bottom: 0; width: 48px; z-index: 46; background: var(--bg2); display: flex; flex-direction: column; align-items: center; padding-top: 8px; gap: 4px; transform: translateX(-340px); transition: transform .2s ease; }
 body.nav-open #rail { transform: none; }
 .rail-btn { width: 36px; height: 36px; border: none; background: none; color: var(--dim); font-size: 17px; border-radius: var(--r-sm); cursor: pointer; transition: background .12s, color .12s; position: relative; }
 .rail-btn:hover { background: var(--bg3); color: var(--fg); }
 .rail-btn.active { color: var(--accent); }
 .rail-btn.active::before { content: ''; position: absolute; left: -8px; top: 7px; bottom: 7px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); }
 
-#sidebar { position: absolute; left: 48px; top: 0; bottom: 0; width: 250px; z-index: 45; background: var(--bg2); border-right: 1px solid var(--border); overflow-y: auto; transform: translateX(-130%); transition: transform .18s ease; box-shadow: 6px 0 28px rgba(0,0,0,.4); }
+#sidebar { position: absolute; left: 48px; top: 0; bottom: 0; width: 250px; z-index: 45; background: var(--bg2); border-right: 1px solid var(--border); overflow-y: auto; transform: translateX(-340px); transition: transform .2s ease; box-shadow: 6px 0 28px rgba(0,0,0,.4); }
 body.nav-open #sidebar { transform: none; }
 /* Dim the canvas behind the open drawer (cosmetic — clicks still reach the canvas to close it). */
 #workspace { position: relative; }
