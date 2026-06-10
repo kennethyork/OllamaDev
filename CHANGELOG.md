@@ -1,5 +1,11 @@
 # Changelog
 
+## v4.8.76 (2026-06-10) — a skill for every crew team + full Skills CRUD in the UI
+
+### Added
+- **Every crew team now has a matching, editable skill in the Skills window.** Alongside the 31 capability skills (responsive-design, payments-money, …), there are now **34 per-team starter skills** — one for each by-project-type team in the crew picker (`website`, `landing-page`, `saas`, `ecommerce`, `admin-dashboard`, `rest-api`, `graphql`, `microservice`, `game`, `cli`, `library`, `vscode-ext`, `ci-cd`, `web3`, …). They’re **listed, readable, and editable** in the UI (⎘ to view / customize a copy), shared across CLI, desktop, and web. They surface in the Skills manager only — crew focus-matching is unchanged, so existing crews behave exactly as before.
+- **Full Skills CRUD in the window**: a **＋ New skill** button, clear **create vs. edit** mode (the name locks while editing so an update can’t silently fork a new skill, with a status line and a 💾 Update / Save-my-copy button), plus **＋ Add crew-template skills** to copy the template-injected built-ins into your own editable skills.
+
 ## v4.8.75 (2026-06-09) — Roles / Skills / Hooks are direct ＋ Add menu entries
 
 ### Added

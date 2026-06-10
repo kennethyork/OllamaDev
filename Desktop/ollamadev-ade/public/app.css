@@ -546,6 +546,11 @@ textarea.field { min-height: 84px; resize: vertical; line-height: 1.5; }
 #skillBody { min-height: 140px; }
 .skill-tag { display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 999px; font-size: 10px; background: var(--bg3); color: var(--dim); border: 1px solid var(--border); vertical-align: middle; }
 .skill-sec { margin: 12px 2px 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.skills-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 4px; }
+.skills-toolbar button { background: var(--bg3); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 5px 11px; cursor: pointer; font-size: 12px; }
+.skills-toolbar button:hover { border-color: var(--accent); }
+.skills-toolbar button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+#skillFormStatus { margin: 2px 0 8px; }
 .card.crew .cmeta { margin-top: 6px; font-size: 11px; color: var(--dim); }
 .card.crew.held .cmeta { color: var(--warn); }
 

@@ -569,6 +569,26 @@ shell_exec('rm -rf ' . escapeshellarg($shk));
 ok('desktop exposes skill bindings + a Skills manager UI', strpos($bind, 'function skillsList') !== false &&
     strpos($bind, 'function skillsSave') !== false && strpos($bind, "'skillsList'") !== false &&
     strpos($ajs, 'var SkillMgr') !== false && strpos($ajs, 'SkillMgr.bind()') !== false);
+// Full skills CRUD UX: a New button, create-vs-edit mode (locks the name when
+// editing so an update doesn't silently fork a new skill), and a one-click
+// "add crew-template skills" that copies the template-injected built-ins to disk.
+ok('Skills window has full CRUD UX (new / edit-mode / add-template-skills)',
+    strpos($ajs, 'newSkill: function') !== false && strpos($ajs, 'setMode: function') !== false &&
+    strpos($ajs, 'addTemplateSkills: function') !== false &&
+    strpos($ihtml_c, 'id="skillNew"') !== false && strpos($ihtml_c, 'id="skillAddTemplates"') !== false &&
+    strpos($ihtml_c, 'id="skillFormStatus"') !== false);
+// Every crew TEAM has a matching, listed + readable + editable skill (teamLibrary),
+// surfaced in the manager via allBuiltins() — without changing crew focus-matching.
+ok('each crew team has a matching skill in the manager (teamLibrary)',
+    strpos($src, 'function teamLibrary') !== false && strpos($src, 'function allBuiltins') !== false &&
+    strpos($src, "'ecommerce', 'E-commerce") !== false && strpos($src, 'CrewSkills::allBuiltins()') !== false);
+// Functional: the binary lists the per-team skills as built-ins (31 capability + 34 team).
+$tsl = json_decode((string) shell_exec('php ' . escapeshellarg(dirname(__DIR__) . '/ollamadev') . ' skills list --json 2>/dev/null'), true);
+$tsBuilt = is_array($tsl) ? array_filter($tsl['skills'] ?? [], fn($s) => $s['builtin'] ?? false) : [];
+$tsNames = array_map(fn($s) => $s['name'], $tsBuilt);
+ok('crew-team skills are listed by the engine (website/ecommerce/saas present, 60+ built-ins)',
+    count($tsBuilt) >= 60 && in_array('website', $tsNames, true) && in_array('ecommerce', $tsNames, true) && in_array('saas', $tsNames, true),
+    'built-in count: ' . count($tsBuilt));
 // Desktop Hooks panel: bindings + bridge + UI, backed by `ollamadev hooks --json`.
 $ihtml_h = (string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/index.html');
 ok('desktop exposes hooks bindings + a Hooks panel UI', strpos($bind, 'function hooksList') !== false &&

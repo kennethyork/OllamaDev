@@ -57,7 +57,7 @@ class Skills {
                 return $s + ['body' => (string) @file_get_contents($s['file']), 'files' => $files];
             }
         }
-        $lib = CrewSkills::library();
+        $lib = CrewSkills::allBuiltins();   // capability skills + per-team starters
         $key = strtolower(trim($name));
         if (isset($lib[$key])) {
             return ['name' => $key, 'description' => $lib[$key]['description'],
@@ -71,7 +71,7 @@ class Skills {
     public static function builtins(): array {
         $onDisk = array_change_key_case(self::all(), CASE_LOWER);
         $out = [];
-        foreach (CrewSkills::library() as $name => $s) {
+        foreach (CrewSkills::allBuiltins() as $name => $s) {   // capability + per-team starters
             if (isset($onDisk[strtolower($name)])) continue;
             $out[] = ['name' => $name, 'description' => $s['description'], 'builtin' => true];
         }

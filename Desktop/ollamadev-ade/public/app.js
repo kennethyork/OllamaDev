@@ -1590,8 +1590,25 @@ var SkillMgr = {
         var close = $('#skillsClose'); if (close) close.onclick = function () { self.close(); };
         var ov = $('#skillsOverlay'); if (ov) ov.onclick = function (e) { if (e.target === ov) self.close(); };
         var save = $('#skillSave'); if (save) save.onclick = function () { self.save(); };
+        var nw = $('#skillNew'); if (nw) nw.onclick = function () { self.newSkill(); };
+        var addt = $('#skillAddTemplates'); if (addt) addt.onclick = function () { self.addTemplateSkills(); };
     },
+    editing: null,
     open: function () { if (!$('#skillsModal')) return; App.openDialog('skills'); this.clearForm(); this.load(); },
+    // Open the form cleared, in CREATE mode (name editable, "Create skill").
+    newSkill: function () { this.clearForm(); this.setMode('new'); var box = $('#skillAddBox'); if (box) box.open = true; var n = $('#skillName'); if (n) n.focus(); },
+    // Reflect create vs edit-mine vs customize-built-in in the status line, the Save
+    // button, and whether the name is locked (renaming = a NEW skill, so we lock it
+    // when editing — to rename, delete and recreate). For a built-in, the name MUST
+    // stay the same so the saved copy overrides it.
+    setMode: function (mode, name, builtin) {
+        this.editing = mode === 'new' ? null : name;
+        var nm = $('#skillName'); if (nm) nm.readOnly = (mode !== 'new');
+        var st = $('#skillFormStatus'), btn = $('#skillSave');
+        if (mode === 'new') { if (st) st.textContent = 'Creating a new skill.'; if (btn) btn.textContent = 'Create skill'; }
+        else if (builtin) { if (st) st.textContent = 'Customizing built-in “' + name + '” — Save creates your editable override.'; if (btn) btn.textContent = '💾 Save my copy'; }
+        else { if (st) st.textContent = 'Editing “' + name + '” (delete & recreate to rename).'; if (btn) btn.textContent = '💾 Update skill'; }
+    },
     close: function () { App.closePaneView('skills'); },
     load: function () {
         var self = this;
@@ -1630,8 +1647,9 @@ var SkillMgr = {
             if ($('#skillName')) $('#skillName').value = s.name || name;
             if ($('#skillDesc')) $('#skillDesc').value = s.description || '';
             if ($('#skillBody')) $('#skillBody').value = s.body || '';
+            self.setMode('edit', s.name || name, !!s.builtin);
             var box = $('#skillAddBox'); if (box) box.open = true;
-            var n = $('#skillName'); if (n) n.focus();
+            var n = $('#skillBody'); if (n) n.focus();   // name is locked in edit mode
             if (s.builtin) banner('built-in "' + (s.name || name) + '" loaded — Save creates your own editable copy that overrides it', 'ok');
         }).catch(function () { banner('could not load skill', 'err'); });
     },
@@ -1655,7 +1673,37 @@ var SkillMgr = {
         if (!name || !window.skillsRemove) return;
         Promise.resolve(window.skillsRemove(name)).then(function (d) { self.render(d); banner('skill "' + name + '" removed', 'ok'); }).catch(function () { banner('could not remove skill', 'err'); });
     },
-    clearForm: function () { ['#skillName', '#skillDesc', '#skillBody'].forEach(function (id) { var el = $(id); if (el) el.value = ''; }); }
+    // Materialize every skill the crew TEMPLATES inject (testing-discipline,
+    // refactor-safety, docs-writing, security-hardening, …) as your own editable
+    // disk copies — so they move out of the read-only "built-in" section into your
+    // skills, fully CRUD-able. Idempotent (skips ones you already have) and
+    // reversible (delete a copy to revert to the engine built-in).
+    addTemplateSkills: function () {
+        var self = this;
+        var want = {};
+        (App.CREW_TEMPLATES || []).forEach(function (t) { (t.skills || []).forEach(function (s) { want[s] = true; }); });
+        var list = Object.keys(want);
+        if (!list.length) { banner('no crew-template skills found', 'err'); return; }
+        var mine = {}; (this.skills || []).forEach(function (s) { if (!s.builtin) mine[s.name] = true; });
+        var todo = list.filter(function (n) { return !mine[n]; });
+        if (!todo.length) { banner('all crew-template skills are already in your skills', 'ok'); return; }
+        if (!window.skillsGet || !window.skillsSave) { banner('skills unavailable here', 'err'); return; }
+        var added = 0, pending = todo.length;
+        todo.forEach(function (n) {
+            Promise.resolve(window.skillsGet(n)).then(function (s) {
+                if (s && !s.error && s.body) { added++; return window.skillsSave(n, s.description || '', s.body); }
+            }).catch(function () {}).then(function () {
+                if (--pending === 0) { self.load(); banner('added ' + added + ' crew-template skill(s) to your skills — now editable', 'ok'); }
+            });
+        });
+    },
+    clearForm: function () {
+        ['#skillName', '#skillDesc', '#skillBody'].forEach(function (id) { var el = $(id); if (el) el.value = ''; });
+        this.editing = null;
+        var nm = $('#skillName'); if (nm) nm.readOnly = false;
+        var st = $('#skillFormStatus'); if (st) st.textContent = '';
+        var btn = $('#skillSave'); if (btn) btn.textContent = 'Save skill';
+    }
 };
 
 // ---------- Hooks: shell commands fired at lifecycle points (PreToolUse can block) ----------

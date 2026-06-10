@@ -324,9 +324,14 @@
         <div class="modal" id="skillsModal">
             <div class="modal-title">🧩 Skills</div>
             <div class="modal-sub dim">Reusable instructions the agent loads on demand (the <code>skill</code> tool) and crews pick up by focus. Shared by the terminal, desktop, and web.</div>
+            <div class="skills-toolbar">
+                <button id="skillNew" type="button" class="primary">＋ New skill</button>
+                <button id="skillAddTemplates" type="button" title="Copy the skills your crew templates inject into your own editable skills">＋ Add crew-template skills</button>
+            </div>
             <div id="skillsList" class="roles-list"></div>
             <details class="crew-adv" id="skillAddBox">
                 <summary>＋ New / edit a skill</summary>
+                <div id="skillFormStatus" class="modal-hint dim"></div>
                 <label class="modal-label">Name</label>
                 <input id="skillName" class="field" placeholder="e.g. stripe-payments">
                 <label class="modal-label">Description <span class="dim">— one line on when to use it</span></label>

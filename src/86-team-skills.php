@@ -168,6 +168,94 @@ class CrewSkills {
         ];
     }
 
+    // One starter skill per crew TEAM (the by-project-type teams in the crew picker),
+    // so every team has a matching, editable skill in the Skills manager. These are
+    // listed + viewable + customizable (⎘ saves an editable copy). Unlike library(),
+    // they are NOT auto-matched into a crew run by focus — so adding them never
+    // changes how an existing crew behaves. Keyed by a project-type slug distinct
+    // from the capability skills above.
+    public static function teamLibrary(): array {
+        $teams = [
+            ['website', 'Website (static / marketing / content) — project starter.', ['website', 'marketing site'],
+                ['Semantic, accessible markup — landmarks, one <h1>, real buttons/links.', 'Responsive, mobile-first; nothing overflows on small screens.', 'SEO basics: unique title/description, Open Graph, sitemap.', 'Fast load: optimize and lazy-load images, keep JS minimal.']],
+            ['landing-page', 'High-converting landing page — project starter.', ['landing page'],
+                ['One clear hero and call-to-action above the fold.', 'Responsive and fast; remove distractions from the goal.', 'SEO/meta and Open Graph for shareable previews.', 'A working contact/signup form with validation and feedback.']],
+            ['web-app', 'Web application (SPA or full-stack) — project starter.', ['web app', 'single-page app'],
+                ['Clear component structure with predictable, minimal state.', 'Routing and auth wired; protect private routes.', 'Handle loading / empty / error states for every async view.', 'Integrate APIs defensively; add tests for core flows.']],
+            ['saas', 'SaaS product (multi-tenant) — project starter.', ['saas'],
+                ['Scope EVERY query by tenant id; deny by default.', 'Secure auth and sessions; least-privilege roles.', 'Reliable billing/subscription logic with idempotent webhooks.', 'Per-tenant limits and an audit log for sensitive actions.']],
+            ['ecommerce', 'E-commerce (catalog / cart / checkout) — project starter.', ['e-commerce', 'ecommerce'],
+                ['Store money as integer minor units, never float; track currency.', 'Compute totals and tax server-side from trusted prices.', 'Make payment and webhook handling idempotent; verify signatures.', 'Guard inventory against oversell with atomic updates.']],
+            ['admin-dashboard', 'Admin dashboard / internal tool — project starter.', ['admin dashboard', 'internal tool'],
+                ['Accurate data with server-side pagination, sort, and filter.', 'Role-based access checked on every action.', 'Clear tables, forms, and charts; confirm destructive operations.', 'Optimistic UI with rollback on failure.']],
+            ['blog-cms', 'Blog or CMS — project starter.', ['blog', 'cms'],
+                ['Clear content models and a stable slug/permalink scheme.', 'Sanitize and safely render user/markdown content.', 'SEO and RSS; draft/publish workflow.', 'Cache rendered content; invalidate on edit.']],
+            ['docs-site', 'Documentation site — project starter.', ['docs site', 'documentation site'],
+                ['Clear navigation and working search.', 'Runnable, tested code samples; keep them accurate.', 'Logical structure and consistent terminology.', 'Versioned docs and a fast static build.']],
+            ['forum-community', 'Forum / community app — project starter.', ['forum', 'community'],
+                ['Data integrity for threads, posts, and users.', 'Moderation tools plus spam/abuse handling.', 'Rate-limit posting; paginate and index for scale.', 'Notifications without N+1 query blowups.']],
+            ['pwa-app', 'Progressive Web App — project starter.', ['progressive web app'],
+                ['Ship a manifest; make it installable.', 'Service worker: precache the shell, runtime-cache data.', 'Offline fallback and graceful degradation.', 'Version caches and clean old ones; serve over HTTPS.']],
+            ['mobile', 'Mobile app (iOS / Android / RN / Flutter) — project starter.', ['mobile app'],
+                ['Handle the app lifecycle and restore state.', 'Keep the UI thread free; do heavy work off it.', 'Follow each platform navigation and UX conventions.', 'Handle offline and flaky networks; request permissions just-in-time.']],
+            ['desktop', 'Desktop app (Electron / Tauri / Qt / GTK) — project starter.', ['desktop app'],
+                ['Keep heavy work off the UI thread; stay responsive.', 'Sandbox any renderer and validate IPC messages.', 'Handle multi-window and OS lifecycle cleanly.', 'Store user data in OS-appropriate paths; test packaging.']],
+            ['rest-api', 'REST API / backend service — project starter.', ['rest api', 'backend service'],
+                ['Noun resources, correct verbs and status codes.', 'Validate every input at the boundary.', 'Consistent error shape; paginate list endpoints.', 'Authorize per request; add tests.']],
+            ['graphql', 'GraphQL API — project starter.', ['graphql api'],
+                ['Design the schema around client needs.', 'Use dataloader/batching to kill N+1.', 'Cursor-based pagination instead of unbounded lists.', 'Enforce auth in resolvers; limit query depth/complexity.']],
+            ['realtime', 'Realtime / WebSocket service — project starter.', ['realtime service', 'websocket service'],
+                ['Handle the full connection lifecycle with reconnect backoff.', 'Authenticate on connect and per room/channel join.', 'Apply backpressure when a client cannot keep up.', 'Make handlers idempotent; clean up on disconnect.']],
+            ['serverless-fn', 'Serverless functions — project starter.', ['serverless function', 'cloud function'],
+                ['Stay stateless; never persist to local disk/memory.', 'Minimize cold starts; init clients outside the handler.', 'Secrets from env/manager; least-privilege IAM per function.', 'Idempotent on duplicate events; return structured errors.']],
+            ['microservice', 'Microservice — project starter.', ['microservice'],
+                ['Single responsibility and a clear API contract.', 'Health/readiness checks and meaningful logs.', 'Observability: logs, metrics, traces with a correlation id.', 'Resilient calls: timeouts, retries, circuit breaking.']],
+            ['database', 'Database / schema work — project starter.', ['database schema', 'migrations'],
+                ['Normalize first; index what you filter, join, and sort on.', 'Enforce integrity: foreign keys, NOT NULL, unique, checks.', 'Reversible, safe-on-live migrations: add nullable, backfill, constrain.', 'Parameterize queries; back up before destructive changes.']],
+            ['data-pipeline', 'Data pipeline / ETL — project starter.', ['data pipeline', 'etl job'],
+                ['Make every stage idempotent so a re-run cannot double-write.', 'Validate incoming data; quarantine bad records.', 'Checkpoint progress so a failed run resumes.', 'Deterministic, testable transforms; log row counts in/out.']],
+            ['data-ml-project', 'Data / ML project — project starter.', ['data science project', 'machine learning project'],
+                ['Set and record seeds; pin library versions.', 'Validate data; never leak test into train.', 'Keep preprocessing in re-runnable code, not manual steps.', 'Track metrics and the params that produced them.']],
+            ['ai-app', 'AI / LLM app — project starter.', ['ai app', 'llm application'],
+                ['Budget tokens; truncate or summarize before the limit.', 'Stream output; handle partial and mid-stream errors.', 'Parse model output defensively (schema/JSON mode).', 'Cache deterministic calls; guard privileged actions.']],
+            ['game', 'Game — project starter.', ['game project'],
+                ['Separate fixed-timestep update from render; scale by delta time.', 'Pool/reuse objects to avoid per-frame GC spikes.', 'Keep per-frame work bounded; profile before optimizing.', 'Load assets async; never stall the loop on I/O.']],
+            ['cli', 'CLI tool — project starter.', ['cli tool', 'command-line tool'],
+                ['Provide --help and a clear usage line.', 'Exit 0 on success; errors to stderr, data to stdout.', 'Offer --json for machine consumption.', 'Validate args early; confirm destructive actions unless --force.']],
+            ['library', 'Library / SDK / package — project starter.', ['library', 'sdk package'],
+                ['Keep the public surface small and intentional.', 'Follow semantic versioning; document every export with an example.', 'Fail loudly on misuse; validate inputs at the boundary.', 'No global mutable state or side effects on import.']],
+            ['browser-ext', 'Browser extension (Manifest V3) — project starter.', ['browser extension', 'chrome extension'],
+                ['Request the minimum permissions; justify each.', 'Keep the service worker lean and event-driven.', 'Validate messages between content and background scripts.', 'Bundle everything; no remote code.']],
+            ['vscode-ext', 'VS Code extension — project starter.', ['vs code extension', 'vscode extension'],
+                ['Declare contribution points and activation events; keep activation lean.', 'Use the extension API and dispose resources you create.', 'Handle workspace and multi-root cases.', 'Test in the Extension Development Host.']],
+            ['plugin', 'Plugin (WordPress / Figma / Obsidian / …) — project starter.', ['plugin for'],
+                ['Follow the host plugin API, hooks, and lifecycle.', 'Do not pollute global or host state.', 'Validate inputs coming from the host.', 'Clean packaging and versioning; fail gracefully on host API changes.']],
+            ['chatbot', 'Chat bot (Discord / Slack / Telegram) — project starter.', ['chat bot'],
+                ['Keep the platform token secret (env, not code).', 'Respect rate limits; queue and back off.', 'Acknowledge events fast; do slow work async.', 'Validate and authorize commands; stay idempotent on reconnect.']],
+            ['automation', 'Automation / script — project starter.', ['automation script'],
+                ['Robust I/O and error handling.', 'Idempotent so it is safe to re-run.', 'Structured logging; clear exit codes.', 'Handle credentials safely; never hard-code secrets.']],
+            ['devops', 'DevOps / infra — project starter.', ['devops', 'infrastructure'],
+                ['Make everything idempotent and declarative.', 'Secrets from a store; least privilege everywhere.', 'Pin versions/images; fail-fast, cache-friendly stages.', 'Plan/diff before apply; keep changes reversible.']],
+            ['ci-cd', 'CI/CD pipeline — project starter.', ['ci/cd pipeline', 'ci cd'],
+                ['Stage build, test, then deploy.', 'Cache dependencies; fail fast.', 'Secrets via the CI store; never print them to logs.', 'Reproducible and pinned; gate production behind review.']],
+            ['embedded-iot', 'Embedded / IoT / firmware — project starter.', ['embedded', 'firmware', 'iot device'],
+                ['Avoid dynamic allocation in hot/interrupt paths; bound buffers.', 'Keep ISRs tiny; defer work to the main loop.', 'Mind timing and watchdogs; do not block on I/O.', 'Be explicit about integer widths and endianness.']],
+            ['web3', 'Smart contract / web3 dApp — project starter.', ['smart contract', 'web3 dapp'],
+                ['Checks-effects-interactions order; guard against reentrancy.', 'Use safe math; watch overflow and rounding.', 'Minimize and audit external calls; emit events on state change.', 'Write adversarial tests before deploy.']],
+            ['security-project', 'Security hardening project — project starter.', ['security hardening project'],
+                ['Validate/escape input; parameterize SQL; escape output.', 'Never commit secrets; scan the diff before committing.', 'Authorize every sensitive action; deny by default.', 'Avoid shelling out with user input; keep dependencies patched.']],
+        ];
+        $out = [];
+        foreach ($teams as $e) {
+            $out[$e[0]] = ['triggers' => $e[2], 'description' => $e[1], 'body' => "# {$e[0]}\n\n- " . implode("\n- ", $e[3]) . "\n"];
+        }
+        return $out;
+    }
+
+    // library() (capability skills, focus-matched into crews) + teamLibrary() (one
+    // per crew team, manager-only). Used by the Skills manager so both groups show.
+    public static function allBuiltins(): array { return array_merge(self::library(), self::teamLibrary()); }
+
     // Specific built-in skills requested by name (e.g. a crew template forcing
     // 'testing-discipline'). Unknown names are ignored. Returns skill-shaped entries.
     public static function byNames(array $names): array {
