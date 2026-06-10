@@ -589,6 +589,13 @@ $tsNames = array_map(fn($s) => $s['name'], $tsBuilt);
 ok('crew-team skills are listed by the engine (website/ecommerce/saas present, 60+ built-ins)',
     count($tsBuilt) >= 60 && in_array('website', $tsNames, true) && in_array('ecommerce', $tsNames, true) && in_array('saas', $tsNames, true),
     'built-in count: ' . count($tsBuilt));
+// Picking a by-project-type team auto-loads its team skill: the engine can force a
+// team skill by name (byNames → allBuiltins), and the UI maps each team → its slug.
+ok('a crew team auto-loads its matching skill (engine forces it by name + UI maps it)',
+    strpos($src, '$lib = self::allBuiltins();   // capability + per-team skills') !== false &&
+    strpos($ajs, 'TEAM_SKILL: {') !== false && strpos($ajs, 'teamSkillFor: function') !== false &&
+    strpos($ajs, "this.crewTeamSkill = (p.group === 'domain')") !== false &&
+    strpos($ajs, 'self.crewTeamSkill ? [self.crewTeamSkill]') !== false);
 // Desktop Hooks panel: bindings + bridge + UI, backed by `ollamadev hooks --json`.
 $ihtml_h = (string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/index.html');
 ok('desktop exposes hooks bindings + a Hooks panel UI', strpos($bind, 'function hooksList') !== false &&

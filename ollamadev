@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '4.8.76');
+define('OLLAMADEV_VERSION', '4.8.77');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -8392,7 +8392,7 @@ class CrewSkills {
     // Specific built-in skills requested by name (e.g. a crew template forcing
     // 'testing-discipline'). Unknown names are ignored. Returns skill-shaped entries.
     public static function byNames(array $names): array {
-        $lib = self::library();
+        $lib = self::allBuiltins();   // capability + per-team skills (a team can force its own)
         $out = [];
         foreach ($names as $n) {
             $n = strtolower(trim((string)$n));

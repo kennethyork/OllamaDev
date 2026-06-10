@@ -2456,6 +2456,7 @@ var App = {
         Promise.resolve(window.crewModels ? window.crewModels() : {}).then(apply).catch(function () { apply({}); });
         this.crewFocus = "";
         this.crewTemplateSkills = [];
+        this.crewTeamSkill = '';
 
         this.renderTemplates();
         this.populatePresets();
@@ -2531,6 +2532,27 @@ var App = {
         { name: '🔍 Audit Crew', group: 'task', max: 2, researcher: true, auditor: true, review: true },
         { name: '⚡ Solo (fast)', group: 'task', max: 1, researcher: false, auditor: false, review: true }
     ],
+    // Each by-project-type team auto-loads its matching team skill when you pick it
+    // (picking the team is the opt-in — nothing changes for a plain crew run). Keyed
+    // by the team name with its leading emoji stripped + lowercased, so it tolerates
+    // emoji/spacing differences.
+    TEAM_SKILL: {
+        'website': 'website', 'landing page': 'landing-page', 'web app': 'web-app', 'saas product': 'saas',
+        'e-commerce': 'ecommerce', 'admin dashboard': 'admin-dashboard', 'blog / cms': 'blog-cms',
+        'docs site': 'docs-site', 'forum / community': 'forum-community', 'pwa': 'pwa-app',
+        'mobile app': 'mobile', 'desktop app': 'desktop', 'rest api / backend': 'rest-api',
+        'graphql api': 'graphql', 'realtime / websocket': 'realtime', 'serverless / functions': 'serverless-fn',
+        'microservice': 'microservice', 'database / schema': 'database', 'data pipeline / etl': 'data-pipeline',
+        'data / ml': 'data-ml-project', 'ai / llm app': 'ai-app', 'game': 'game', 'cli tool': 'cli',
+        'library / sdk': 'library', 'browser extension': 'browser-ext', 'vs code extension': 'vscode-ext',
+        'plugin': 'plugin', 'bot': 'chatbot', 'automation / script': 'automation', 'devops / infra': 'devops',
+        'ci/cd pipeline': 'ci-cd', 'embedded / iot': 'embedded-iot', 'smart contract / web3': 'web3',
+        'security hardening': 'security-project'
+    },
+    teamSkillFor: function (name) {
+        var key = String(name || '').replace(/^[^A-Za-z]+/, '').trim().toLowerCase();
+        return this.TEAM_SKILL[key] || '';
+    },
     // ---- saved crew presets (team composition + per-role models, reusable) ----
     crewPresets: function () { try { var p = JSON.parse(localStorage.getItem('ade.crewPresets') || '{}'); return (p && typeof p === 'object') ? p : {}; } catch (e) { return {}; } },
     populatePresets: function () {
@@ -2555,6 +2577,9 @@ var App = {
         if (!p) return;
         var name = p.name || value.replace(/^saved:/, '');
         this.crewFocus = p.focus || ''; // domain steer the team passes to the crew
+        // A by-project-type team auto-loads its matching team skill (saved presets
+        // keep whatever they saved). Picking the team is the opt-in.
+        this.crewTeamSkill = (p.group === 'domain') ? this.teamSkillFor(name) : (p.teamSkill || '');
         if (p.max) $('#crewMax').value = String(p.max);
         if ('review' in p && $('#crewReview')) $('#crewReview').checked = !!p.review;
         if ('researcher' in p && $('#crewResearcher')) $('#crewResearcher').checked = !!p.researcher;
@@ -2564,7 +2589,7 @@ var App = {
         this.setMval('crewModelAuditor', p.auditorModel);
         this.setMval('crewModelResearcher', p.researcherModel);
         var adv = document.querySelector('.crew-adv'); if (adv) adv.open = true;
-        banner('loaded preset ' + name, 'ok');
+        banner('loaded preset ' + name + (this.crewTeamSkill ? ' · auto-loads the ' + this.crewTeamSkill + ' skill' : ''), 'ok');
     },
     savePreset: function () {
         var name = ($('#crewPresetName').value || '').trim() || $('#crewPreset').value;
@@ -2628,7 +2653,8 @@ var App = {
                 researcherModel: self.mval('crewModelResearcher'),
                 focus: self.crewFocus || '',
                 parallel: $('#crewParallel') && $('#crewParallel').checked,   // opt-in single-box parallel coders
-                skills: self.crewTemplateSkills || [],
+                // template-forced skills + the picked team's own skill (deduped)
+                skills: (self.crewTemplateSkills || []).concat(self.crewTeamSkill ? [self.crewTeamSkill] : []).filter(function (v, i, a) { return v && a.indexOf(v) === i; }),
                 hosts: ($('#crewHosts') && $('#crewHosts').value || '').trim()
             };
             self.closeCrew();

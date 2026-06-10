@@ -1,5 +1,11 @@
 # Changelog
 
+## v4.8.77 (2026-06-10) — picking a crew team auto-loads its team skill
+
+### Added
+- **Choosing a by-project-type crew team now auto-loads that team’s skill into the run.** Pick **🛒 E-commerce** and the crew loads the `ecommerce` skill; **🔌 REST API / Backend** loads `rest-api`; and so on for all 34 teams. The team selection is the opt-in — a plain crew run (no team picked) behaves exactly as before. The Crew window shows which skill a team will load when you select it.
+- Engine: a forced skill name now resolves against the per-team starters too (`CrewSkills::byNames` → `allBuiltins`), so a team can materialize its own skill into each coder’s worktree. Focus-matching of the capability skills is unchanged.
+
 ## v4.8.76 (2026-06-10) — a skill for every crew team + full Skills CRUD in the UI
 
 ### Added
