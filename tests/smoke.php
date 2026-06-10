@@ -548,6 +548,12 @@ ok('crew topology is a canvas window wired to the live board',
 // (4) Real-time activity feed parsed from each coder's log tail.
 ok('crew panes parse live per-coder activity (editing/reading/running)',
     strpos($ajs, 'parseActivity: function') !== false && strpos($ajs, 'self.activity[n] = self.parseActivity') !== false);
+// Roles / Skills / Hooks are directly openable from the ＋ Add / right-click menu
+// (previously only reachable through the Crew window). addPane already routes them.
+ok('Roles, Skills, Hooks are direct ＋ Add menu entries',
+    strpos($ihtml_c, 'data-add="skills"') !== false && strpos($ihtml_c, 'data-add="roles"') !== false &&
+    strpos($ihtml_c, 'data-add="hooks"') !== false &&
+    strpos($ajs, 'skills: function () { SkillMgr.open(); }') !== false);
 // (5) Voice drives the EXISTING crew (start + steer) — no new orchestration path.
 ok('voice can start + steer the crew via runCrew / crewSteer',
     strpos($ajs, 'voiceStartCrew: function') !== false && strpos($ajs, 'steerCrew: function') !== false &&

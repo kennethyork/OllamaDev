@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.8.75 (2026-06-09) — Roles / Skills / Hooks are direct ＋ Add menu entries
+
+### Added
+- **🎭 Roles, 🧩 Skills, and 🪝 Hooks now open directly from the ＋ Add button and the right-click canvas menu**, instead of only through the Crew window’s “Manage…” links. The Skills window lists your custom skills **and all 31 built-in team-skills** (the ones crew templates inject — `testing-discipline`, `refactor-safety`, `docs-writing`, `security-hardening`, …) under a “Built-in team-skills” section; ⎘ views or customizes a copy of any. (No new wiring — `addPane` already routed these; they just lacked a menu entry.)
+
 ## v4.8.74 (2026-06-09) — parallel local coders on one box (opt-in) + cockpit verified live
 
 ### Added
