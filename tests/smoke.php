@@ -522,6 +522,36 @@ ok('desktop opens a dedicated Director terminal on crew launch', strpos($ajs, 'o
 ok('desktop terminals support a per-terminal working folder', strpos($bind, 'termCreate(string $id, string $model, string $cwd') !== false &&
     strpos($ajs, 'changeTermFolder') !== false && strpos($ajs, "class=\"term-cd\"") !== false &&
     strpos($ajs, 'cdPrefix: function (cwd)') !== false && strpos($ajs, 'expandHome') !== false);
+
+// ---- Crew cockpit: live topology, voice control, activity feed, model defaults ----
+// (1) Engine enriches the live board with per-role models, branch + files + audit
+//     verdict — ADDITIVE display fields; orchestration is untouched.
+$ihtml_c = (string) @file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/index.html');
+$brjs = (string) @file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/web/bridge.js');
+ok('crew board carries per-role models + branch for the topology view',
+    strpos($src, "'models' => ['director' => \$mDirector") !== false &&
+    strpos($src, "'branch' => self::branchFor(\$runId, \$i + 1") !== false);
+ok('crew board gains a setMeta channel for files + audit verdict (additive)',
+    strpos($src, '$setMeta = function (int $n, array $kv)') !== false &&
+    strpos($src, "'audit' => \$av, 'issues' =>") !== false &&
+    strpos($src, '?callable $setMeta = null') !== false);
+// (2) Per-role model defaults persist via the shared bridge (crew.*Model in config).
+ok('desktop/web can save per-role crew models as defaults',
+    strpos($bind, 'function setCrewModels') !== false && strpos($bind, "'setCrewModels'") !== false &&
+    strpos($brjs, "'setCrewModels'") !== false &&
+    strpos($ajs, 'saveCrewModels: function') !== false && strpos($ihtml_c, 'id="crewModelsDefault"') !== false);
+// (3) Live topology window — a read-only map over the (now enriched) crew board.
+ok('crew topology is a canvas window wired to the live board',
+    strpos($ajs, 'var Topology = {') !== false && strpos($ajs, "topology: '#topologyView'") !== false &&
+    strpos($ajs, "'topology'") !== false && strpos($ihtml_c, 'id="topologyView"') !== false &&
+    strpos($ihtml_c, 'data-add="topology"') !== false);
+// (4) Real-time activity feed parsed from each coder's log tail.
+ok('crew panes parse live per-coder activity (editing/reading/running)',
+    strpos($ajs, 'parseActivity: function') !== false && strpos($ajs, 'self.activity[n] = self.parseActivity') !== false);
+// (5) Voice drives the EXISTING crew (start + steer) — no new orchestration path.
+ok('voice can start + steer the crew via runCrew / crewSteer',
+    strpos($ajs, 'voiceStartCrew: function') !== false && strpos($ajs, 'steerCrew: function') !== false &&
+    strpos($ajs, 'tell|steer|have|ask)\\s+coder') !== false);
 // Desktop Skills manager: list / view / create-edit / remove, backed by the CLI.
 $shk = sys_get_temp_dir() . '/skills_mgr_' . getmypid(); @mkdir($shk, 0777, true);
 [$so, , $sc] = run_bin(['skills', 'save', 'Demo Skill'], '{"description":"d","body":"# Demo\nBody."}', ['HOME' => $shk]);

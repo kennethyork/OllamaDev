@@ -410,10 +410,49 @@ textarea.field { min-height: 84px; resize: vertical; line-height: 1.5; }
 #crewPanes.zoomed .cpane.focused { display: flex; }
 #crewPanes.zoomed .cpane.focused .cpane-body { max-height: 60vh; }
 .cpane-badge.st-doing { color: var(--accent); border-color: var(--accent); }
-.cpane-badge.st-done { color: #3fb950; border-color: #3fb950; }
-.cpane-badge.st-held { color: #d29922; border-color: #d29922; }
+.cpane-badge.st-done { color: var(--ok); border-color: var(--ok); }
+.cpane-badge.st-held { color: var(--warn); border-color: var(--warn); }
+.cpane-badge.st-flagged { color: var(--warn); border-color: var(--warn); }
 .cpane-body { margin: 0; padding: 8px 10px; flex: 1; max-height: 240px; overflow: auto; font: 11px/1.45 ui-monospace, Menlo, Consolas, monospace; color: var(--fg); white-space: pre-wrap; word-break: break-word; }
 #board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; min-height: 100%; }
+
+/* ---- Live crew topology window (read-only map over the crew board) ---- */
+#topologyView { overflow: hidden; }
+#topoBar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+#topoStat { margin-left: auto; font-family: var(--mono); font-size: 11px; }
+.topo-body { flex: 1; min-height: 0; overflow: auto; padding: 14px; }
+.topo-empty { padding: 22px; line-height: 1.6; max-width: 460px; }
+.topo-dir { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: 6px; }
+.topo-node { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 9px 11px; }
+.topo-node.dir { width: min(420px, 92%); text-align: center; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft); }
+.topo-node .tn-top { display: flex; align-items: center; gap: 7px; }
+.tn-ico { font-size: 14px; }
+.tn-role { font-weight: 600; font-size: 12px; text-transform: capitalize; }
+.tn-model { font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
+.topo-node.dir .tn-top { justify-content: center; }
+.tn-task { font-size: 11.5px; color: var(--fg); margin-top: 4px; opacity: .9; }
+.topo-aux { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.topo-chip { font-size: 10.5px; color: var(--dim); background: var(--bg3); border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; }
+.topo-chip b { color: var(--fg); font-weight: 600; font-family: var(--mono); }
+.topo-coders { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; margin-top: 12px; position: relative; }
+.topo-coders::before { content: ''; position: absolute; top: -12px; left: 50%; width: 1px; height: 12px; background: var(--border); }
+.topo-node.coder { display: flex; flex-direction: column; gap: 5px; border-left: 3px solid var(--border); }
+.topo-node.coder.st-doing { border-left-color: var(--accent); }
+.topo-node.coder.st-done { border-left-color: var(--ok); }
+.topo-node.coder.st-held, .topo-node.coder.st-flagged { border-left-color: var(--warn); }
+.tn-state { margin-left: auto; font-size: 10px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--dim); white-space: nowrap; }
+.tn-state.st-doing { color: var(--accent); border-color: var(--accent); }
+.tn-state.st-done { color: var(--ok); border-color: var(--ok); }
+.tn-state.st-held, .tn-state.st-flagged { color: var(--warn); border-color: var(--warn); }
+.tn-branch { font-family: var(--mono); font-size: 10.5px; color: var(--accent2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topo-act { font-size: 11px; color: var(--fg); background: var(--accent-soft); border-radius: var(--r-sm); padding: 3px 7px; }
+.topo-files { display: flex; flex-wrap: wrap; gap: 4px; }
+.topo-file { font-family: var(--mono); font-size: 10px; color: var(--dim); background: var(--bg3); border: 1px solid var(--border-muted); border-radius: 5px; padding: 1px 5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topo-file.more { color: var(--faint); }
+.topo-audit { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--dim); align-self: flex-start; }
+.topo-audit.clean { color: var(--ok); border-color: var(--ok); }
+.topo-audit.flagged { color: var(--warn); border-color: var(--warn); }
+.topo-audit.empty { color: var(--faint); }
 /* A workspace view popped out into a terminal pane: its real .ws-view fills the body. */
 .term-pane.pop-pane .pop-pane-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .term-pane.pop-pane .pop-pane-body > .ws-view { flex: 1; min-height: 0; }

@@ -103,10 +103,17 @@ class Crew {
         // desktop can show one live pane per coder (watch them work in parallel).
         $logDir = dirname($boardFile) . '/' . $runId;
         @mkdir($logDir, 0755, true);
-        $board = ['task' => $task, 'runId' => $runId, 'active' => true, 'model' => $model, 'logDir' => $logDir, 'subtasks' => []];
-        foreach ($subtasks as $i => $st) $board['subtasks'][] = ['n' => $i + 1, 'title' => $st['title'] ?? ('task ' . ($i + 1)), 'role' => $st['role'] ?? 'coder', 'state' => 'todo'];
+        $board = ['task' => $task, 'runId' => $runId, 'active' => true, 'model' => $model, 'logDir' => $logDir,
+            // Additive (desktop topology view): per-role models + run shape. Display only.
+            'models' => ['director' => $mDirector, 'researcher' => $mResearcher, 'coder' => $mCoder, 'auditor' => $mAuditor],
+            'amplify' => $amplify, 'focus' => $focus, 'subtasks' => []];
+        foreach ($subtasks as $i => $st) $board['subtasks'][] = ['n' => $i + 1, 'title' => $st['title'] ?? ('task ' . ($i + 1)), 'role' => $st['role'] ?? 'coder', 'state' => 'todo',
+            'branch' => self::branchFor($runId, $i + 1, $st['title'] ?? ('task' . ($i + 1))), 'model' => $mCoder];
         $writeBoard = function () use (&$board, $boardFile) { $board['ts'] = time(); @file_put_contents($boardFile, json_encode($board)); };
         $setState = function (int $n, string $s) use (&$board, $writeBoard) { foreach ($board['subtasks'] as &$bs) { if ($bs['n'] === $n) $bs['state'] = $s; } unset($bs); $writeBoard(); };
+        // Additive: merge extra display fields (files owned, audit verdict) into a
+        // subtask for the desktop topology view. Never changes orchestration.
+        $setMeta = function (int $n, array $kv) use (&$board, $writeBoard) { foreach ($board['subtasks'] as &$bs) { if ($bs['n'] === $n) foreach ($kv as $k => $v) $bs[$k] = $v; } unset($bs); $writeBoard(); };
         $writeBoard();
 
         // Persist the full plan (incl. subtask prompts + branch names) so this run
@@ -215,9 +222,12 @@ class Crew {
             }
         }
 
+        // Surface each coder's changed files on the live board (topology view only).
+        foreach ($results as $res) $setMeta((int)$res['n'], ['files' => array_slice($res['files'] ?? [], 0, 24), 'empty' => !empty($res['empty'])]);
+
         // ---- Auditor reviews each diff, then gated landing (shared with resume). ----
         self::auditAndLand($agent, $results, $opts, $base, $baseCommit, $mAuditor, $amplify, $task, $setState,
-            ['coderModel' => $mCoder, 'maxIter' => $maxIter, 'research' => $research, 'focus' => $focus, 'logDir' => $logDir]);
+            ['coderModel' => $mCoder, 'maxIter' => $maxIter, 'research' => $research, 'focus' => $focus, 'logDir' => $logDir], $setMeta);
         self::offerIdeas($runId, $agent, $task, $research, $results, $mDirector, $opts, $board, $writeBoard);
         self::rememberFacts($task, $research, $results, $mDirector, $opts);
         $board['active'] = false; $writeBoard();
@@ -233,7 +243,7 @@ class Crew {
     // resume(). Audits each non-empty diff (amplify = N-reviewer panel), then lands:
     // 'review' holds everything; 'auto' merges audit-clean branches and holds the
     // rest (self-repo forces 'review' unless --auto-merge). Updates the board.
-    private static function auditAndLand(Agent $agent, array $results, array $opts, string $base, string $baseCommit, string $mAuditor, int $amplify, string $task, callable $setState, ?array $ctx = null): void {
+    private static function auditAndLand(Agent $agent, array $results, array $opts, string $base, string $baseCommit, string $mAuditor, int $amplify, string $task, callable $setState, ?array $ctx = null, ?callable $setMeta = null): void {
         $d = "\033[2m"; $b = "\033[1m"; $g = "\033[32m"; $y = "\033[33m"; $r = "\033[0m";
         $doAudit = ($opts['audit'] ?? true) !== false;
         // Same skills the coders loaded — so the Auditor reviews against their standards.
@@ -249,6 +259,12 @@ class Crew {
             foreach (($res['audit']['issues'] ?? []) as $iss) echo "      {$y}- " . substr((string)$iss, 0, 100) . "{$r}\n";
         }
         unset($res);
+
+        // Surface the auditor's verdict per branch on the live board (topology view).
+        if ($setMeta) foreach ($results as $res) {
+            $av = !empty($res['empty']) ? 'empty' : (!$doAudit ? 'manual' : (!empty($res['audit']['clean']) ? 'clean' : 'flagged'));
+            $setMeta((int)$res['n'], ['audit' => $av, 'issues' => count($res['audit']['issues'] ?? [])]);
+        }
 
         // ---- Auditor → coder fix-back: ONE bounded repair pass per flagged branch
         // (a single retry with the auditor's exact issues — NOT a back-and-forth chat).
@@ -354,10 +370,14 @@ class Crew {
         $home = getenv('HOME') ?: sys_get_temp_dir();
         $boardFile = $home . '/.ollamadev/crew/current.json'; @mkdir(dirname($boardFile), 0755, true);
         $logDir = dirname($boardFile) . '/' . $runId; @mkdir($logDir, 0755, true);
-        $board = ['task' => $task, 'runId' => $runId, 'active' => true, 'model' => $model, 'logDir' => $logDir, 'subtasks' => []];
-        foreach ($subtasks as $st) $board['subtasks'][] = ['n' => $st['n'], 'title' => $st['title'] ?? ('task ' . $st['n']), 'role' => $st['role'] ?? 'coder', 'state' => 'todo'];
+        $board = ['task' => $task, 'runId' => $runId, 'active' => true, 'model' => $model, 'logDir' => $logDir,
+            'models' => ['director' => $rm('directorModel'), 'researcher' => $rm('researcherModel'), 'coder' => $mCoder, 'auditor' => $mAuditor],
+            'amplify' => $amplify, 'focus' => $focus, 'subtasks' => []];
+        foreach ($subtasks as $st) $board['subtasks'][] = ['n' => $st['n'], 'title' => $st['title'] ?? ('task ' . $st['n']), 'role' => $st['role'] ?? 'coder', 'state' => 'todo',
+            'branch' => (string)($st['branch'] ?? self::branchFor($runId, (int)$st['n'], (string)($st['title'] ?? ''))), 'model' => $mCoder];
         $writeBoard = function () use (&$board, $boardFile) { $board['ts'] = time(); @file_put_contents($boardFile, json_encode($board)); };
         $setState = function (int $n, string $s) use (&$board, $writeBoard) { foreach ($board['subtasks'] as &$bs) { if ($bs['n'] === $n) $bs['state'] = $s; } unset($bs); $writeBoard(); };
+        $setMeta = function (int $n, array $kv) use (&$board, $writeBoard) { foreach ($board['subtasks'] as &$bs) { if ($bs['n'] === $n) foreach ($kv as $k => $v) $bs[$k] = $v; } unset($bs); $writeBoard(); };
         $writeBoard();
 
         $wtRoot = sys_get_temp_dir() . '/ollamadev-crew/' . $runId; @mkdir($wtRoot, 0755, true);
@@ -388,8 +408,9 @@ class Crew {
             $results[] = self::collectCoderResult(['n' => $n, 'st' => ['title' => $title], 'branch' => $branch, 'wt' => $wt], $baseCommit);
         }
 
+        foreach ($results as $res) $setMeta((int)$res['n'], ['files' => array_slice($res['files'] ?? [], 0, 24), 'empty' => !empty($res['empty'])]);
         self::auditAndLand($agent, $results, $opts, $base, $baseCommit, $mAuditor, $amplify, $task, $setState,
-            ['coderModel' => $mCoder, 'maxIter' => $maxIter, 'research' => $research, 'focus' => $focus, 'logDir' => $logDir]);
+            ['coderModel' => $mCoder, 'maxIter' => $maxIter, 'research' => $research, 'focus' => $focus, 'logDir' => $logDir], $setMeta);
         self::offerIdeas($runId, $agent, $task, $research, $results, $mCoder, $opts, $board, $writeBoard);
         self::rememberFacts($task, $research, $results, $mCoder, $opts);
         $board['active'] = false; $writeBoard();

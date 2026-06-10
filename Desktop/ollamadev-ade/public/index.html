@@ -175,6 +175,14 @@
                         <div id="brEmpty" class="dim">Preview a local app you're building — enter a URL or pick a port. Localhost loads instantly; some external sites refuse to embed (use ↗ to open them in your real browser).</div>
                     </div>
                 </div>
+
+                <div id="topologyView" class="ws-view">
+                    <div id="topoBar">
+                        <span class="dim">Live crew topology — who owns which branch &amp; files, and the Auditor's verdict.</span>
+                        <span id="topoStat" class="dim"></span>
+                    </div>
+                    <div id="topologyBody" class="topo-body"></div>
+                </div>
             </div>
 
             <!-- Right-click / ＋ Add menu for dropping a new pane on the canvas. -->
@@ -190,6 +198,7 @@
                 <button data-add="graph">🕸 Graph</button>
                 <button data-add="browser">🌐 Browser</button>
                 <button data-add="crew">👥 Crew</button>
+                <button data-add="topology">🛰 Crew topology</button>
                 <button data-add="diff">⇄ Review</button>
                 <div class="cm-group">Actions</div>
                 <button data-cmd="open-project">📂 Open project…</button>
@@ -263,6 +272,7 @@
                     </div>
                     <label class="rmate"><input type="checkbox" id="crewAuditor" checked><span class="rico">🔍</span><span class="rname">Auditor</span><select id="crewModelAuditor" class="rmodel"></select></label>
                 </div>
+                <div class="roles-line modal-hint dim"><button type="button" id="crewModelsDefault" class="linklike">💾 Save these models as my default crew</button> <span>— every future run (terminal, desktop, web) starts with them.</span></div>
                 <div class="roles-line modal-hint dim">The Director assigns each subtask a <strong>role</strong> (coder, tester, docs, security…). <button type="button" id="crewManageRoles" class="linklike">🎭 Manage roles…</button></div>
                 <div class="roles-line modal-hint dim"><strong>Skills</strong> are reusable instructions the agent loads on demand. <button type="button" id="manageSkills" class="linklike">🧩 Manage skills…</button></div>
                 <div class="roles-line modal-hint dim"><strong>Hooks</strong> run shell commands at lifecycle points (PreToolUse can block a tool). <button type="button" id="manageHooks" class="linklike">🪝 Manage hooks…</button></div>

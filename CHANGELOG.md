@@ -1,5 +1,18 @@
 # Changelog
 
+## v4.8.73 (2026-06-09) — Crew cockpit: live topology map, voice-driven crew, real-time activity (compete with cnvs/BridgeSpace/Forge)
+
+Four additive surfaces over the **existing** crew engine — the Director, isolated git worktrees, the Auditor gate, and `crew steer`/`crew director` are all **unchanged**. This just *shows* and *drives* what the crew already does, matching the headline features of cnvs.dev, BridgeSpace, and Plyrium Forge while staying 100% local + vanilla.
+
+### Added
+- **🛰 Live crew topology window** (＋ Add → Crew topology, right-click canvas, or say “open topology”). A read-only map of a running crew: the **Director** + Researcher + Auditor (with each role’s model), and one card per **coder** showing the **branch it owns**, its model, the **files it’s touching**, the **Auditor’s verdict** (clean / flagged / held), and its **live activity**. Updates live off the same board the kanban uses.
+- **Real-time agent activity** — each coder’s pane badge (and its topology card) now shows what it’s doing *right now* — ✎ editing, 👁 reading, ⚡ running, 🔎 searching, 💭 thinking — parsed live from the per-coder logs, instead of a static “working”.
+- **Voice commands the crew** (in the 🎙 Voice window). “**start a crew to add tests to the signup form**” launches a run; “**tell coder 2 to focus on edge cases**” or “**tell the crew to add error handling**” steers a running coder (or the whole crew). Drives the existing `runCrew` / `crewSteer` — no new orchestration.
+- **💾 Save these models as my default crew** — the Crew modal’s per-role model picks (Director / Researcher / Coder / Auditor) can now be saved as your global defaults (`crew.*Model`), so every future run — terminal, desktop, or web — starts with them.
+
+### Changed
+- The live crew board JSON gains additive display fields (per-role models, each subtask’s branch, files, and audit verdict). Purely for the new views — orchestration is byte-for-byte the same.
+
 ## v4.8.72 (2026-06-08) — cohesive ☰ drawer (rail + Projects + Session slide as one panel)
 
 ### Changed

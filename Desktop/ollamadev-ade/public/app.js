@@ -119,11 +119,23 @@ var VoiceCtl = {
         // Explicit dictation: "type/say/send/tell … <text>" → straight to the CLI.
         var pre = lc.match(/^(type|say|send|tell|dictate|prompt)\b[:,]?\s*/);
         if (pre && this.mode !== 'cmd') { this.toCli(raw.slice(pre[0].length)); return; }
-        if (this.mode !== 'cli' && this.tryCommand(lc)) return;
+        if (this.mode !== 'cli' && this.tryCommand(lc, raw)) return;
         if (this.mode === 'cmd') { this.log('no command matched: ' + raw, 'err'); banner('no matching command', 'err'); return; }
         this.toCli(raw);   // Auto fallthrough / "To CLI" mode
     },
-    tryCommand: function (lc) {
+    tryCommand: function (lc, raw) {
+        raw = raw || lc;
+        // ---- Crew control (additive — drives the EXISTING runCrew / crewSteer; the
+        // crew, Director, worktrees, and auditor are untouched). Matched on `raw` so
+        // the task/instruction keeps its original casing. ----
+        var cm = raw.match(/\b(?:tell|steer|have|ask)\s+coder\s+(\d+)\s+(?:to\s+)?(.+)$/i);
+        if (cm && window.crewSteer) { App.steerCrew(parseInt(cm[1], 10), cm[2].trim()); return true; }
+        cm = raw.match(/\b(?:tell|steer|have|ask)\s+(?:the\s+)?(?:crew|team|everyone|all coders)\s+(?:to\s+)?(.+)$/i);
+        if (cm && window.crewSteer) { App.steerCrew(0, cm[1].trim()); return true; }
+        cm = raw.match(/\b(?:start|launch|spin up|kick off|run|create|fire up)\s+(?:a\s+|the\s+|new\s+)?(?:crew|team)\b\s*(?:to|for|that|:)?\s*(.*)$/i);
+        if (cm) { App.voiceStartCrew(cm[1].trim()); return true; }
+        cm = raw.match(/\bcrew[,:]?\s+(?:please\s+|should\s+|go\s+)?(?:to\s+)?(build|add|fix|implement|write|refactor|create|make)\b\s+(.+)$/i);
+        if (cm) { App.voiceStartCrew(cm[1].trim() + ' ' + cm[2].trim()); return true; }
         if (/\bzoom in\b|\bzoom closer\b/.test(lc)) { App.zoomBy(1.2); this.log('zoomed in'); return true; }
         if (/\bzoom out\b|\bzoom away\b/.test(lc)) { App.zoomBy(1 / 1.2); this.log('zoomed out'); return true; }
         if (/\b(reset zoom|zoom reset|actual size|hundred percent|100 ?%)\b/.test(lc)) { App.resetZoom(); this.log('zoom reset'); return true; }
@@ -1246,7 +1258,31 @@ var Graph = {
 // tailing its log so you watch the whole team build in parallel.
 var CrewPanes = {
     runId: null, offsets: {}, text: {}, bodies: {}, count: 0, zoomed: null,
+    // Live activity per coder ({icon,label,detail}), parsed from each coder's log
+    // tail. Shared with the Topology window so both show what an agent is doing now.
+    activity: {},
+    // Turn the last meaningful log line into a status: editing/reading/running/etc.
+    parseActivity: function (text) {
+        if (!text) return null;
+        var lines = text.split('\n'), ln = '';
+        for (var i = lines.length - 1; i >= 0 && i >= lines.length - 8; i--) { if (lines[i].trim()) { ln = lines[i].trim(); break; } }
+        if (/^✓ done/.test(ln)) return { icon: '✓', label: 'done', detail: '' };
+        if (/^✗ error/.test(ln)) return { icon: '✗', label: 'error', detail: ln.slice(2, 60).trim() };
+        var m = ln.match(/^→\s+(\S+)\s*(.*)$/);   // tool call:  → write path ⇒ snippet
+        if (m) {
+            var tool = m[1].toLowerCase(), rest = (m[2] || '').split('⇒')[0].trim();
+            var first = rest.split(/\s+/)[0] || '', file = /[\/.]/.test(first) ? first.split('/').pop() : '';
+            if (/write|edit|str_replace|create|apply|patch/.test(tool)) return { icon: '✎', label: 'editing', detail: file };
+            if (/bash|shell|run|exec|command|test/.test(tool)) return { icon: '⚡', label: 'running', detail: rest.slice(0, 38) };
+            if (/view|read|cat|open|fetch/.test(tool)) return { icon: '👁', label: 'reading', detail: file };
+            if (/grep|glob|find|ls|search|list/.test(tool)) return { icon: '🔎', label: 'searching', detail: rest.slice(0, 30) };
+            return { icon: '⚙', label: tool, detail: file };
+        }
+        if (/^·/.test(ln)) return { icon: '💭', label: 'thinking', detail: '' };
+        return null;
+    },
     sync: function (board) {
+        var self = this;
         var host = $('#crewPanes'); if (!host) return;
         var subs = (board && Array.isArray(board.subtasks)) ? board.subtasks : [];
         if (!board || !board.runId || !subs.length) { host.hidden = true; host.innerHTML = ''; this.runId = null; this.count = 0; this.zoomed = null; return; }
@@ -1272,12 +1308,16 @@ var CrewPanes = {
                 h.ondblclick = function (e) { if (e.target.classList.contains('cpane-zoom')) return; self.toggleZoom(parseInt(h.parentNode.dataset.n, 10)); };
             });
         }
-        // Update state badges every sync.
+        // Update state badges every sync — a working coder shows its LIVE activity
+        // (editing/reading/running …) instead of a static "working" label.
         subs.forEach(function (s) {
             var badge = host.querySelector('.cpane-badge[data-n="' + s.n + '"]'); if (!badge) return;
-            var map = { todo: '○ queued', doing: '● working', done: '✓ done', held: '⚠ held' };
-            badge.textContent = map[s.state] || s.state || '';
-            badge.className = 'cpane-badge st-' + (s.state || 'todo');
+            var map = { todo: '○ queued', doing: '● working', done: '✓ done', held: '⚠ held', flagged: '⚑ flagged' };
+            var st = s.state || 'todo', act = self.activity[s.n];
+            var label = map[st] || st;
+            if (st === 'doing' && act && act.label !== 'done') label = act.icon + ' ' + act.label + (act.detail ? ' ' + act.detail : '');
+            badge.textContent = label;
+            badge.className = 'cpane-badge st-' + st;
         });
         // A focused coder that vanished on rebuild reverts to the grid.
         if (this.zoomed != null && !subs.some(function (s) { return s.n === this.zoomed; }, this)) this.zoomed = null;
@@ -1305,10 +1345,70 @@ var CrewPanes = {
                 if (!r || !r.data) return;
                 self.text[n] = (self.text[n] || '') + r.data;
                 self.offsets[n] = r.size;
+                self.activity[n] = self.parseActivity(self.text[n]);   // live status for the badge + topology
                 var el = self.bodies[n];
                 if (el) { el.textContent = self.text[n]; el.scrollTop = el.scrollHeight; }
             }).catch(function () {});
         });
+    }
+};
+
+// ---------- Live crew topology ----------
+// A read-only map of the running crew: the Director + Researcher + Auditor, and
+// one card per coder showing the branch it owns, its model, the files it's
+// touching, the Auditor's verdict, and live activity. Purely additive — it reads
+// the same `crewBoard()` the kanban does (now enriched with branch/files/audit)
+// plus CrewPanes' parsed activity. It changes nothing about how the crew runs.
+var Topology = {
+    sync: function (board) {
+        var host = $('#topologyBody'); if (!host) return;
+        var subs = (board && Array.isArray(board.subtasks)) ? board.subtasks : [];
+        var stat = $('#topoStat');
+        if (!board || !board.runId || !subs.length) {
+            host.innerHTML = '<div class="topo-empty dim">No crew running. Launch one — <b>👥 Crew</b>, or say <i>“start a crew to add tests to the signup form”</i> — and the whole team appears here live: who owns which branch, the files they’re touching, and the Auditor’s verdict.</div>';
+            if (stat) stat.textContent = '';
+            return;
+        }
+        var models = board.models || {}, self = this;
+        if (stat) stat.textContent = (board.active ? '● live' : '○ done') + ' · ' + subs.length + ' coder' + (subs.length > 1 ? 's' : '') + (board.amplify > 1 ? ' · audit ×' + board.amplify : '');
+        var dir =
+            '<div class="topo-dir">' +
+              '<div class="topo-node dir"><div class="tn-top"><span class="tn-ico">🧭</span><span class="tn-role">Director</span>' +
+              '<span class="tn-model">' + esc(models.director || board.model || '') + '</span></div>' +
+              '<div class="tn-task" title="' + esc(board.task || '') + '">' + esc((board.task || '(waiting for a task)').slice(0, 90)) + '</div></div>' +
+              '<div class="topo-aux">' +
+                '<span class="topo-chip">🔎 Researcher <b>' + esc(models.researcher || '—') + '</b></span>' +
+                '<span class="topo-chip">🔍 Auditor <b>' + esc(models.auditor || '—') + '</b></span>' +
+                (board.focus ? '<span class="topo-chip">🎯 ' + esc(board.focus.slice(0, 28)) + '</span>' : '') +
+              '</div>' +
+            '</div>';
+        var cards = subs.map(function (s) { return self.coderCard(s, models); }).join('');
+        host.innerHTML = dir + '<div class="topo-coders">' + cards + '</div>';
+    },
+    coderCard: function (s, models) {
+        var st = s.state || 'todo';
+        var stMap = { todo: '○ queued', doing: '● working', done: '✓ merged', held: '⚠ held', flagged: '⚑ flagged' };
+        var auditMap = {
+            clean: '<span class="topo-audit clean">✓ audit clean</span>',
+            flagged: '<span class="topo-audit flagged">⚑ audit flagged' + (s.issues ? ' (' + s.issues + ')' : '') + '</span>',
+            empty: '<span class="topo-audit empty">no changes</span>',
+            manual: '<span class="topo-audit">review manually</span>'
+        };
+        var act = (window.CrewPanes && CrewPanes.activity && CrewPanes.activity[s.n]) || null;
+        var actLine = (st === 'doing' && act && act.label !== 'done')
+            ? '<div class="topo-act">' + act.icon + ' ' + esc(act.label) + (act.detail ? ' <span class="dim">' + esc(act.detail) + '</span>' : '') + '</div>' : '';
+        var files = Array.isArray(s.files) ? s.files : [];
+        var fileList = files.length
+            ? '<div class="topo-files">' + files.slice(0, 6).map(function (f) { return '<span class="topo-file" title="' + esc(f) + '">' + esc(f.split('/').pop()) + '</span>'; }).join('') + (files.length > 6 ? '<span class="topo-file more">+' + (files.length - 6) + '</span>' : '') + '</div>'
+            : '<div class="topo-files dim">—</div>';
+        return '<div class="topo-node coder st-' + st + '" data-n="' + s.n + '">' +
+            '<div class="tn-top"><span class="tn-ico">👷</span><span class="tn-role">' + esc(s.role || 'coder') + ' ' + s.n + '</span>' +
+            '<span class="tn-state st-' + st + '">' + (stMap[st] || st) + '</span></div>' +
+            '<div class="tn-branch" title="' + esc(s.branch || '') + '">⎇ ' + esc((s.branch || '').replace(/^crew\//, '') || '—') + '</div>' +
+            '<div class="tn-model">' + esc(s.model || models.coder || '') + '</div>' +
+            actLine + fileList +
+            (auditMap[s.audit] || '') +
+            '</div>';
     }
 };
 
@@ -2002,17 +2102,17 @@ var App = {
     panX: 0, panY: 0, zoom: 1,
     popped: {},
     // Persistent content windows (saved per-project, in the rail + Add menu).
-    POP_VIEWS: ['files', 'search', 'tasks', 'voice', 'editor', 'board', 'graph', 'browser'],
+    POP_VIEWS: ['files', 'search', 'tasks', 'voice', 'editor', 'board', 'graph', 'browser', 'topology'],
     // Tool dialogs — now canvas windows too, but transient (not persisted across restart).
     DIALOG_VIEWS: ['crew', 'roles', 'skills', 'hooks', 'diff'],
     POP_SEL: {
         files: '#filesPanel', search: '#searchPanel', tasks: '#tasksPanel', editor: '#editorPane',
-        board: '#boardView', graph: '#graphView', browser: '#browserView', voice: '#voicePanel',
+        board: '#boardView', graph: '#graphView', browser: '#browserView', voice: '#voicePanel', topology: '#topologyView',
         crew: '#crewModal', roles: '#rolesModal', skills: '#skillsModal', hooks: '#hooksModal', diff: '#diffModal'
     },
     POP_TITLE: {
         files: '▤ Files', search: '🔎 Code search', tasks: '▦ Tasks', editor: '📝 Editor',
-        board: '📋 Board', graph: '🕸 Graph', browser: '🌐 Browser', voice: '🎙 Voice',
+        board: '📋 Board', graph: '🕸 Graph', browser: '🌐 Browser', voice: '🎙 Voice', topology: '🛰 Crew topology',
         crew: '👥 Crew', roles: '🎭 Roles', skills: '🧩 Skills', hooks: '🪝 Hooks', diff: '⇄ Review'
     },
     // Sensible default size/spot (canvas-world coords) when a window is first opened.
@@ -2021,6 +2121,7 @@ var App = {
         tasks: { x: 16, y: 16, w: 300, h: 340 }, editor: { x: 326, y: 16, w: 640, h: 460 },
         board: { x: 16, y: 16, w: 580, h: 430 }, graph: { x: 16, y: 16, w: 640, h: 470 },
         browser: { x: 16, y: 16, w: 720, h: 500 }, voice: { x: 16, y: 16, w: 320, h: 420 },
+        topology: { x: 16, y: 16, w: 620, h: 480 },
         crew: { x: 80, y: 24, w: 700, h: 580 }, roles: { x: 100, y: 36, w: 620, h: 520 },
         skills: { x: 100, y: 36, w: 640, h: 540 }, hooks: { x: 100, y: 36, w: 640, h: 540 },
         diff: { x: 48, y: 20, w: 860, h: 640 }
@@ -2079,6 +2180,7 @@ var App = {
         var cps = $('#crewPreset'); if (cps) cps.onchange = function () { if (cps.value) self.applyPreset(cps.value); };
         var cpsv = $('#crewPresetSave'); if (cpsv) cpsv.onclick = function () { self.savePreset(); };
         var cpdl = $('#crewPresetDel'); if (cpdl) cpdl.onclick = function () { self.delPreset(); };
+        var cmd = $('#crewModelsDefault'); if (cmd) cmd.onclick = function () { self.saveCrewModels(); };
         // Activity rail: switch the sidebar between Files and Tasks.
         document.querySelectorAll('.rail-btn').forEach(function (b) {
             b.onclick = function () { self.setPanel(b.dataset.panel); };
@@ -2443,6 +2545,22 @@ var App = {
         try { localStorage.setItem('ade.crewPresets', JSON.stringify(all)); } catch (e) {}
         this.populatePresets(); banner('deleted preset ' + name, 'ok');
     },
+    // Persist the current per-role model picks as the global crew defaults (writes
+    // crew.*Model in config.json via the bridge). The crew engine already reads
+    // these, so every future run — terminal, desktop, or web — starts with them.
+    saveCrewModels: function () {
+        var payload = {
+            directorModel: this.mval('crewModelDirector'),
+            researcherModel: this.mval('crewModelResearcher'),
+            coderModel: this.mval('crewModelCoder'),
+            auditorModel: this.mval('crewModelAuditor')
+        };
+        if (!window.setCrewModels) { banner('saving defaults needs the desktop/web bridge', 'err'); return; }
+        Promise.resolve(window.setCrewModels(payload)).then(function (r) {
+            if (r && r.error) banner('could not save: ' + r.error, 'err');
+            else banner('saved as your default crew models', 'ok');
+        }).catch(function () { banner('could not save crew defaults', 'err'); });
+    },
     // One screen: prompt the Director; the team handles the rest with smart
     // defaults (advanced section overrides if the user opened it).
     submitCrew: function () {
@@ -2516,6 +2634,24 @@ var App = {
             banner(interactive ? 'crew ready — prompt the Director in the terminal' : 'crew running…', 'ok');
         }).catch(function (e) { banner('crew launch failed: ' + e, 'err'); });
     },
+    // Voice: launch a crew with sensible defaults (or open the setup if no task was
+    // spoken). Reuses the exact runCrew path — same Director/coders/auditor flow.
+    voiceStartCrew: function (task) {
+        task = (task || '').trim();
+        if (!task) { this.openCrew(); if (window.VoiceCtl) VoiceCtl.log('opened the Crew setup', 'ok'); return; }
+        this.runCrew(task, { max: 2, review: true, researcher: true, auditor: true, coderModel: this.realModel() });
+        if (window.VoiceCtl) VoiceCtl.log('🚀 crew launched: ' + task, 'ok');
+    },
+    // Voice: steer a running coder (n) or the whole crew (n=0) via the existing
+    // separate-Director channel (window.crewSteer → steer.jsonl). No engine change.
+    steerCrew: function (n, msg) {
+        msg = (msg || '').trim(); if (!msg) return;
+        var who = n === 0 ? 'the crew' : 'coder ' + n;
+        Promise.resolve(window.crewSteer ? window.crewSteer(n, msg) : { error: 'crew steering unavailable here' }).then(function (r) {
+            if (r && r.error) { if (window.VoiceCtl) VoiceCtl.log('⚠ ' + r.error, 'err'); banner(r.error, 'err'); }
+            else { if (window.VoiceCtl) VoiceCtl.log('🧭 → ' + who + ': ' + msg, 'ok'); banner('steered ' + who, 'ok'); }
+        }).catch(function () { if (window.VoiceCtl) VoiceCtl.log('steer failed', 'err'); });
+    },
     // Open a dedicated terminal running the Director steering console (`crew director`),
     // so you redirect coders from its own tab instead of the coder output stream.
     openDirectorTerminal: function () {
@@ -2565,10 +2701,14 @@ var App = {
                 }
                 self.crewBoard = (b && b.subtasks) ? b : self.crewBoard;
                 // Refresh the board whenever it's open as a pane on the canvas.
-                if (self.popped.board) { Tasks.render(); CrewPanes.sync(self.crewBoard); }
+                if (self.popped.board) Tasks.render();
+                // CrewPanes polls the per-coder logs (→ live activity), so run it
+                // whenever the board OR the topology window is open.
+                if (self.popped.board || self.popped.topology) CrewPanes.sync(self.crewBoard);
+                if (self.popped.topology && window.Topology) Topology.sync(self.crewBoard);
                 // Stop polling a while after the run goes inactive — but keep it alive
-                // while the board is popped out so a fresh crew run shows up there live.
-                if (b && b.active === false && !self.popped.board) { if (++idle > 6) { clearInterval(self.crewPoll); self.crewPoll = null; } }
+                // while the board or topology is open so a fresh crew run shows up live.
+                if (b && b.active === false && !self.popped.board && !self.popped.topology) { if (++idle > 6) { clearInterval(self.crewPoll); self.crewPoll = null; } }
                 else idle = 0;
             }).catch(function () {});
         }, 1500);
@@ -3180,6 +3320,15 @@ var App = {
             else if (view === 'browser' && window.Browser && Browser.onShow) Browser.onShow();
             else if (view === 'search' && window.CodeSearch && CodeSearch.onShow) CodeSearch.onShow();
             else if (view === 'voice' && window.VoiceCtl) VoiceCtl.refreshTarget();
+            else if (view === 'topology' && window.Topology) {
+                // Kick the crew poll so a live (or finished) run renders right away.
+                self.startCrewPoll();
+                Topology.sync(self.crewBoard);
+                if (window.crewBoard) Promise.resolve(crewBoard()).then(function (bd) {
+                    if (bd && bd.subtasks) self.crewBoard = bd;
+                    CrewPanes.sync(self.crewBoard); Topology.sync(self.crewBoard);
+                }).catch(function () {});
+            }
         }, 0);
     },
     wireFree: function (t, pane, rh) {

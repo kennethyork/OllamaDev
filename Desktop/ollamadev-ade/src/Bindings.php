@@ -28,7 +28,7 @@ final class Bindings
         'codeSearch', 'codeIndexStatus', 'codeIndexBuild',
         'reviewDiff', 'temperature', 'setTemperature',
         'sttModel', 'setSttModel', 'sttHistory', 'sttClearHistory',
-        'openExternal', 'proxyFetch', 'crewModels', 'crewSteer',
+        'openExternal', 'proxyFetch', 'crewModels', 'setCrewModels', 'crewSteer',
         'skillsList', 'skillsGet', 'skillsSave', 'skillsRemove',
         'hooksList', 'hooksAdd', 'hooksRemove',
     ];
@@ -184,6 +184,26 @@ final class Bindings
             'auditorModel'    => (string)($crew['auditorModel'] ?? $base),
             'researcherModel' => (string)($crew['researcherModel'] ?? $base),
         ];
+    }
+
+    // Persist the per-role crew models as the new defaults (crew.*Model in
+    // config.json) so the Crew modal's "Save as default" sticks. Additive — the
+    // crew engine already reads these keys (crew.coderModel etc.); this only writes
+    // them. Read-modify-write preserves every other config key. Returns the set.
+    public function setCrewModels(array $models): array
+    {
+        $home = getenv('HOME') ?: sys_get_temp_dir();
+        $f = $home . '/.ollamadev/config.json';
+        $c = json_decode((string) @file_get_contents($f), true);
+        if (!is_array($c)) $c = [];
+        if (!is_array($c['crew'] ?? null)) $c['crew'] = [];
+        foreach (['directorModel', 'coderModel', 'auditorModel', 'researcherModel'] as $k) {
+            $v = trim((string) ($models[$k] ?? ''));
+            if ($v !== '') $c['crew'][$k] = $v;
+        }
+        @mkdir(dirname($f), 0755, true);
+        @file_put_contents($f, json_encode($c, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        return $this->crewModels();
     }
 
     public function homeDir(): string { return getenv('HOME') ?: ''; }
