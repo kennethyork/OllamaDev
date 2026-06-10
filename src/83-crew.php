@@ -118,7 +118,7 @@ class Crew {
 
         // Persist the full plan (incl. subtask prompts + branch names) so this run
         // is resumable from disk if it's interrupted. Only the reusable opts are kept.
-        $resumeOpts = array_intersect_key($opts, array_flip(['directorModel', 'coderModel', 'auditorModel', 'researcherModel', 'focus', 'max', 'amplify', 'land', 'research', 'audit', 'skills', 'hosts', 'ideas', 'memory', 'forceSkills']));
+        $resumeOpts = array_intersect_key($opts, array_flip(['directorModel', 'coderModel', 'auditorModel', 'researcherModel', 'focus', 'max', 'amplify', 'land', 'research', 'audit', 'skills', 'hosts', 'ideas', 'memory', 'forceSkills', 'parallel']));
         $diskPlan = [];
         foreach ($subtasks as $i => $st) {
             $n = $i + 1; $title = $st['title'] ?? ('task ' . $n);
@@ -158,7 +158,20 @@ class Crew {
         $baseHost = Config::get('ollama.host', 'http://localhost:11434');
         $hosts = array_values(array_unique(array_filter(array_merge([$baseHost], array_map('trim', $extraHosts)))));
         $canFork = function_exists('pcntl_fork');
-        $parallel = count($jobs) > 1 && count($hosts) > 1 && $canFork;
+        $multiHost = count($hosts) > 1;
+        // Single-box parallelism is OPT-IN (--parallel [N] or crew.parallel) so the
+        // default stays sequential and unchanged; multi-host parallelism stays
+        // automatic as before. One local Ollama serves concurrent requests up to
+        // OLLAMA_NUM_PARALLEL (queuing the rest), and tool/git/IO overlap regardless.
+        $pOpt = $opts['parallel'] ?? Config::get('crew.parallel', false);
+        $wantParallel = $multiHost || ($pOpt !== false && $pOpt !== 0 && $pOpt !== '0' && $pOpt !== '');
+        $parallel = count($jobs) > 1 && $canFork && $wantParallel;
+        // Concurrency cap: --parallel N pins it; else one slot per host (multi-host)
+        // or crew.parallelMax (single-box, default 2) so we don't thrash one GPU.
+        $maxPar = is_numeric($pOpt) && (int)$pOpt > 0 ? (int)$pOpt
+            : ($multiHost ? count($hosts) : max(1, (int)Config::get('crew.parallelMax', 2)));
+        $maxPar = max(1, min($maxPar, count($jobs)));
+        $board['parallel'] = $parallel ? $maxPar : 1; $writeBoard();   // topology shows the lane count
 
         // Reset per-coder steering marks. A SEPARATE Director (the `crew steer` command
         // in another pane, or the desktop Director box) can redirect any coder mid-run.
@@ -166,32 +179,38 @@ class Crew {
         if (count($jobs) > 0 && function_exists('posix_isatty') && @posix_isatty(STDIN))
             echo "  {$d}steer a coder from another pane: ollamadev crew steer " . $jobs[0]['n'] . " \"focus on tests\"{$r}\n";
 
-        // Phase 2: run coders. Parallel across hosts when possible; else sequential.
+        // Phase 2: run coders. Parallel (bounded pool) when enabled; else sequential.
         if ($parallel) {
-            echo "\n{$b}▸ Coders{$r} {$d}running " . count($jobs) . " in parallel across " . count($hosts) . " hosts (" . implode(', ', $hosts) . ")…{$r}\n";
-            $pids = [];
-            foreach ($jobs as $idx => $job) {
-                $host = $hosts[$idx % count($hosts)];
-                $resFile = $wtRoot . '/result-' . $job['n'] . '.json';
-                $pid = pcntl_fork();
-                if ($pid === 0) { // child: build in isolation, write the result, exit
-                    self::runCoder($job['wt'], $job['st'], $mCoder, $maxIter, $research, $task, $focus, $host, $job['log']);
-                    @file_put_contents($resFile, json_encode(self::collectCoderResult($job, $baseCommit)));
-                    exit(0);
-                } elseif ($pid > 0) {
-                    $pids[$pid] = ['job' => $job, 'file' => $resFile];
-                } else { // fork failed: run inline as a fallback
-                    self::runCoder($job['wt'], $job['st'], $mCoder, $maxIter, $research, $task, $focus, $host, $job['log']);
-                    $results[] = self::collectCoderResult($job, $baseCommit);
+            $where = $multiHost ? ("across " . count($hosts) . " hosts (" . implode(', ', $hosts) . ")") : ("on " . $hosts[0]);
+            echo "\n{$b}▸ Coders{$r} {$d}running " . count($jobs) . " coders, up to {$maxPar} at once {$where}…{$r}\n";
+            if (!$multiHost) echo "  {$d}(one box: set OLLAMA_NUM_PARALLEL≥{$maxPar} for true concurrent inference; otherwise requests queue but tool/git work still overlaps){$r}\n";
+            // Bounded pool: fork at most $maxPar coders, wait for the wave, then the
+            // next — so a 6-coder run doesn't open 6 inference streams against one GPU.
+            foreach (array_chunk($jobs, $maxPar) as $chunk) {
+                $pids = [];
+                foreach ($chunk as $job) {
+                    $host = $multiHost ? $hosts[($job['n'] - 1) % count($hosts)] : $hosts[0];
+                    $resFile = $wtRoot . '/result-' . $job['n'] . '.json';
+                    $pid = pcntl_fork();
+                    if ($pid === 0) { // child: build in isolation, write the result, exit
+                        self::runCoder($job['wt'], $job['st'], $mCoder, $maxIter, $research, $task, $focus, $host, $job['log']);
+                        @file_put_contents($resFile, json_encode(self::collectCoderResult($job, $baseCommit)));
+                        exit(0);
+                    } elseif ($pid > 0) {
+                        $pids[$pid] = ['job' => $job, 'file' => $resFile];
+                    } else { // fork failed: run inline as a fallback
+                        self::runCoder($job['wt'], $job['st'], $mCoder, $maxIter, $research, $task, $focus, $host, $job['log']);
+                        $results[] = self::collectCoderResult($job, $baseCommit);
+                    }
                 }
-            }
-            foreach ($pids as $pid => $meta) {
-                $status = 0; pcntl_waitpid($pid, $status);
-                $cres = json_decode((string) @file_get_contents($meta['file']), true);
-                if (is_array($cres)) $results[] = $cres;
-                else $results[] = ['n' => $meta['job']['n'], 'title' => $meta['job']['st']['title'] ?? 'task', 'branch' => $meta['job']['branch'], 'wt' => $meta['job']['wt'], 'diff' => '', 'files' => [], 'empty' => true];
-                $nfiles = is_array($cres) ? count($cres['files'] ?? []) : 0;
-                echo "  {$g}✓{$r} Coder {$meta['job']['n']} {$d}" . ($nfiles ? "$nfiles file(s)" : 'no changes') . "{$r}\n";
+                foreach ($pids as $pid => $meta) {
+                    $status = 0; pcntl_waitpid($pid, $status);
+                    $cres = json_decode((string) @file_get_contents($meta['file']), true);
+                    if (is_array($cres)) $results[] = $cres;
+                    else $results[] = ['n' => $meta['job']['n'], 'title' => $meta['job']['st']['title'] ?? 'task', 'branch' => $meta['job']['branch'], 'wt' => $meta['job']['wt'], 'diff' => '', 'files' => [], 'empty' => true];
+                    $nfiles = is_array($cres) ? count($cres['files'] ?? []) : 0;
+                    echo "  {$g}✓{$r} Coder {$meta['job']['n']} {$d}" . ($nfiles ? "$nfiles file(s)" : 'no changes') . "{$r}\n";
+                }
             }
             usort($results, fn($a, $b2) => $a['n'] <=> $b2['n']);
         } else {
@@ -332,7 +351,7 @@ class Crew {
         // Recorded BEFORE the connection check so the intent persists regardless.
         if (!empty($overrides)) {
             // Whitelist known keys so a stray flag can't pollute the persisted run.
-            $allowed = array_flip(['directorModel', 'coderModel', 'auditorModel', 'researcherModel', 'model', 'focus', 'amplify', 'max', 'retries', 'land', 'research', 'audit', 'skills', 'hosts', 'ideas', 'memory', 'forceSkills', 'escalate']);
+            $allowed = array_flip(['directorModel', 'coderModel', 'auditorModel', 'researcherModel', 'model', 'focus', 'amplify', 'max', 'retries', 'land', 'research', 'audit', 'skills', 'hosts', 'ideas', 'memory', 'forceSkills', 'escalate', 'parallel']);
             $clean = array_filter(array_intersect_key($overrides, $allowed), fn($v) => $v !== null && $v !== '');
             if ($clean) {
                 $opts = array_merge($opts, $clean);

@@ -482,6 +482,13 @@ for ($i = 1; $i < $argc; $i++) {
         if (isset($argv[$i + 1]) && ctype_digit((string)$argv[$i + 1])) $flags['amplify'] = (int)$argv[++$i];
         else $flags['amplify'] = 3;
     }
+    elseif ($a === '--parallel') {
+        // Crew: run coders concurrently on one box. Bare = enable (cap crew.parallelMax);
+        // --parallel N caps concurrency at N. Default (no flag) stays sequential.
+        if (isset($argv[$i + 1]) && ctype_digit((string)$argv[$i + 1])) $flags['parallel'] = (int)$argv[++$i];
+        else $flags['parallel'] = true;
+    }
+    elseif ($a === '--no-parallel') { $flags['parallel'] = false; }
     elseif ($a === '--offline' || $a === '--air-gapped') { $flags['offline'] = true; }
     elseif ($a === '--interval') { $flags['interval'] = (int)($argv[++$i] ?? 2); }
     elseif ($a === '--once') { $flags['once'] = true; }
@@ -1763,6 +1770,7 @@ if ($cmd === 'chat') {
     foreach (['directorModel', 'coderModel', 'auditorModel', 'researcherModel', 'focus'] as $fk) if (!empty($flags[$fk])) $flagOpts[$fk] = $flags[$fk];
     if (!empty($flags['max'])) $flagOpts['max'] = (int)$flags['max'];
     if (!empty($flags['amplify'])) $flagOpts['amplify'] = (int)$flags['amplify'];
+    if (array_key_exists('parallel', $flags)) $flagOpts['parallel'] = $flags['parallel']; // true / N / false (--no-parallel)
     if (in_array('--review', $argv, true)) $flagOpts['land'] = 'review';
     elseif (in_array('--auto-merge', $argv, true)) $flagOpts['land'] = 'auto';
     if (in_array('--no-research', $argv, true)) $flagOpts['research'] = false;

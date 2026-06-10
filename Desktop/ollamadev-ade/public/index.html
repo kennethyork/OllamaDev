@@ -277,6 +277,7 @@
                 <div class="roles-line modal-hint dim"><strong>Skills</strong> are reusable instructions the agent loads on demand. <button type="button" id="manageSkills" class="linklike">🧩 Manage skills…</button></div>
                 <div class="roles-line modal-hint dim"><strong>Hooks</strong> run shell commands at lifecycle points (PreToolUse can block a tool). <button type="button" id="manageHooks" class="linklike">🪝 Manage hooks…</button></div>
                 <label class="modal-check"><input type="checkbox" id="crewReview" checked> 🧑 You — review before merge (hold every branch; nothing auto-merges)</label>
+                <label class="modal-check"><input type="checkbox" id="crewParallel"> ‖ Run coders in parallel on this machine <span class="dim">(faster; for true concurrent inference set <code>OLLAMA_NUM_PARALLEL</code>)</span></label>
                 <label class="modal-label">Ollama hosts <span class="dim">(optional — comma-separated, runs coders in parallel across machines/GPUs)</span></label>
                 <input id="crewHosts" class="field mono" placeholder="http://localhost:11434, http://192.168.1.50:11434">
             </details>

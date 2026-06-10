@@ -1,5 +1,14 @@
 # Changelog
 
+## v4.8.74 (2026-06-09) — parallel local coders on one box (opt-in) + cockpit verified live
+
+### Added
+- **Run crew coders in parallel on a single machine** — opt-in via **`--parallel [N]`** (CLI), **`crew.parallel`** / **`crew.parallelMax`** (config), or the new **“‖ Run coders in parallel on this machine”** checkbox in the Crew window. A **bounded pool** forks up to N coders at once (default 2) so a 6-coder run doesn’t open 6 inference streams against one GPU. For true concurrent inference set `OLLAMA_NUM_PARALLEL`; otherwise requests queue but tool/git/IO work still overlaps. The topology window shows the lane count (`‖ N parallel`).
+- The **default stays sequential** and multi-host parallelism stays automatic — existing crew behavior is unchanged.
+
+### Verified
+- The v4.8.73 **crew cockpit was checked against a real crew run**: the live board is enriched exactly as the topology + activity feed expect — per-role models, each coder’s branch, the files it changed, and the Auditor’s verdict (clean/held) — and the per-coder logs carry the `→ tool` lines the activity parser reads (👁 reading / ✎ editing / ✓ done). The Director → worktrees → coders → Auditor → land pipeline ran intact.
+
 ## v4.8.73 (2026-06-09) — Crew cockpit: live topology map, voice-driven crew, real-time activity (compete with cnvs/BridgeSpace/Forge)
 
 Four additive surfaces over the **existing** crew engine — the Director, isolated git worktrees, the Auditor gate, and `crew steer`/`crew director` are all **unchanged**. This just *shows* and *drives* what the crew already does, matching the headline features of cnvs.dev, BridgeSpace, and Plyrium Forge while staying 100% local + vanilla.

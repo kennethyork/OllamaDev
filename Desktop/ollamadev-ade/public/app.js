@@ -1370,7 +1370,7 @@ var Topology = {
             return;
         }
         var models = board.models || {}, self = this;
-        if (stat) stat.textContent = (board.active ? '● live' : '○ done') + ' · ' + subs.length + ' coder' + (subs.length > 1 ? 's' : '') + (board.amplify > 1 ? ' · audit ×' + board.amplify : '');
+        if (stat) stat.textContent = (board.active ? '● live' : '○ done') + ' · ' + subs.length + ' coder' + (subs.length > 1 ? 's' : '') + (board.parallel > 1 ? ' · ‖ ' + board.parallel + ' parallel' : '') + (board.amplify > 1 ? ' · audit ×' + board.amplify : '');
         var dir =
             '<div class="topo-dir">' +
               '<div class="topo-node dir"><div class="tn-top"><span class="tn-ico">🧭</span><span class="tn-role">Director</span>' +
@@ -2579,6 +2579,7 @@ var App = {
                 auditorModel: self.mval('crewModelAuditor'),
                 researcherModel: self.mval('crewModelResearcher'),
                 focus: self.crewFocus || '',
+                parallel: $('#crewParallel') && $('#crewParallel').checked,   // opt-in single-box parallel coders
                 skills: self.crewTemplateSkills || [],
                 hosts: ($('#crewHosts') && $('#crewHosts').value || '').trim()
             };
@@ -2615,6 +2616,7 @@ var App = {
             rmf('--researcher-model', opts.researcher !== false ? opts.researcherModel : '') +
             rmf('--auditor-model', opts.auditor !== false ? opts.auditorModel : '') +
             rmf('--focus', opts.focus) +
+            (opts.parallel ? ' --parallel' + (typeof opts.parallel === 'number' && opts.parallel > 0 ? ' ' + opts.parallel : '') : '') +
             (Array.isArray(opts.skills) ? opts.skills.map(function (s) { return rmf('--skill', s); }).join('') : '') +
             (opts.hosts ? ' --hosts ' + "'" + String(opts.hosts).replace(/\s+/g, '').replace(/'/g, "'\\''") + "'" : '');
         var model = base;

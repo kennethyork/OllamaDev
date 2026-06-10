@@ -1099,7 +1099,14 @@ echo "\n== Crew multi-host parallel ==\n";
 ok('Agent::setHost added', strpos($src, 'function setHost(string $host)') !== false);
 ok('crew builds a host pool', strpos($src, '$baseHost') !== false && strpos($src, "Config::get('ollama.hosts'") !== false);
 ok('crew parallelizes with pcntl when >1 host', strpos($src, 'pcntl_fork()') !== false && strpos($src, "function_exists('pcntl_fork')") !== false);
-ok('crew requires >1 host + >1 job to parallelize', strpos($src, 'count($jobs) > 1 && count($hosts) > 1') !== false);
+ok('crew parallelizes on multi-host automatically, single-box only when opted in', strpos($src, '$wantParallel = $multiHost || (') !== false &&
+    strpos($src, '$parallel = count($jobs) > 1 && $canFork && $wantParallel') !== false);
+// Single-box parallel coders: opt-in (--parallel [N] / crew.parallel), bounded pool
+// so 6 coders don't open 6 inference streams against one GPU; default stays sequential.
+ok('crew supports opt-in single-box parallel coders (bounded pool)',
+    strpos($src, "Config::get('crew.parallel'") !== false && strpos($src, 'array_chunk($jobs, $maxPar)') !== false &&
+    strpos($src, "Config::get('crew.parallelMax'") !== false &&
+    strpos((string)@file_get_contents(dirname(__DIR__) . '/src/99-main.php'), "\$a === '--parallel'") !== false);
 ok('crew runCoder accepts a host param', strpos($src, "string \$focus = '', string \$host = ''") !== false);
 ok('crew falls back to sequential (inline) on fork failure', strpos($src, 'fork failed: run inline') !== false);
 ok('crew --hosts flag wired (CLI)', strpos($src, "\$a === '--hosts'") !== false);
