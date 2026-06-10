@@ -4,7 +4,7 @@
 
 OllamaDev is a terminal coding agent that runs entirely against your local [Ollama](https://ollama.com) instance. Nothing leaves your machine — no cloud, no API keys, no subscription. It's a single self-contained **vanilla PHP** binary (no Composer, no extensions beyond PHP core + curl), with diff-previewed edits, undo, an interruptible agent loop, real context management, and 60+ tools.
 
-It also ships a **crew** — a deterministic team of agents (a **Director** that plans, **Coders** that each work in an isolated git worktree, and an **Auditor** that reviews every diff and sends flagged work back for one fix before it lands) — plus a desktop app and a browser mode, all sharing one engine. Unlike cloud multi-agent tools, the whole team runs on **your** hardware: no per-seat pricing, no agents phoning home, **air-gappable end to end**. It's the private, free alternative to tools like Plyrium Forge and BridgeSpace — you trade frontier-model horsepower for total control and zero cost.
+It also ships a **crew** — a deterministic team of agents (a **Director** that plans, **Coders** that each work in an isolated git worktree, and an **Auditor** that reviews every diff and sends flagged work back for one fix before it lands) — surfaced in an **ADE** (Agentic Development Environment) that runs as a desktop app *and* in the browser off one shared engine. Its workspace is a single **infinite, pannable/zoomable canvas** where everything — terminals, the editor, file tree, code search, the task board, the memory graph, a localhost browser preview, a voice-control window, and a **live crew topology** — is a draggable window. Unlike cloud multi-agent canvases (cnvs, BridgeSpace, Plyrium Forge), the whole team runs on **your** hardware: no per-seat pricing, no agents phoning home, **air-gappable end to end** — you trade frontier-model horsepower for total control and zero cost.
 
 ```
 > create a Fastify server in server.js with a /health route
@@ -53,21 +53,22 @@ It also ships a **crew** — a deterministic team of agents (a **Director** that
 
 ### Sessions
 - **Persistent sessions** with resume — `ollamadev resume` shows an interactive picker of recent sessions.
-- **Workspaces** — a named list of project folders you switch between (`ollamadev workspace add|list|open`, alias `ws`, or the **Projects** list in the left pane of the desktop/web app). One global list shared across CLI, desktop, and web; in the GUI each project restores its own terminals, editor tabs, layout, and session.
+- **Workspaces** — a named list of project folders you switch between (`ollamadev workspace add|list|open`, alias `ws`, or the **Projects** list in the ☰ drawer of the desktop/web app). One global list shared across CLI, desktop, and web; in the GUI each project restores its own canvas — terminals, editor tabs, open windows, positions, and session.
 - **Project memory** — `/init` (or `ollamadev init`) scans the project and generates an `OLLAMADEV.md` the agent reads on startup.
 
 ### Power tools
-- **Crew (multi-agent)** — a Director plans and assigns each subtask a **role** (built-ins: coder, tester, docs, refactor, security — or define your own with `crew role add`), parallel agents build in isolated git worktrees, an Auditor reviews. Each role can pin its own model and permission mode. `--amplify N` trades free local compute for quality (N-sample plan self-consistency + an N-reviewer adversarial audit panel); `crew pack save <name>` / `--pack <name>` reuse and share tuned teams.
+- **Crew (multi-agent)** — a Director plans and assigns each subtask a **role** (built-ins: coder, tester, docs, refactor, security — or define your own with `crew role add`), agents build in isolated git worktrees, an Auditor reviews every diff (and sends flagged work back for one fix). Each role can pin its own model and permission mode, and you can **save per-role models as defaults**. `--amplify N` trades free local compute for quality (N-sample plan self-consistency + an N-reviewer adversarial audit panel); `crew pack save <name>` / `--pack <name>` reuse and share tuned teams; **`--parallel [N]`** runs coders concurrently on one box (bounded pool).
+- **Crew cockpit (ADE)** — a **live topology window** maps the running crew: the Director + Researcher + Auditor with their models, and each coder's branch, the files it's touching, the Auditor's verdict, and its **real-time activity** (✎ editing / 👁 reading / ⚡ running). You can **launch and steer the crew by voice** ("start a crew to add tests", "tell coder 2 to focus on edge cases"), and picking a by-project-type team auto-loads that team's skill.
 - **Watch (background agent)** — `ollamadev watch "<task>"` re-runs a task (tests, auto-fix, docs) whenever files change. Continuous agents are cheap because the compute is local.
 - **Air-gapped mode** — `--offline` (or `OLLAMADEV_OFFLINE=1`) hard-blocks every network tool, unwaivable even in `auto` mode. `ollamadev attest` audits and prints a fingerprinted report proving nothing can leave the machine.
-- **Skill registry** — discover and share skills: `ollamadev skills browse` / `skills search <q>` / `skills add <name>`, with registry sources configurable under `skills.registries`.
+- **Skills** — reusable instructions the agent loads on demand (the `skill` tool). **60+ built in**: *capability* skills (payments-money, testing-discipline, auth-security, …) that crews load by focus, plus a *per-team starter* for every crew team (website, ecommerce, rest-api, …). View / create / edit / delete them in the ADE's **Skills window**, or discover shareable ones with `ollamadev skills browse` / `skills search <q>` / `skills add <name>` (registry sources under `skills.registries`).
 - **60+ built-in tools** — files, search, shell, git, web fetch/search, code navigation.
 - **Custom slash commands** — drop prompt templates in `~/.ollamadev/commands/*.md` and invoke them as `/name`.
 - **Hooks** — run shell commands on `beforePrompt` / `afterEdit` via config.
 - **MCP** — connect Model Context Protocol servers (stdio + HTTP/SSE).
 - **LSP** — code navigation/diagnostics, plus an LSP server mode for editors.
 - **Terminal multiplexer** — named background terminal sessions.
-- **Desktop GUI (ADE)** — an optional Boson WebView app: file browser, multiple PTY terminals, a Crew board, a memory graph, and a left-pane Projects (workspaces) switcher. Also runs in a browser (web mode).
+- **Desktop GUI (ADE)** — an optional Boson WebView app whose workspace is one **infinite canvas**: terminals, the editor, file tree, code search, task board, memory graph, localhost browser preview, voice control, and the live crew topology are all draggable, resizable windows you pan/zoom across. Drop new windows from the **＋ Add** button or a right-click menu; the rail + **Projects** switcher live in a ☰ drawer; each project remembers its own canvas. Also runs in a browser (web mode).
 - **VS Code extension** — inline completions and chat.
 
 ### Built-in tools
@@ -132,7 +133,7 @@ ollamadev help
 
 ### Desktop app (ADE)
 
-**OllamaDev ADE** (Agentic Development Environment) is an optional desktop GUI in `Desktop/ollamadev-ade/` — a [Boson](https://github.com/boson-php/boson) WebView app built with vanilla PHP/JS/HTML/CSS (no front-end frameworks). It wraps the agent in a windowed interface: a file browser, multiple real PTY terminals, a Crew board, a memory graph, and a left-pane **Projects** (workspaces) switcher. The same UI also runs in a browser — see [Browser / web mode](#browser--web-mode-and-self-hosting) below.
+**OllamaDev ADE** (Agentic Development Environment) is an optional desktop GUI in `Desktop/ollamadev-ade/` — a [Boson](https://github.com/boson-php/boson) WebView app built with vanilla PHP/JS/HTML/CSS (no front-end frameworks). Its workspace is a single **infinite, pannable/zoomable canvas** where every tool is a draggable window: real PTY terminals (with full-screen TUI support — vim/htop), a code editor, file tree, semantic code search, the Crew board, a live **crew topology**, the memory graph, a localhost **browser preview**, and a press-to-talk **voice control** window. Add windows from the **＋ Add** button or by right-clicking the canvas; the left rail + **Projects** (workspaces) switcher tuck into a ☰ drawer so the canvas is full-bleed, and each project restores its own canvas layout. The same UI also runs in a browser — see [Browser / web mode](#browser--web-mode-and-self-hosting) below.
 
 > Unlike the CLI binary (which is dependency-free), the desktop app uses Composer for the Boson runtime and needs **PHP 8.4+**.
 
@@ -350,6 +351,22 @@ The loop is **edit → review → build → test → verify → commit**:
 | MCP / LSP | Yes / Yes | Yes / partial | partial |
 | Terminal multiplexer | Yes | No | No |
 | Dependencies | **None (vanilla PHP)** | Node | editor |
+
+And the **ADE** (the agent canvas) versus the cloud multi-agent environments it's modeled against:
+
+| | OllamaDev ADE | cnvs.dev | BridgeSpace | Plyrium Forge |
+|---|---|---|---|---|
+| Models | **Local Ollama** | cloud (Claude/GPT/…) | cloud | cloud + local |
+| Runs offline / air-gapped | **Yes, by default** | No | No | optional |
+| Cost | **Free** | paid | paid | $19–59/mo |
+| Surfaces | **CLI + desktop + web** (one engine) | macOS app only | desktop | Electron desktop |
+| Infinite agent canvas | Yes | Yes | — | — |
+| Worktree-per-agent + Auditor gate | Yes | — | partial | Yes |
+| Live agent topology | Yes | activity feed | — | Yes |
+| Voice-driven crew | Yes | Yes | — | — |
+| Graph memory (`[[wikilinks]]`) | Yes | — | Yes | — |
+
+You give up frontier-model horsepower; you get a private, free, cross-platform environment that runs entirely on your machine.
 
 ## Troubleshooting
 
