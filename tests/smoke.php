@@ -914,12 +914,15 @@ if (is_resource($fproc)) {
     [$xo] = run_bin(['chat', 'export', 'smoke_persona', '--json'], '', $cenv);
     $xd = json_decode(trim($xo), true);
     ok('chat export <id> --json returns Markdown', is_array($xd) && strpos((string)($xd['markdown'] ?? ''), '**You:**') !== false && strpos((string)($xd['markdown'] ?? ''), '# ') === 0, trim($xo));
-    // /image attaches a base64 image to the next message (the fake server flags it).
+    // Images via the SHARED Vision helper — inline "/image <path> msg" and "@<path>"
+    // (the fake server flags any message that carried an image).
     $imgPath = sys_get_temp_dir() . '/odv_smoke_img_' . getmypid() . '.png';
     @file_put_contents($imgPath, "\x89PNG\r\n\x1a\nFAKE-IMAGE-BYTES");
-    [$io] = run_bin(['chat', '--session', 'smoke_img', '-m', 'fake-reasoner:latest', '--host', $fakeHost], "/image $imgPath\nwhat is this\n/exit\n", $cenv);
+    [$io] = run_bin(['chat', '--session', 'smoke_img', '-m', 'fake-reasoner:latest', '--host', $fakeHost], "/image $imgPath what is this?\n/exit\n", $cenv);
     $iclean = preg_replace('/\x1b\[[0-9;]*m/', '', $io);
-    ok('chat /image attaches an image (vision message reaches the model)', strpos($iclean, 'I see your image.') !== false, trim($iclean));
+    ok('chat /image (inline, via Vision::extract) attaches an image', strpos($iclean, 'I see your image.') !== false && strpos($iclean, 'attached 1 image') !== false, trim($iclean));
+    [$io2] = run_bin(['chat', '--session', 'smoke_img2', '-m', 'fake-reasoner:latest', '--host', $fakeHost], "look at @$imgPath please\n/exit\n", $cenv);
+    ok('chat @<path> mention attaches an image (same Vision path as the agent)', strpos(preg_replace('/\x1b\[[0-9;]*m/', '', (string) $io2), 'I see your image.') !== false);
     @unlink($imgPath);
     foreach ($fpipes as $p) { if (is_resource($p)) fclose($p); }
     @proc_terminate($fproc); @proc_close($fproc);
@@ -940,6 +943,8 @@ ok('Chat toolbar: image (vision) / persona / export — buttons, methods, bindin
     strpos($ihtmlChat2, 'id="chatImageBtn"') !== false && strpos($ihtmlChat2, 'id="chatPersonaBtn"') !== false && strpos($ihtmlChat2, 'id="chatExportBtn"') !== false &&
     strpos($ade, 'attachImage: function') !== false && strpos($ade, 'setPersona: function') !== false && strpos($ade, 'exportChat: function') !== false &&
     strpos($bindChat, 'function chatExport') !== false);
+ok('chat reuses the shared Vision helper (no duplicate image logic)',
+    strpos($src, 'Vision::extract($line)') !== false);
 
 echo "\n== Auto-remember (self-populating memory) ==\n";
 ok('Memory::autoRemember exists + dedupes', strpos($src, 'function autoRemember(') !== false && strpos($src, 'title dedupe') !== false);

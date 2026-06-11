@@ -2181,13 +2181,14 @@ var Chat = {
         var eb = $('#chatExportBtn'); if (eb) eb.onclick = function () { self.exportChat(); };
     },
     _focusScreen: function () { var h = $('#chatHost'); if (h) { var s = h.querySelector('.term-screen'); if (s) s.focus(); } },
-    // Attach an image to the next message (vision models). Sends the `/image <path>` slash
-    // command to the chat — the path is read on this machine (where the chat runs).
+    // Attach an image (vision models): prime the line with `/image <path> ` — no newline,
+    // so you type your question after it and press Enter. Sends to the chat, which routes
+    // it through the shared Vision helper. (You can also just type `@photo.png …` yourself.)
     attachImage: function () {
         if (!this.term || !this.id) { banner('open a chat first', 'err'); return; }
         var p = (window.prompt ? window.prompt('Image file path (on this machine):', '') : '');
         if (p == null) return; p = (p || '').trim(); if (!p) return;
-        try { window.termWrite(this.id, strToB64('/image ' + p + '\n')); } catch (e) {}
+        try { window.termWrite(this.id, strToB64('/image ' + p + ' ')); } catch (e) {}   // no newline — type your question, then Enter
         this._focusScreen();
     },
     // Set a custom persona (system prompt) via `/system <text>`; blank resets to default.

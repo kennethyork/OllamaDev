@@ -10821,7 +10821,6 @@ if ($argc >= 2 && $argv[1] === 'chat') {
     // session file; falls back to the default friendly-assistant persona.
     $savedSystem = is_array($loaded) ? trim((string)($loaded['system'] ?? '')) : '';
     $system = $savedSystem !== '' ? $savedSystem : $persona;
-    $pendingImages = [];   // images attached via /image, sent with the next message
 
     // Interactive REPL — plain line input, streamed reply. Clean in the embedded
     // ADE terminal and in a real shell alike.
@@ -10877,12 +10876,12 @@ if ($argc >= 2 && $argv[1] === 'chat') {
         if ($t === '') continue;
         if ($t === '/exit' || $t === '/quit' || $t === '/bye' || $t === '/q') { echo $c("bye 👋\n", '2'); break; }
         if ($t === '/help' || $t === '/?') {
-            echo $c("  /model <name>    switch model        /system <text>  set a custom persona (/system reset)\n", '2');
-            echo $c("  /image <path>    attach an image     /clear          start a fresh conversation\n", '2');
-            echo $c("  /exit            leave chat          Ctrl-D          leave chat\n", '2');
+            echo $c("  /model <name>      switch model        /system <text>  set a custom persona (/system reset)\n", '2');
+            echo $c("  /image <path> …    or @<path> in a message — attach an image (vision model)\n", '2');
+            echo $c("  /clear             fresh conversation  /exit (Ctrl-D)  leave chat\n", '2');
             continue;
         }
-        if ($t === '/clear' || $t === '/new' || $t === '/reset') { $history = [['role' => 'system', 'content' => $system]]; $pendingImages = []; echo $c("— new conversation —\n", '2'); continue; }
+        if ($t === '/clear' || $t === '/new' || $t === '/reset') { $history = [['role' => 'system', 'content' => $system]]; echo $c("— new conversation —\n", '2'); continue; }
         if (strncmp($t, '/model', 6) === 0) {
             $next = trim(substr($t, 6));
             if ($next !== '') { $model = $next; echo $c("→ model: $model\n", '2'); } else echo $c("current model: $model\n", '2');
@@ -10898,21 +10897,17 @@ if ($argc >= 2 && $argv[1] === 'chat') {
             $saveSession();
             continue;
         }
-        // /image <path> — attach an image to the NEXT message (for a vision model).
-        if (strncmp($t, '/image', 6) === 0) {
-            $path = trim(substr($t, 6));
-            if ($path === '') { echo $c("usage: /image <path-to-image>\n", '2'); continue; }
-            if ($path !== '' && $path[0] === '~') $path = $home . substr($path, 1);
-            if (!is_file($path)) { echo $c("✗ no such file: $path\n", '33'); continue; }
-            $data = @file_get_contents($path);
-            if ($data === false || $data === '') { echo $c("✗ could not read: $path\n", '33'); continue; }
-            $pendingImages[] = base64_encode($data);
-            echo $c('📎 attached ' . basename($path) . " — now type your message (it'll go with the image).\n", '2');
-            if (!OllamaClient::modelSupportsVision($model)) echo $c("  ⚠ \"$model\" may not support images — try a vision model (e.g. llava, qwen2.5-vl).\n", '33');
-            continue;
+        // Attach images via the SHARED Vision helper — "/image <path> [message]" or
+        // "@<path>" anywhere in the line, exactly like the agent (src/77-vision.php). On a
+        // non-vision model Ollama ignores the images and the text still goes through.
+        $vin = Vision::extract($line);
+        $userMsg = ['role' => 'user', 'content' => ($vin['text'] !== '' ? $vin['text'] : $line)];
+        if (!empty($vin['images'])) {
+            $userMsg['images'] = $vin['images'];
+            echo $c('  🖼 attached ' . count($vin['images']) . ' image(s)', '2');
+            if (!OllamaClient::modelSupportsVision($model)) echo $c(' — ⚠ "' . $model . '" may not support images (try llava / qwen2.5-vl)', '33');
+            echo "\n";
         }
-        $userMsg = ['role' => 'user', 'content' => $line];
-        if ($pendingImages) { $userMsg['images'] = $pendingImages; $pendingImages = []; }   // consume the attachment
         $history[] = $userMsg;
         echo $c("\n" . $model . " ▸ ", '1;36');
         // Send a bounded recent window to the model (system + last ~48 turns).
