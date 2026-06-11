@@ -3,8 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OllamaDev — Local AI coding agent. 100% private, zero dependencies.</title>
-<meta name="description" content="OllamaDev is a terminal AI coding agent that runs entirely on your local Ollama or LM Studio. No cloud, no API keys, no subscription — a single vanilla-PHP binary with diff-previewed edits, undo, multi-agent Crew, skills, and graph memory.">
+<title>OllamaDev — Local agentic dev environment. 100% private, zero dependencies.</title>
+<meta name="description" content="OllamaDev is a 100%-local agentic development environment powered by your own Ollama models. An infinite canvas of draggable windows — terminals, editor, files, a multi-agent Crew with a live topology, skills, and graph memory — running as CLI, desktop, and web. No cloud, no API keys, no subscription. Vanilla PHP.">
+<meta property="og:title" content="OllamaDev — Local agentic dev environment">
+<meta property="og:description" content="An infinite-canvas ADE with a local multi-agent crew. 100% on your machine. Free. Vanilla PHP.">
+<meta property="og:image" content="https://ollamadev.com/img/ade-canvas.png">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -13,8 +16,9 @@
   <div class="nav-inner">
     <a class="brand" href="index.html"><span class="dot">▰</span> OllamaDev</a>
     <div class="nav-links">
+      <a href="#canvas">Canvas</a>
+      <a href="#crew">Crew</a>
       <a href="#features">Features</a>
-      <a href="#why">Why local</a>
       <a href="compare.html">Compare</a>
       <a href="downloads.html">Download</a>
       <a href="docs.html">Docs</a>
@@ -26,11 +30,11 @@
 <header class="hero">
   <div class="wrap">
     <span class="badge"><span class="blip"></span> Runs 100% on your machine</span>
-    <h1>Local AI coding agent.<br><span class="grad">Private. Free. Vanilla.</span></h1>
+    <h1>The agentic dev environment<br><span class="grad">that never leaves your machine.</span></h1>
     <p class="lede">
-      A terminal coding agent powered by your local <strong>Ollama</strong> (or LM Studio).
-      Nothing leaves your machine — no cloud, no API keys, no subscription. One self-contained
-      vanilla-PHP binary with diff-previewed edits, undo, a multi-agent Crew, skills, and graph memory.
+      A coding agent powered by your local <strong>Ollama</strong> models — on an <strong>infinite canvas</strong>
+      of draggable windows, with a multi-agent <strong>Crew</strong> you watch work live. No cloud, no API keys,
+      no subscription. One vanilla-PHP engine, as <strong>CLI, desktop, and web</strong>.
     </p>
     <div class="cta">
       <a class="btn btn-primary" href="downloads.html">Download →</a>
@@ -38,28 +42,93 @@
     </div>
     <div class="install-line">
       <span class="prompt">$</span>
-      <code id="installCmd">git clone https://github.com/kennethyork/OllamaDev &amp;&amp; cd OllamaDev &amp;&amp; make install</code>
+      <code id="installCmd">curl -fsSL https://raw.githubusercontent.com/kennethyork/OllamaDev/main/install.sh | sh</code>
       <button data-copy="installCmd">Copy</button>
     </div>
+  </div>
 
-    <div class="term">
-      <div class="term-bar">
-        <span class="tdot r"></span><span class="tdot y"></span><span class="tdot g"></span>
-        <span class="ttl">ollamadev</span>
+  <div class="hero-shot">
+    <div class="frame">
+      <div class="frame-bar">
+        <span class="d r"></span><span class="d y"></span><span class="d g"></span>
+        <span class="url">localhost:41434 · OllamaDev ADE</span>
       </div>
-<pre><span class="u">❯ create a Fastify server in server.js with a /health route</span>
-
-  <span class="tool">⏺ write  server.js</span>
-  <span class="dim">── diff preview ──────────────────────────────</span>
-  <span class="add">+++ server.js</span>
-  <span class="add">+const fastify = require('fastify')()</span>
-  <span class="add">+fastify.get('/health', async () =&gt; ({ ok: true }))</span>
-  <span class="dim">...</span>
-  <span class="ok">✎ server.js</span>  <span class="dim">· /undo to revert · checkpointed</span></pre>
+      <img src="img/ade-canvas.png" alt="OllamaDev ADE — an infinite canvas with file tree, code editor, a live crew topology, voice control, a localhost browser preview, and a task board as draggable windows" width="2000">
     </div>
+    <p class="shot-caption">The web ADE — every tool is a window on one pannable, zoomable canvas.</p>
   </div>
 </header>
 
+<!-- ============ SHOWCASE: infinite canvas ============ -->
+<section id="canvas">
+  <div class="wrap">
+    <div class="showcase">
+      <div class="frame">
+        <div class="frame-bar"><span class="d r"></span><span class="d y"></span><span class="d g"></span><span class="url">files · editor · live crew topology</span></div>
+        <img src="img/ade-editor.png" alt="The ADE canvas: a file tree, the crew engine source open in the editor, and the live crew topology" loading="lazy" width="2000">
+      </div>
+      <div class="show-text">
+        <span class="eyebrow">The canvas</span>
+        <h2>Everything is a window. The canvas is infinite.</h2>
+        <p>No tabs, no fixed panels. Terminals, the editor, file tree, code search, task board, memory graph, a localhost browser preview, voice control, and the crew topology are all draggable, resizable windows you pan and zoom across.</p>
+        <ul>
+          <li>Drop a new window from <b>＋ Add</b> or by right-clicking the canvas</li>
+          <li>Real PTY terminals with full-screen <b>TUI support</b> (vim, htop)</li>
+          <li>Each <b>project</b> remembers its own canvas — windows, positions, session</li>
+          <li>The rail + Projects switcher tuck into a <b>☰ drawer</b> so the canvas is full-bleed</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SHOWCASE: crew cockpit ============ -->
+<section id="crew" style="background:var(--bg-soft);border-top:1px solid var(--border);border-bottom:1px solid var(--border);">
+  <div class="wrap">
+    <div class="showcase rev">
+      <div class="show-text">
+        <span class="eyebrow">The crew cockpit</span>
+        <h2>Watch a whole team of agents build — locally.</h2>
+        <p>A <b>Director</b> plans and assigns roles; <b>Coders</b> each work in an isolated git worktree; an <b>Auditor</b> reviews every diff and sends flagged work back for one fix before it lands. The live <b>topology</b> shows it all as it happens.</p>
+        <ul>
+          <li>Each coder's <b>branch</b>, the <b>files</b> it's touching, and the Auditor's <b>verdict</b></li>
+          <li>Real-time activity — <b>✎ editing · 👁 reading · ⚡ running</b></li>
+          <li>Launch &amp; steer it by <b>voice</b>: <code>"start a crew to add tests"</code></li>
+          <li>Run coders <b>in parallel</b> on one box; pick a model per role</li>
+        </ul>
+        <p style="margin-top:18px;font-size:0.9rem;color:var(--fg-faint);">The private, free answer to cloud agent-canvases like cnvs, BridgeSpace, and Plyrium Forge — but it runs entirely on your hardware.</p>
+      </div>
+      <div class="frame">
+        <div class="frame-bar"><span class="d r"></span><span class="d y"></span><span class="d g"></span><span class="url">🛰 live crew topology · 📋 board</span></div>
+        <img src="img/ade-cockpit.png" alt="The crew cockpit: a live topology of the Director, coders, and Auditor with branches, files, and audit verdicts, next to a kanban board" loading="lazy" width="2000">
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SHOWCASE: skills ============ -->
+<section id="skills-showcase">
+  <div class="wrap">
+    <div class="showcase">
+      <div class="frame">
+        <div class="frame-bar"><span class="d r"></span><span class="d y"></span><span class="d g"></span><span class="url">🧩 Skills</span></div>
+        <img src="img/ade-skills.png" alt="The Skills window listing custom and built-in team-skills with create, edit, and delete" loading="lazy" width="2000">
+      </div>
+      <div class="show-text">
+        <span class="eyebrow">Skills</span>
+        <h2>60+ built-in skills the crew loads on demand.</h2>
+        <p>Reusable <code>SKILL.md</code> instructions the agent loads via the <code>skill</code> tool. <b>Capability</b> skills (payments-money, testing-discipline, auth-security…) plus a <b>per-team starter</b> for every crew team — pick the E-commerce team and it auto-loads the <code>ecommerce</code> skill.</p>
+        <ul>
+          <li>Full <b>CRUD</b> in the Skills window — create, view, edit, delete</li>
+          <li>Customize any built-in; your copy <b>overrides</b> it for every run</li>
+          <li>Shared across CLI, desktop, and web; discover more with <code>skills browse</code></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FEATURES GRID ============ -->
 <section id="features">
   <div class="wrap">
     <div class="section-head">
@@ -86,94 +155,71 @@
       <div class="card">
         <span class="ico">🛡️</span>
         <h3>Safe by default</h3>
-        <p>Edits show a colorized diff and ask first. Every change is checkpointed and reversible with <code>/undo</code> — and <code>ollamadev verify</code> runs your tests and fixes failures until they pass, so changes actually work.</p>
+        <p>Edits show a colorized diff and ask first. Every change is checkpointed and reversible with <code>/undo</code> — and <code>ollamadev verify</code> runs your tests and fixes failures until they pass.</p>
       </div>
       <div class="card">
         <span class="ico">👥</span>
         <h3>Crew — multi-agent</h3>
-        <p>A Director plans and assigns each subtask a role (coder, tester, docs, security, or your own), parallel agents build in isolated git worktrees, an Auditor reviews. Per-role models, multi-host.</p>
-      </div>
-      <div class="card">
-        <span class="ico">🧩</span>
-        <h3>Skills</h3>
-        <p>Reusable <code>SKILL.md</code> packs with progressive disclosure. Install, export, and share them.</p>
+        <p>Director plans, coders build in isolated git worktrees, an Auditor gates every diff. Per-role models, an adversarial audit panel, and a live topology you watch.</p>
       </div>
       <div class="card">
         <span class="ico">🕸️</span>
         <h3>Graph memory</h3>
-        <p>A wiki-linked knowledge base the agent recalls on demand — context that survives across sessions.</p>
+        <p>A wiki-linked knowledge base the agent recalls on demand — <code>[[linked]]</code> notes that survive across sessions, rendered as a graph.</p>
+      </div>
+      <div class="card">
+        <span class="ico">🎤</span>
+        <h3>Voice control</h3>
+        <p>Press-to-talk with a bundled, on-device Whisper engine. Dictate to the CLI, open windows, or launch and steer the crew — 100% offline.</p>
       </div>
       <div class="card">
         <span class="ico">🔌</span>
         <h3>Code intelligence</h3>
-        <p>Connect MCP servers (stdio + HTTP/SSE) and get real LSP navigation &amp; diagnostics — plus <strong>local semantic code search</strong>: <code>ollamadev index build</code> embeds the repo with your own model, so the agent finds code by meaning, not keywords. No cloud.</p>
-      </div>
-      <div class="card">
-        <span class="ico">🖥️</span>
-        <h3>Two local backends</h3>
-        <p>Ollama by default; opt into LM Studio for a higher model ceiling. Both stay on <code>localhost</code>.</p>
-      </div>
-      <div class="card">
-        <span class="ico">🌐</span>
-        <h3>CLI · desktop · web</h3>
-        <p>Run it in the terminal, as a native desktop app, or in your browser (<code>composer serve</code>) — same UI, same local engine, shared data. Use it from your phone via a tunnel.</p>
+        <p>MCP servers (stdio + HTTP/SSE), real LSP navigation &amp; diagnostics, and <strong>local semantic code search</strong> embedded with your own model. No cloud.</p>
       </div>
       <div class="card">
         <span class="ico">🛜</span>
         <h3>Air-gapped &amp; attestable</h3>
-        <p>Flip on <code>--offline</code> and every network tool is hard-blocked — unwaivable. <code>ollamadev attest</code> prints a fingerprint proving the run never touched the wire. Built for regulated and disconnected work.</p>
+        <p>Flip on <code>--offline</code> and every network tool is hard-blocked — unwaivable. <code>ollamadev attest</code> prints a fingerprint proving the run never touched the wire.</p>
       </div>
       <div class="card">
-        <span class="ico">♻️</span>
-        <h3>Picks up where you left off</h3>
-        <p>Close the app or reboot — sessions resume per-repo and a running Crew comes back from disk, right where it stopped. Each folder is its own persistent workspace.</p>
-      </div>
-      <div class="card">
-        <span class="ico">🎤</span>
-        <h3>Voice input</h3>
-        <p>Dictate to the agent with a local speech-to-text engine of your choice. Engine-agnostic (<code>stt.host</code> or <code>stt.command</code>) and, like everything else, it stays on your machine.</p>
-      </div>
-      <div class="card">
-        <span class="ico">🗂️</span>
-        <h3>Workspaces</h3>
-        <p>A <strong>Projects</strong> list in the left pane of the app (or <code>ws</code> in the terminal). Click a project to switch — each restores its own terminals, editor tabs, layout, and session. One global list shared by CLI, desktop, and web.</p>
-      </div>
-      <div class="card">
-        <span class="ico">🛰️</span>
-        <h3>Yours, from anywhere</h3>
-        <p>Self-host on a VPS and drive it from your phone over an SSH tunnel or Tailscale. Localhost-only by default with a required token, so it's reachable by you alone — never the open internet.</p>
+        <span class="ico">🌐</span>
+        <h3>CLI · desktop · web</h3>
+        <p>The terminal, a native desktop app, or your browser (<code>composer serve</code>) — one engine, one set of data. Crew runs, memory, models, and skills are shared across all three.</p>
       </div>
     </div>
   </div>
 </section>
 
+<!-- ============ WHY LOCAL ============ -->
 <section id="why" style="background:var(--bg-soft);border-top:1px solid var(--border);border-bottom:1px solid var(--border);">
   <div class="wrap">
     <div class="section-head">
       <span class="eyebrow">Why local</span>
       <h2>The privacy &amp; cost moat a cloud tool can't match</h2>
-      <p>Same agentic workflow. Your code never leaves the room, and you never see a bill.</p>
+      <p>The same agentic workflow as the cloud agent-canvases — your code never leaves the room, and you never see a bill.</p>
     </div>
     <div class="cmp">
       <table class="compare">
         <thead>
-          <tr><th>Feature</th><th class="col-own">OllamaDev</th><th>Cloud coding agents</th></tr>
+          <tr><th>Feature</th><th class="col-own">OllamaDev</th><th>Cloud agent-canvases</th></tr>
         </thead>
         <tbody>
-          <tr><td class="feat">AI provider</td><td class="own">Local (Ollama / LM Studio)</td><td>Hosted, cloud-only</td></tr>
-          <tr><td class="feat">Privacy</td><td class="own">100% on-device</td><td>Code sent to servers</td></tr>
-          <tr><td class="feat">Cost</td><td class="own">Free</td><td>Subscription / per-token</td></tr>
-          <tr><td class="feat">Diff preview + undo</td><td class="own">Yes</td><td>Partial</td></tr>
-          <tr><td class="feat">Multi-agent crew</td><td class="own">Yes (parallel, per-role models)</td><td>Varies</td></tr>
-          <tr><td class="feat">Graph memory</td><td class="own">Yes</td><td>Varies</td></tr>
-          <tr><td class="feat">MCP / LSP</td><td class="own">Yes / Yes</td><td>Partial</td></tr>
-          <tr><td class="feat">Dependencies</td><td class="own">None (vanilla PHP)</td><td>Editor / Node stack</td></tr>
+          <tr><td class="feat">AI provider</td><td class="own">Local (your Ollama models)</td><td>Hosted, cloud-only</td></tr>
+          <tr><td class="feat">Runs offline / air-gapped</td><td class="own">Yes, by default</td><td>No</td></tr>
+          <tr><td class="feat">Cost</td><td class="own">Free</td><td>Subscription / per-seat</td></tr>
+          <tr><td class="feat">Surfaces</td><td class="own">CLI + desktop + web (one engine)</td><td>One app</td></tr>
+          <tr><td class="feat">Infinite agent canvas</td><td class="own">Yes</td><td>Some</td></tr>
+          <tr><td class="feat">Worktree-per-agent + Auditor gate</td><td class="own">Yes</td><td>Varies</td></tr>
+          <tr><td class="feat">Live crew topology</td><td class="own">Yes</td><td>Varies</td></tr>
+          <tr><td class="feat">Dependencies</td><td class="own">None (vanilla PHP)</td><td>Editor / Node / Electron</td></tr>
         </tbody>
       </table>
     </div>
   </div>
 </section>
 
+<!-- ============ INSTALL ============ -->
 <section id="install">
   <div class="wrap">
     <div class="section-head">
@@ -189,23 +235,21 @@ ollama pull qwen2.5-coder
 ollama serve<button class="copy-btn">Copy</button></pre>
       </div>
       <div class="step">
-        <h3><span class="n">2</span> Build &amp; install</h3>
-<pre class="code">git clone https://github.com/\
-  kennethyork/OllamaDev
-cd OllamaDev
-make install<button class="copy-btn">Copy</button></pre>
+        <h3><span class="n">2</span> Install OllamaDev</h3>
+<pre class="code"><span class="cm"># PHP-free native binary</span>
+curl -fsSL https://raw.github\
+usercontent.com/kennethyork/\
+OllamaDev/main/install.sh | sh<button class="copy-btn">Copy</button></pre>
       </div>
       <div class="step">
         <h3><span class="n">3</span> Code</h3>
-<pre class="code"><span class="cm"># interactive chat</span>
+<pre class="code"><span class="cm"># terminal, or open the ADE</span>
 ollamadev
-
-<span class="cm"># or run a crew</span>
 ollamadev crew "add tests"<button class="copy-btn">Copy</button></pre>
       </div>
     </div>
     <p style="text-align:center;margin-top:28px;color:var(--fg-dim);">
-      Prefer a GUI? There's a <strong>desktop app (ADE)</strong>, a <strong>browser/web mode</strong> (run it on a server and use it anywhere), and a <strong>VS Code extension</strong> too —
+      Prefer a GUI? Grab the <strong>desktop app (ADE)</strong> or run <strong>browser/web mode</strong> (<code>composer serve</code>) — same canvas, same local engine. There's a <strong>VS Code extension</strong> too —
       see <a href="docs.html#three-ways">CLI · Desktop · Web</a> and the <a href="docs.html#selfhost">self-hosting</a> docs.
     </p>
   </div>
