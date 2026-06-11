@@ -596,7 +596,7 @@ if ($argc >= 2 && $argv[1] === 'chat') {
         }
         if (count($msgs) <= 1) { echo json_encode(['error' => 'no messages']) . "\n"; exit(0); }
         if (!$client->checkConnection()) { echo json_encode(['error' => ModelClient::activeLabel() . ' not reachable']) . "\n"; exit(1); }
-        $reply = (string)$client->chatWithModel($model, $msgs);
+        $reply = (string)$client->chatWithModel($model, $msgs, null, false);   // answer only, no chain-of-thought
         echo json_encode(['reply' => $reply, 'model' => $model], JSON_UNESCAPED_SLASHES) . "\n";
         exit(0);
     }
@@ -632,7 +632,7 @@ if ($argc >= 2 && $argv[1] === 'chat') {
         }
         $history[] = ['role' => 'user', 'content' => $line];
         echo $c("\n" . $model . " ▸ ", '1;36');
-        $reply = (string)$client->chatWithModel($model, $history, function (string $delta) { echo $delta; flush(); });
+        $reply = (string)$client->chatWithModel($model, $history, function (string $delta) { echo $delta; flush(); }, false);   // answer only, no chain-of-thought
         echo "\n";
         if ($reply === '') { echo $c("(no reply — is \"$model\" pulled? try: ollamadev models pull $model)\n", '33'); array_pop($history); continue; }
         $history[] = ['role' => 'assistant', 'content' => $reply];
