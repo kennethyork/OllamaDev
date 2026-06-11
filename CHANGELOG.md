@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.8.78 (2026-06-11) — a plain Chat window (ollamadev chat)
+
+### Added
+- **A dedicated 💬 Chat window in the ADE — a plain, tool-free chatbot, like ChatGPT but 100% local.** Pick any of your local Ollama models from the in-window picker and just talk. It runs the new `ollamadev chat` command — **no agent, no tools, no file access, no permissions** — streams replies, and renders clean in the embedded terminal (it's line-based like the CLI). It's a window on the infinite canvas like everything else (drag / resize / persist per project), and it **remembers its own last-used model** across restarts, independent of the session Model dropdown.
+- **CLI: `ollamadev chat [-m <model>]`** — a plain conversational REPL (`/model`, `/clear`, `/exit`) plus a `--json` one-shot mode. Shares the one engine, so your model / host (`--host` / `--lmstudio`) / temperature / context settings all apply.
+- **Website**: a Chat showcase section with a real demo screenshot, a nav link, and docs updates (window tour + CLI command table).
+
+### Fixed
+- Batch the terminal's `ResizeObserver` into `requestAnimationFrame` so resizing a renderer inside the callback can't retrigger it — silences the benign "ResizeObserver loop completed with undelivered notifications" warning.
+
+### Notes
+- Purely **additive** — the agentic Crew and the ollamadev CLI agent terminals are untouched. The Chat window is conversation only.
+
 ## v0.8.77 (2026-06-10) — picking a crew team auto-loads its team skill
 
 ### Added
