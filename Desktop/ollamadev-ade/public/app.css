@@ -473,6 +473,9 @@ textarea.field { min-height: 84px; resize: vertical; line-height: 1.5; }
 .chat-bar { display: flex; align-items: center; gap: 8px; padding: 7px 11px; border-bottom: 1px solid var(--border); background: var(--bg2); flex: 0 0 auto; min-width: 0; overflow: hidden; }
 .chat-newbar { flex: 0 0 auto; white-space: nowrap; background: var(--bg3); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r-sm); height: 30px; padding: 0 11px; font-size: 12px; line-height: 28px; cursor: pointer; transition: border-color .15s, background-color .15s; }
 .chat-newbar:hover { border-color: var(--accent); background-color: var(--elev); }
+/* Toolbar icon buttons: 📎 attach image · 🧠 persona · ⬇ export. */
+.chat-iconbtn { flex: 0 0 auto; min-width: 30px; height: 30px; padding: 0 6px; background: var(--bg3); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r-sm); font-size: 13px; line-height: 28px; cursor: pointer; transition: border-color .15s, background-color .15s; }
+.chat-iconbtn:hover { border-color: var(--accent); background-color: var(--elev); }
 .chat-bar .chat-label { flex: 0 0 auto; font-size: 14px; line-height: 1; }
 /* Model picker — same themed look as the top-bar / session model selects. */
 .chat-model {

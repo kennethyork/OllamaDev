@@ -906,6 +906,21 @@ if (is_resource($fproc)) {
     ok('chat --session resumes (replays the prior conversation)', strpos($r2, 'resumed') !== false && strpos($r2, 'capital of France?') !== false, trim($r2));
     run_bin(['chat', 'delete', 'smoke_thread'], '', $cenv);
     ok('chat delete removes the thread', !is_file($sessFile));
+    // Custom persona (/system) persists in the session.
+    run_bin(['chat', '--session', 'smoke_persona', '-m', 'fake-reasoner:latest', '--host', $fakeHost], "/system You are a pirate.\nhi\n/exit\n", $cenv);
+    $pf = json_decode((string) @file_get_contents($chatHome . '/.ollamadev/chats/smoke_persona.json'), true);
+    ok('chat /system persists a custom persona in the session', is_array($pf) && ($pf['system'] ?? '') === 'You are a pirate.', json_encode($pf['system'] ?? null));
+    // Export renders Markdown.
+    [$xo] = run_bin(['chat', 'export', 'smoke_persona', '--json'], '', $cenv);
+    $xd = json_decode(trim($xo), true);
+    ok('chat export <id> --json returns Markdown', is_array($xd) && strpos((string)($xd['markdown'] ?? ''), '**You:**') !== false && strpos((string)($xd['markdown'] ?? ''), '# ') === 0, trim($xo));
+    // /image attaches a base64 image to the next message (the fake server flags it).
+    $imgPath = sys_get_temp_dir() . '/odv_smoke_img_' . getmypid() . '.png';
+    @file_put_contents($imgPath, "\x89PNG\r\n\x1a\nFAKE-IMAGE-BYTES");
+    [$io] = run_bin(['chat', '--session', 'smoke_img', '-m', 'fake-reasoner:latest', '--host', $fakeHost], "/image $imgPath\nwhat is this\n/exit\n", $cenv);
+    $iclean = preg_replace('/\x1b\[[0-9;]*m/', '', $io);
+    ok('chat /image attaches an image (vision message reaches the model)', strpos($iclean, 'I see your image.') !== false, trim($iclean));
+    @unlink($imgPath);
     foreach ($fpipes as $p) { if (is_resource($p)) fclose($p); }
     @proc_terminate($fproc); @proc_close($fproc);
 } else {
@@ -921,6 +936,10 @@ ok('Chat window has a New-chat button and NO threads sidebar',
 ok('Chat persists a resumable session (new chat + `chat --session <id>`)',
     strpos($ade, "' chat --session '") !== false && strpos($ade, 'newChat: function') !== false &&
     strpos($bindChat, 'function chatList') !== false && strpos($bindChat, 'function chatDelete') !== false);
+ok('Chat toolbar: image (vision) / persona / export — buttons, methods, binding',
+    strpos($ihtmlChat2, 'id="chatImageBtn"') !== false && strpos($ihtmlChat2, 'id="chatPersonaBtn"') !== false && strpos($ihtmlChat2, 'id="chatExportBtn"') !== false &&
+    strpos($ade, 'attachImage: function') !== false && strpos($ade, 'setPersona: function') !== false && strpos($ade, 'exportChat: function') !== false &&
+    strpos($bindChat, 'function chatExport') !== false);
 
 echo "\n== Auto-remember (self-populating memory) ==\n";
 ok('Memory::autoRemember exists + dedupes', strpos($src, 'function autoRemember(') !== false && strpos($src, 'title dedupe') !== false);

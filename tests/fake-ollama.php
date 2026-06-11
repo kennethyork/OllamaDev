@@ -27,6 +27,19 @@ if ($uri === '/api/tags') { echo json_encode(['models' => [['name' => 'fake-reas
 if ($uri === '/api/show') { echo json_encode(['model_info' => new stdClass(), 'capabilities' => []]); return true; }
 
 if ($uri === '/api/chat') {
+    // If any message carried a base64 image (vision), echo that back so the suite can
+    // assert /image actually attaches it.
+    $hasImage = false;
+    foreach (($body['messages'] ?? []) as $m) { if (!empty($m['images'])) { $hasImage = true; break; } }
+    if ($hasImage) {
+        if (!empty($body['stream'])) {
+            header('Content-Type: application/x-ndjson');
+            echo json_encode(['message' => ['role' => 'assistant', 'content' => 'I see your image.'], 'done' => true, 'eval_count' => 3]) . "\n";
+        } else {
+            echo json_encode(['message' => ['role' => 'assistant', 'content' => 'I see your image.'], 'done' => true]);
+        }
+        return true;
+    }
     if (!empty($body['stream'])) {
         // NDJSON stream: a thinking-only chunk FIRST (content empty) — exactly the shape
         // that leaked — then the answer split across content chunks.

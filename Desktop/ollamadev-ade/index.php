@@ -126,6 +126,7 @@ $app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $
     $b->bind('hooksRemove',      fn(string $event, int $index): array => $bx->hooksRemove($event, $index));
     $b->bind('chatList',         fn(): array => $bx->chatList());
     $b->bind('chatDelete',       fn(string $id): array => $bx->chatDelete($id));
+    $b->bind('chatExport',       fn(string $id): array => $bx->chatExport($id));
 });
 
 $app->run();

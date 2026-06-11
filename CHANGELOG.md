@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.8.82 (2026-06-11) — Chat: image input, custom persona, and export
+
+Three additions to the 💬 Chat (all 100% local, vanilla — no new deps):
+
+### Added
+- **Image input (vision).** `/image <path>` in `ollamadev chat` attaches an image (base64) to your next message, sent to a vision-capable Ollama model via the `images` field — with a warning if the model isn't vision-capable. The Chat window has a 📎 button. Saved transcripts stay text-only (images aren't persisted).
+- **Custom persona.** `/system <text>` sets a custom system prompt for the conversation, **persisted per session** (a 🧠 button in the window; `/system reset` returns to the default). Resuming a thread keeps its persona.
+- **Export.** `ollamadev chat export <id>` renders a saved conversation as Markdown; the window's ⬇ button copies it to the clipboard **and** downloads a `.md`. Backed by a `chatExport` binding (desktop + web).
+
+All three are covered by hermetic smoke tests (a mock Ollama server flags image messages, asserts persona persistence + Markdown export). 613 tests passing.
+
 ## v0.8.81 (2026-06-11) — the Chat window fits small windows
 
 ### Fixed

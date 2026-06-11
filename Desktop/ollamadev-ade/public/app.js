@@ -2176,6 +2176,44 @@ var Chat = {
         var self = this;
         var sel = $('#chatModel'); if (sel) sel.onchange = function () { self.setModel(sel.value); };
         var nb = $('#chatNew'); if (nb) nb.onclick = function () { self.newChat(); };
+        var ib = $('#chatImageBtn'); if (ib) ib.onclick = function () { self.attachImage(); };
+        var pb = $('#chatPersonaBtn'); if (pb) pb.onclick = function () { self.setPersona(); };
+        var eb = $('#chatExportBtn'); if (eb) eb.onclick = function () { self.exportChat(); };
+    },
+    _focusScreen: function () { var h = $('#chatHost'); if (h) { var s = h.querySelector('.term-screen'); if (s) s.focus(); } },
+    // Attach an image to the next message (vision models). Sends the `/image <path>` slash
+    // command to the chat — the path is read on this machine (where the chat runs).
+    attachImage: function () {
+        if (!this.term || !this.id) { banner('open a chat first', 'err'); return; }
+        var p = (window.prompt ? window.prompt('Image file path (on this machine):', '') : '');
+        if (p == null) return; p = (p || '').trim(); if (!p) return;
+        try { window.termWrite(this.id, strToB64('/image ' + p + '\n')); } catch (e) {}
+        this._focusScreen();
+    },
+    // Set a custom persona (system prompt) via `/system <text>`; blank resets to default.
+    setPersona: function () {
+        if (!this.term || !this.id) { banner('open a chat first', 'err'); return; }
+        var p = (window.prompt ? window.prompt('Custom persona / system prompt (blank = reset to default):', '') : null);
+        if (p == null) return;
+        var cmd = p.trim() === '' ? '/system reset' : '/system ' + p.replace(/[\r\n]+/g, ' ').trim();
+        try { window.termWrite(this.id, strToB64(cmd + '\n')); } catch (e) {}
+        this._focusScreen();
+    },
+    // Export the current conversation as Markdown — copy to clipboard + download a .md.
+    exportChat: function () {
+        if (!this.session || !window.chatExport) { banner('nothing to export yet', 'err'); return; }
+        Promise.resolve(window.chatExport(this.session)).then(function (r) {
+            if (!r || r.error || !r.markdown) { banner('export: ' + ((r && r.error) || 'send a message first'), 'err'); return; }
+            var md = r.markdown, name = ((r.title || 'chat').replace(/[^\w.-]+/g, '_').slice(0, 40) || 'chat') + '.md';
+            try { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(md); } catch (e) {}
+            try {
+                var a = document.createElement('a');
+                a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }));
+                a.download = name; document.body.appendChild(a); a.click();
+                setTimeout(function () { try { URL.revokeObjectURL(a.href); } catch (e) {} a.remove(); }, 1500);
+            } catch (e) {}
+            banner('⬇ chat exported (copied + .md downloaded)', 'ok');
+        }).catch(function () { banner('export failed', 'err'); });
     },
     newId: function () { return 'chat_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8); },
     // The chat's OWN last-used model, remembered across restarts — independent of the
@@ -2212,6 +2250,7 @@ var Chat = {
         if (!this.session) this.session = this.newId();
         this._killTerm();
         this.model = model; this.started = true; this.remember(model);
+        var msel = $('#chatModel'); if (msel && msel.value !== model && [].some.call(msel.options, function (o) { return o.value === model; })) msel.value = model;
         var pane = document.createElement('div'); pane.className = 'term-pane chat-term'; host.appendChild(pane);
         var dir = (App.cwd && App.cwd !== '.') ? App.cwd : '';
         var id = 'chatpty_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
@@ -2281,7 +2320,7 @@ var App = {
         tasks: { x: 16, y: 16, w: 300, h: 340 }, editor: { x: 326, y: 16, w: 640, h: 460 },
         board: { x: 16, y: 16, w: 580, h: 430 }, graph: { x: 16, y: 16, w: 640, h: 470 },
         browser: { x: 16, y: 16, w: 720, h: 500 }, voice: { x: 16, y: 16, w: 320, h: 420 },
-        topology: { x: 16, y: 16, w: 620, h: 480 }, chat: { x: 16, y: 16, w: 480, h: 560 },
+        topology: { x: 16, y: 16, w: 620, h: 480 }, chat: { x: 16, y: 16, w: 560, h: 560 },
         crew: { x: 80, y: 24, w: 700, h: 580 }, roles: { x: 100, y: 36, w: 620, h: 520 },
         skills: { x: 100, y: 36, w: 640, h: 540 }, hooks: { x: 100, y: 36, w: 640, h: 540 },
         diff: { x: 48, y: 20, w: 860, h: 640 }

@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '0.8.81');
+define('OLLAMADEV_VERSION', '0.8.82');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -10753,6 +10753,27 @@ if ($argc >= 2 && $argv[1] === 'chat') {
         if ($jsonMode) echo json_encode(['ok' => (bool)$ok]) . "\n"; else echo $ok ? "deleted $did\n" : "not found\n";
         exit(0);
     }
+    // `chat export <id>` — render a saved conversation as Markdown (for the ADE ⎘ button,
+    // and handy from a terminal). --json wraps it so a binding can read the markdown.
+    if ($sub === 'export') {
+        $eid = $argv[3] ?? '';
+        $ef = ($eid !== '' && preg_match('/^[\w.-]+$/', $eid)) ? $chatsDir . '/' . $eid . '.json' : '';
+        $ed = ($ef !== '' && is_file($ef)) ? json_decode((string)@file_get_contents($ef), true) : null;
+        if (!is_array($ed) || empty($ed['messages'])) {
+            if ($jsonMode) echo json_encode(['error' => 'not found']) . "\n"; else echo "not found\n";
+            exit($jsonMode ? 0 : 1);
+        }
+        $md = '# ' . (string)($ed['title'] ?? 'Chat') . "\n\n";
+        $md .= '_' . (string)($ed['model'] ?? '') . ' · ' . date('Y-m-d H:i', (int)($ed['updated'] ?? time())) . " · OllamaDev chat_\n\n";
+        foreach ($ed['messages'] as $m) {
+            if (!is_array($m)) continue;
+            $who = ($m['role'] ?? '') === 'assistant' ? (string)($ed['model'] ?? 'assistant') : 'You';
+            $md .= '**' . $who . ":**\n\n" . trim((string)($m['content'] ?? '')) . "\n\n";
+        }
+        if ($jsonMode) echo json_encode(['markdown' => $md, 'title' => (string)($ed['title'] ?? 'Chat')], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
+        else echo $md;
+        exit(0);
+    }
 
     $client = ModelClient::default();   // honors --host / --lmstudio / configured provider
     $model = (string)($flags['model'] ?? '');
@@ -10775,7 +10796,9 @@ if ($argc >= 2 && $argv[1] === 'chat') {
             if (!is_array($m)) continue;
             $role = (($m['role'] ?? '') === 'assistant') ? 'assistant' : 'user';
             $content = trim((string)($m['content'] ?? ''));
-            if ($content !== '') $msgs[] = ['role' => $role, 'content' => $content];
+            $im = ['role' => $role, 'content' => $content];
+            if (!empty($m['images']) && is_array($m['images'])) $im['images'] = array_values(array_filter($m['images'], 'is_string'));   // vision: base64 images
+            if ($content !== '' || !empty($im['images'])) $msgs[] = $im;
         }
         if (count($msgs) <= 1) { echo json_encode(['error' => 'no messages']) . "\n"; exit(0); }
         if (!$client->checkConnection()) { echo json_encode(['error' => ModelClient::activeLabel() . ' not reachable']) . "\n"; exit(1); }
@@ -10794,6 +10817,11 @@ if ($argc >= 2 && $argv[1] === 'chat') {
     $loaded = is_file($sessFile) ? json_decode((string)@file_get_contents($sessFile), true) : null;
     $priorMsgs = (is_array($loaded) && is_array($loaded['messages'] ?? null)) ? $loaded['messages'] : [];
     $createdAt = is_array($loaded) ? (int)($loaded['created'] ?? time()) : time();
+    // Custom persona (system prompt) per session — set with /system, persisted in the
+    // session file; falls back to the default friendly-assistant persona.
+    $savedSystem = is_array($loaded) ? trim((string)($loaded['system'] ?? '')) : '';
+    $system = $savedSystem !== '' ? $savedSystem : $persona;
+    $pendingImages = [];   // images attached via /image, sent with the next message
 
     // Interactive REPL — plain line input, streamed reply. Clean in the embedded
     // ADE terminal and in a real shell alike.
@@ -10804,15 +10832,17 @@ if ($argc >= 2 && $argv[1] === 'chat') {
     }
     // Full transcript (system + any resumed turns). Saved verbatim; only a recent slice
     // is sent to the model (below) so context stays bounded on long chats.
-    $history = [['role' => 'system', 'content' => $persona]];
+    $history = [['role' => 'system', 'content' => $system]];
     foreach ($priorMsgs as $m) {
         if (!is_array($m)) continue;
         $role = ($m['role'] ?? '') === 'assistant' ? 'assistant' : (($m['role'] ?? '') === 'user' ? 'user' : '');
         $content = (string)($m['content'] ?? '');
         if ($role !== '' && trim($content) !== '') $history[] = ['role' => $role, 'content' => $content];
     }
-    $saveSession = function () use ($sessFile, $chatsDir, $sessionId, &$model, &$history, $createdAt) {
-        $msgs = array_values(array_filter($history, fn($m) => ($m['role'] ?? '') !== 'system'));
+    $saveSession = function () use ($sessFile, $chatsDir, $sessionId, &$model, &$history, &$system, $persona, $createdAt) {
+        // Strip images (base64) and any extra keys — save text-only so the JSON stays small.
+        $msgs = array_values(array_map(fn($m) => ['role' => $m['role'], 'content' => (string)($m['content'] ?? '')],
+            array_filter($history, fn($m) => ($m['role'] ?? '') !== 'system')));
         if (!$msgs) return;
         $title = 'Chat';
         foreach ($msgs as $m) {
@@ -10822,8 +10852,10 @@ if ($argc >= 2 && $argv[1] === 'chat') {
                 break;
             }
         }
+        $out = ['id' => $sessionId, 'model' => $model, 'title' => $title, 'created' => $createdAt, 'updated' => time(), 'messages' => $msgs];
+        if ($system !== $persona) $out['system'] = $system;   // only persist a CUSTOM persona
         @mkdir($chatsDir, 0755, true);
-        @file_put_contents($sessFile, json_encode(['id' => $sessionId, 'model' => $model, 'title' => $title, 'created' => $createdAt, 'updated' => time(), 'messages' => $msgs], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+        @file_put_contents($sessFile, json_encode($out, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
     };
 
     echo $c('💬 OllamaDev chat', '1;36') . '  ·  ' . $c($model, '36') . '  ·  ' . ModelClient::activeLabel() . "\n";
@@ -10845,17 +10877,43 @@ if ($argc >= 2 && $argv[1] === 'chat') {
         if ($t === '') continue;
         if ($t === '/exit' || $t === '/quit' || $t === '/bye' || $t === '/q') { echo $c("bye 👋\n", '2'); break; }
         if ($t === '/help' || $t === '/?') {
-            echo $c("  /model <name>   switch model      /clear   start a fresh conversation\n", '2');
-            echo $c("  /exit           leave chat        Ctrl-D   leave chat\n", '2');
+            echo $c("  /model <name>    switch model        /system <text>  set a custom persona (/system reset)\n", '2');
+            echo $c("  /image <path>    attach an image     /clear          start a fresh conversation\n", '2');
+            echo $c("  /exit            leave chat          Ctrl-D          leave chat\n", '2');
             continue;
         }
-        if ($t === '/clear' || $t === '/new' || $t === '/reset') { $history = [['role' => 'system', 'content' => $persona]]; echo $c("— new conversation —\n", '2'); continue; }
+        if ($t === '/clear' || $t === '/new' || $t === '/reset') { $history = [['role' => 'system', 'content' => $system]]; $pendingImages = []; echo $c("— new conversation —\n", '2'); continue; }
         if (strncmp($t, '/model', 6) === 0) {
             $next = trim(substr($t, 6));
             if ($next !== '') { $model = $next; echo $c("→ model: $model\n", '2'); } else echo $c("current model: $model\n", '2');
             continue;
         }
-        $history[] = ['role' => 'user', 'content' => $line];
+        // /system <text> — set a custom system prompt (persona) for this conversation; it
+        // persists in the session. "/system reset" returns to the default persona.
+        if (strncmp($t, '/system', 7) === 0) {
+            $next = trim(substr($t, 7));
+            if ($next === '' || $next === 'reset' || $next === 'clear' || $next === 'default') { $system = $persona; echo $c("→ persona reset to default\n", '2'); }
+            else { $system = $next; echo $c("→ persona set\n", '2'); }
+            $history[0] = ['role' => 'system', 'content' => $system];
+            $saveSession();
+            continue;
+        }
+        // /image <path> — attach an image to the NEXT message (for a vision model).
+        if (strncmp($t, '/image', 6) === 0) {
+            $path = trim(substr($t, 6));
+            if ($path === '') { echo $c("usage: /image <path-to-image>\n", '2'); continue; }
+            if ($path !== '' && $path[0] === '~') $path = $home . substr($path, 1);
+            if (!is_file($path)) { echo $c("✗ no such file: $path\n", '33'); continue; }
+            $data = @file_get_contents($path);
+            if ($data === false || $data === '') { echo $c("✗ could not read: $path\n", '33'); continue; }
+            $pendingImages[] = base64_encode($data);
+            echo $c('📎 attached ' . basename($path) . " — now type your message (it'll go with the image).\n", '2');
+            if (!OllamaClient::modelSupportsVision($model)) echo $c("  ⚠ \"$model\" may not support images — try a vision model (e.g. llava, qwen2.5-vl).\n", '33');
+            continue;
+        }
+        $userMsg = ['role' => 'user', 'content' => $line];
+        if ($pendingImages) { $userMsg['images'] = $pendingImages; $pendingImages = []; }   // consume the attachment
+        $history[] = $userMsg;
         echo $c("\n" . $model . " ▸ ", '1;36');
         // Send a bounded recent window to the model (system + last ~48 turns).
         $ctx = count($history) > 49 ? array_merge([$history[0]], array_slice($history, -48)) : $history;

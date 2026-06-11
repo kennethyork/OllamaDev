@@ -31,7 +31,7 @@ final class Bindings
         'openExternal', 'proxyFetch', 'crewModels', 'setCrewModels', 'crewSteer',
         'skillsList', 'skillsGet', 'skillsSave', 'skillsRemove',
         'hooksList', 'hooksAdd', 'hooksRemove',
-        'chatList', 'chatDelete',
+        'chatList', 'chatDelete', 'chatExport',
     ];
 
     // Dispatch an allow-listed call with positional args (used by server.php).
@@ -221,6 +221,15 @@ final class Bindings
     {
         if (trim($id) !== '') @shell_exec('php ' . escapeshellarg($this->cli) . ' chat delete ' . escapeshellarg($id) . ' 2>/dev/null');
         return $this->chatList();
+    }
+    // Render a saved conversation as Markdown (the Chat window's ⎘ export button copies +
+    // downloads it). Backed by the CLI's `chat export <id> --json`.
+    public function chatExport(string $id): array
+    {
+        if (trim($id) === '') return ['error' => 'no id'];
+        $out = shell_exec('php ' . escapeshellarg($this->cli) . ' chat export ' . escapeshellarg($id) . ' --json 2>/dev/null');
+        $d = json_decode((string) $out, true);
+        return is_array($d) ? $d : ['error' => 'not found'];
     }
 
     public function homeDir(): string { return getenv('HOME') ?: ''; }
