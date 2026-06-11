@@ -183,12 +183,27 @@
                     </div>
                     <div id="topologyBody" class="topo-body"></div>
                 </div>
+
+                <!-- 💬 Chat — a dedicated window that runs `ollamadev chat -m <model>` in its
+                     own terminal, with a model picker right here. A plain, tool-free chatbot
+                     (no agent, no tools, no file access) — line-based like the ollamadev CLI so
+                     it renders cleanly. Separate from (and additive to) the agent terminals. -->
+                <div id="chatView" class="ws-view chat-view">
+                    <div id="chatBar" class="chat-bar">
+                        <span class="chat-label">💬</span>
+                        <select id="chatModel" class="chat-model" title="Model — chat with any of your local Ollama models"></select>
+                        <button id="chatRestart" class="chat-restart" title="Start a fresh chat">↻ New chat</button>
+                        <span class="chat-hint dim">chat · no tools</span>
+                    </div>
+                    <div id="chatHost" class="chat-host"></div>
+                </div>
             </div>
 
             <!-- Right-click / ＋ Add menu for dropping a new pane on the canvas. -->
             <div id="canvasMenu" class="canvas-menu" hidden>
                 <div class="cm-group">Add window</div>
                 <button data-add="terminal">＋ Terminal</button>
+                <button data-add="chat">💬 Chat</button>
                 <button data-add="voice">🎙 Voice control</button>
                 <button data-add="editor">📝 Editor</button>
                 <button data-add="files">▤ Files</button>

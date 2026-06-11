@@ -826,6 +826,48 @@ ok('desktop has a local voice dictation module', strpos($ade, 'var Voice') !== f
 ok('crew terminal uses a real model, not the literal "crew" (resume relaunch bug)', strpos($ade, "new Terminal(id, 'crew')") === false);
 ok('desktop binds sttEnabled + sttTranscribe to the CLI', strpos((string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/index.php'), 'sttTranscribe') !== false);
 
+echo "\n== General chat (ollama-only, no tools) ==\n";
+// CLI: a plain, tool-free conversational command that shares the one engine.
+ok('CLI has a `chat` command (general, tool-free)',
+    strpos($src, "=== 'chat'") !== false && strpos($src, 'OllamaDev chat') !== false &&
+    strpos($src, 'no tools, no file edits') !== false);
+ok('chat shares the engine (model/host config via ModelClient)',
+    strpos($src, 'ModelClient::default()') !== false && strpos($src, "Config::get('ollama.defaultModel'") !== false &&
+    strpos($src, '$client->chatWithModel(') !== false);
+ok('chat --json one-shot returns {reply}/{error}',
+    strpos($src, "json_encode(['reply'") !== false && strpos($src, "'no messages'") !== false);
+// Functional: the error path needs no Ollama running.
+[$cout] = run_bin(['chat', '--json'], '{}');
+ok('`echo {} | ollamadev chat --json` → no-messages error', strpos($cout, '"error":"no messages"') !== false, trim($cout));
+
+// Desktop/web: a DEDICATED 💬 Chat window (its own canvas pane) with an in-window model
+// picker that runs vanilla `ollama run <model>` — NOT the coding agent.
+$ihtmlChat = (string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/index.html');
+$acssChat  = (string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/app.css');
+ok('dedicated Chat window exists (pane + model picker + host + Add-menu entry)',
+    strpos($ihtmlChat, 'id="chatView"') !== false && strpos($ihtmlChat, 'id="chatModel"') !== false &&
+    strpos($ihtmlChat, 'id="chatHost"') !== false && strpos($ihtmlChat, 'data-add="chat"') !== false);
+ok('Chat is a first-class canvas view (draggable/resizable/persisted)',
+    strpos($ade, "'browser', 'topology', 'chat'") !== false && strpos($ade, "chat: '#chatView'") !== false &&
+    strpos($ade, "chat: '💬 Chat'") !== false);
+ok('Chat window runs `ollamadev chat -m <model>` (plain chat, no agent/tools)',
+    strpos($ade, 'var Chat = {') !== false && strpos($ade, "' chat -m ' + model") !== false &&
+    strpos($ade, 'window.termCreate(id, model, dir)') !== false);
+ok('Chat model picker switches model (kills + restarts ollama run)',
+    strpos($ade, 'setModel: function') !== false && strpos($ade, 'fillModels: function') !== false &&
+    strpos($ade, 'this.dispose();') !== false);
+ok('Chat reuses the terminal renderer but hides its inner head',
+    strpos($acssChat, '.chat-term .term-head { display: none; }') !== false);
+ok('closing the Chat window kills its ollama-run session',
+    strpos($ade, "view === 'chat' && window.Chat && Chat.dispose") !== false);
+ok('the ollamadev agent terminals are untouched (still launchCli)',
+    strpos($ade, 'launchCli: function') !== false && strpos($ade, 'if (!isShell) self.launchCli') !== false);
+ok('desktop remembers your last real model (Chat default)',
+    strpos($ade, 'lastModel') !== false && strpos($ade, "localStorage.setItem('ade.lastModel'") !== false);
+ok('Chat remembers its OWN last-used model across restarts',
+    strpos($ade, "localStorage.getItem('ade.chatModel')") !== false && strpos($ade, "localStorage.setItem('ade.chatModel'") !== false &&
+    strpos($ade, 'this.saved()') !== false);
+
 echo "\n== Auto-remember (self-populating memory) ==\n";
 ok('Memory::autoRemember exists + dedupes', strpos($src, 'function autoRemember(') !== false && strpos($src, 'title dedupe') !== false);
 ok('crew auto-remembers after a run (run + resume)', strpos($src, 'function rememberFacts(') !== false && substr_count($src, 'self::rememberFacts(') >= 2);

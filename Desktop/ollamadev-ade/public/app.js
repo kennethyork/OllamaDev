@@ -10,7 +10,13 @@ function banner(msg, kind) {
     b.style.background = kind === 'ok' ? '#238636' : kind === 'err' ? '#b62324' : '#9a6700';
     if (kind === 'ok') setTimeout(function () { b.style.display = 'none'; }, 2000);
 }
-window.onerror = function (m, s, l) { banner('JS error: ' + m + ' @' + l, 'err'); return false; };
+window.onerror = function (m, s, l) {
+    // "ResizeObserver loop completed with undelivered notifications" is a benign,
+    // self-correcting browser warning (a resize handler resized something that
+    // retriggered the observer; it settles next frame). Don't alarm the user with it.
+    if (typeof m === 'string' && m.indexOf('ResizeObserver loop') !== -1) return true;
+    banner('JS error: ' + m + ' @' + l, 'err'); return false;
+};
 
 // Voice dictation — records the mic locally and transcribes via the configured
 // local STT engine (window.sttTranscribe → CLI → SttClient). Inserts the text
@@ -747,7 +753,17 @@ Terminal.prototype.mount = function (host) {
     // zoom, window resize) — no timing guesswork. Fixes a canvas sized off a stale
     // clientWidth. Works for the DOM renderer too (keeps the pty cols/rows correct).
     if (window.ResizeObserver) {
-        try { if (this._ro) this._ro.disconnect(); this._ro = new ResizeObserver(function () { self.fit(); }); this._ro.observe(this.screen); } catch (e) {}
+        // Batch fit() to the next frame so resizing the (canvas) renderer inside the
+        // observer callback can't synchronously retrigger the observer — which is what
+        // produces the harmless "ResizeObserver loop … undelivered notifications" warning.
+        try {
+            if (this._ro) this._ro.disconnect();
+            this._ro = new ResizeObserver(function () {
+                if (self._roRaf) return;
+                self._roRaf = (window.requestAnimationFrame || function (f) { return setTimeout(f, 16); })(function () { self._roRaf = 0; self.fit(); });
+            });
+            this._ro.observe(this.screen);
+        } catch (e) {}
     }
 };
 Terminal.prototype.setStatus = function (s) {
@@ -923,7 +939,7 @@ Terminal.prototype._pollLoop = function () {
     tick();
 };
 Terminal.prototype._closeStream = function () { if (this._es) { try { this._es.close(); } catch (e) {} this._es = null; } };
-Terminal.prototype._disposeCanvas = function () { if (this.canvasR) { try { this.canvasR.dispose(); } catch (e) {} this.canvasR = null; } if (this._ro) { try { this._ro.disconnect(); } catch (e) {} this._ro = null; } };
+Terminal.prototype._disposeCanvas = function () { if (this.canvasR) { try { this.canvasR.dispose(); } catch (e) {} this.canvasR = null; } if (this._ro) { try { this._ro.disconnect(); } catch (e) {} this._ro = null; } if (this._roRaf) { try { (window.cancelAnimationFrame || clearTimeout)(this._roRaf); } catch (e) {} this._roRaf = 0; } };
 Terminal.prototype.close = function () { this.polling = false; this._closeStream(); this._disposeCanvas(); try { window.termKill(this.id); } catch (e) {} };
 // Detach the UI but KEEP the backend pty alive (used when switching workspaces),
 // so re-attaching later resumes the same running session.
@@ -1526,7 +1542,7 @@ var Roles = {
         // Fill the optional pinned-model dropdown from the loaded models.
         var sel = $('#roleModel'), ms = $('#modelSelect');
         if (sel && ms) {
-            var opts = Array.prototype.slice.call(ms.options).map(function (o) { return o.value; }).filter(function (m) { return m !== 'shell'; });
+            var opts = Array.prototype.slice.call(ms.options).map(function (o) { return o.value; }).filter(function (m) { return m !== 'shell' && m !== 'chat'; });
             sel.innerHTML = '<option value="">— crew coder model —</option>' + opts.map(function (m) { return '<option>' + esc(m) + '</option>'; }).join('');
         }
         this.load();
@@ -2141,8 +2157,93 @@ var Stt = {
     }
 };
 
+// ---- 💬 Chat — a dedicated canvas window that runs `ollamadev chat -m <model>` in its
+// OWN terminal, with a model picker in the window. A plain, tool-free chatbot (no agent,
+// no tools, no file access, no permissions — just conversation), line-based like the
+// ollamadev CLI so it renders cleanly here. Fully additive — the ollamadev CLI agent
+// terminals are untouched. The embedded session reuses the Terminal renderer (ANSI +
+// streaming), so it behaves exactly like any other canvas terminal. ----
+var Chat = {
+    term: null, id: null, model: '', started: false,
+    bind: function () {
+        var self = this;
+        var sel = $('#chatModel'); if (sel) sel.onchange = function () { self.setModel(sel.value); };
+        var rb = $('#chatRestart'); if (rb) rb.onclick = function () { self.restart(); };
+    },
+    // The chat's OWN last-used model, remembered across restarts — independent of the
+    // session Model dropdown. So reopening the chat lands on the model you last chatted with.
+    saved: function () { try { return localStorage.getItem('ade.chatModel') || ''; } catch (e) { return ''; } },
+    remember: function (m) { try { if (m) localStorage.setItem('ade.chatModel', m); } catch (e) {} },
+    // Fill the in-window model picker from your installed models (same source as the
+    // session Model dropdown, minus the 'shell' helper). Defaults to the chat's last model.
+    fillModels: function () {
+        var sel = $('#chatModel'), src = $('#modelSelect'); if (!sel || !src) return;
+        var models = [].slice.call(src.options).map(function (o) { return o.value; }).filter(function (m) { return m && m !== 'shell' && m !== 'chat'; });
+        if (!models.length) { sel.innerHTML = '<option value="">no models — pull one first</option>'; return; }
+        var want = this.model || this.saved() || App.lastModel || App.realModel();
+        if (models.indexOf(want) === -1) want = models[0];
+        sel.innerHTML = models.map(function (m) { return '<option' + (m === want ? ' selected' : '') + '>' + esc(m) + '</option>'; }).join('');
+        sel.value = want; this.model = want;
+    },
+    // Called when the Chat window is shown on the canvas. Boots the ollama-run session
+    // once; on later (re)mounts just re-fit the embedded terminal to the pane size.
+    onShow: function () {
+        this.fillModels();
+        if (!this.started) this.start(this.model);
+        else if (this.term && this.term.fit) setTimeout(function () { try { Chat.term.fit(); } catch (e) {} }, 30);
+    },
+    // Start a vanilla `ollama run <model>` in a fresh pty, rendered in the chat host.
+    start: function (model) {
+        model = model || this.model || App.realModel();
+        var host = $('#chatHost'); if (!host) return;
+        if (!model || model === 'shell' || model === 'chat') {
+            host.innerHTML = '<div class="chat-empty dim">No model yet — pull one first: <code>ollamadev models pull &lt;name&gt;</code></div>';
+            return;
+        }
+        if (!/^[\w./:@-]+$/.test(model)) { host.innerHTML = '<div class="chat-empty dim">Unsupported model name.</div>'; return; }
+        this.model = model; this.started = true; this.remember(model);   // persist as the chat's model
+        host.innerHTML = '';
+        var pane = document.createElement('div'); pane.className = 'term-pane chat-term'; host.appendChild(pane);
+        var dir = (App.cwd && App.cwd !== '.') ? App.cwd : '';
+        var id = 'chat_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+        var t = new Terminal(id, model, dir); t.kind = 'chat';
+        this.term = t; this.id = id;
+        var cli = App.cli || 'ollamadev';
+        Promise.resolve(window.termCreate(id, model, dir)).then(function () {
+            t.mount(pane);
+            // Launch `ollamadev chat` — a plain, tool-free chat (no agent, no file access).
+            // It's line-based like the ollamadev CLI, so it renders cleanly in the embedded
+            // terminal (unlike `ollama run`, whose readline TUI can't position the cursor here).
+            setTimeout(function () { try { window.termWrite(id, strToB64(cli + ' chat -m ' + model + '\n')); } catch (e) {} }, 350);
+        }).catch(function () {});
+    },
+    // Switch the chat to another model (kills the old ollama-run, starts a new one).
+    setModel: function (model) {
+        if (!model || model === this.model) return;
+        this.dispose();
+        this.model = model;
+        var sel = $('#chatModel'); if (sel && sel.value !== model) sel.value = model;   // keep the picker in sync
+        this.remember(model);   // the chat remembers its own model across restarts
+        try { App.lastModel = model; localStorage.setItem('ade.lastModel', model); } catch (e) {}
+        this.start(model);
+        banner('💬 chat → ' + model, 'ok');
+    },
+    // New chat: restart ollama run on the same model (clears the conversation).
+    restart: function () { var m = this.model; this.dispose(); this.start(m); banner('💬 new chat', 'ok'); },
+    // Kill the ollama-run pty + stop polling; clear the host. Called on window close.
+    dispose: function () {
+        if (this.term) { try { this.term.close(); } catch (e) {} this.term = null; this.id = null; }
+        this.started = false;
+        var host = $('#chatHost'); if (host) host.innerHTML = '';
+    }
+};
+
 var App = {
     terminals: [], cwd: '.', layout: 'split', termLayout: 'free', zoomed: null, view: 'code', panel: 'files', crewBoard: null, crewPoll: null,
+    // The last REAL model you picked in the Model dropdown (remembered across restarts).
+    // So a "shell" selection still launches crew with YOUR model, and the 💬 Chat window
+    // defaults to it — every installed model is usable for chat.
+    lastModel: '',
     // The workspace is one infinite, pannable canvas. `panX/panY` is its scroll offset;
     // panes are positioned at (world x + panX, world y + panY). Singleton "view" panes
     // (editor/board/graph/browser) live in `popped` (view -> geometry); their real element
@@ -2150,17 +2251,19 @@ var App = {
     panX: 0, panY: 0, zoom: 1,
     popped: {},
     // Persistent content windows (saved per-project, in the rail + Add menu).
-    POP_VIEWS: ['files', 'search', 'tasks', 'voice', 'editor', 'board', 'graph', 'browser', 'topology'],
+    POP_VIEWS: ['files', 'search', 'tasks', 'voice', 'editor', 'board', 'graph', 'browser', 'topology', 'chat'],
     // Tool dialogs — now canvas windows too, but transient (not persisted across restart).
     DIALOG_VIEWS: ['crew', 'roles', 'skills', 'hooks', 'diff'],
     POP_SEL: {
         files: '#filesPanel', search: '#searchPanel', tasks: '#tasksPanel', editor: '#editorPane',
         board: '#boardView', graph: '#graphView', browser: '#browserView', voice: '#voicePanel', topology: '#topologyView',
+        chat: '#chatView',
         crew: '#crewModal', roles: '#rolesModal', skills: '#skillsModal', hooks: '#hooksModal', diff: '#diffModal'
     },
     POP_TITLE: {
         files: '▤ Files', search: '🔎 Code search', tasks: '▦ Tasks', editor: '📝 Editor',
         board: '📋 Board', graph: '🕸 Graph', browser: '🌐 Browser', voice: '🎙 Voice', topology: '🛰 Crew topology',
+        chat: '💬 Chat',
         crew: '👥 Crew', roles: '🎭 Roles', skills: '🧩 Skills', hooks: '🪝 Hooks', diff: '⇄ Review'
     },
     // Sensible default size/spot (canvas-world coords) when a window is first opened.
@@ -2169,7 +2272,7 @@ var App = {
         tasks: { x: 16, y: 16, w: 300, h: 340 }, editor: { x: 326, y: 16, w: 640, h: 460 },
         board: { x: 16, y: 16, w: 580, h: 430 }, graph: { x: 16, y: 16, w: 640, h: 470 },
         browser: { x: 16, y: 16, w: 720, h: 500 }, voice: { x: 16, y: 16, w: 320, h: 420 },
-        topology: { x: 16, y: 16, w: 620, h: 480 },
+        topology: { x: 16, y: 16, w: 620, h: 480 }, chat: { x: 16, y: 16, w: 480, h: 560 },
         crew: { x: 80, y: 24, w: 700, h: 580 }, roles: { x: 100, y: 36, w: 620, h: 520 },
         skills: { x: 100, y: 36, w: 640, h: 540 }, hooks: { x: 100, y: 36, w: 640, h: 540 },
         diff: { x: 48, y: 20, w: 860, h: 640 }
@@ -2229,6 +2332,15 @@ var App = {
         var cpsv = $('#crewPresetSave'); if (cpsv) cpsv.onclick = function () { self.savePreset(); };
         var cpdl = $('#crewPresetDel'); if (cpdl) cpdl.onclick = function () { self.delPreset(); };
         var cmd = $('#crewModelsDefault'); if (cmd) cmd.onclick = function () { self.saveCrewModels(); };
+        // Remember the last real model picked, so "💬 chat" / "🐚 shell" selections still
+        // launch with YOUR model (persisted across restarts). Restored from localStorage
+        // now; seeded from your configured default once models load (loadModels).
+        try { this.lastModel = localStorage.getItem('ade.lastModel') || ''; } catch (e) {}
+        var msel = $('#modelSelect');
+        if (msel) msel.onchange = function () {
+            var v = msel.value;
+            if (v && v !== 'shell' && v !== 'chat') { self.lastModel = v; try { localStorage.setItem('ade.lastModel', v); } catch (e) {} }
+        };
         // Activity rail: switch the sidebar between Files and Tasks.
         document.querySelectorAll('.rail-btn').forEach(function (b) {
             b.onclick = function () { self.setPanel(b.dataset.panel); };
@@ -2250,6 +2362,7 @@ var App = {
         Browser.bind();
         CodeSearch.bind();
         Diff.bind();
+        Chat.bind();
         Temp.bind();
         Stt.bind();
         // Add a task from the sidebar.
@@ -2436,7 +2549,7 @@ var App = {
         var cf = $('#crewFolder'); if (cf) cf.value = (this.cwd && this.cwd !== '.') ? this.cwd : '';
         // Per-role model pickers default to your CONFIG (crew.coderModel etc.) so
         // whatever you set sticks; falls back to a recommended model if unset.
-        var opts = Array.prototype.slice.call($('#modelSelect').options).map(function (o) { return o.value; }).filter(function (m) { return m !== 'shell'; });
+        var opts = Array.prototype.slice.call($('#modelSelect').options).map(function (o) { return o.value; }).filter(function (m) { return m !== 'shell' && m !== 'chat'; });
         var fallback = opts[0] || '';
         for (var i = 0; i < this.CREW_PREFERRED.length; i++) {
             var hit = opts.find(function (m) { return m.indexOf(this.CREW_PREFERRED[i]) !== -1; }, this);
@@ -2824,7 +2937,8 @@ var App = {
                 var models = (s && s.models) || [];
                 var def = (s && s.default) || '';   // your configured ollama.defaultModel
                 // "shell" sits at the top of the model list: pick it + "+ Terminal" for a
-                // plain shell (no ollamadev). It's never the default selection.
+                // plain shell (no ollamadev). It's never the default selection. (General
+                // chat lives in its own 💬 Chat window — see the Chat controller.)
                 var shellOpt = '<option value="shell">🐚 shell — plain terminal</option>';
                 sel.innerHTML = shellOpt + (models.map(function (m) {
                     var name = m.name || m;
@@ -2832,6 +2946,12 @@ var App = {
                 }).join('') || '<option>llama3.2:latest</option>');
                 // If the default isn't in the list (e.g. not pulled), still select it.
                 if (def && sel.value !== def && [].some.call(sel.options, function (o) { return o.value === def; })) sel.value = def;
+                // Seed the remembered chat/crew model from your configured default the first
+                // time (a programmatic .value set doesn't fire onchange). Drop a stale
+                // remembered model that's no longer installed so chat always has a real one.
+                var real = [].slice.call(sel.options).map(function (o) { return o.value; }).filter(function (m) { return m !== 'shell' && m !== 'chat'; });
+                if (App.lastModel && real.indexOf(App.lastModel) === -1) App.lastModel = '';
+                if (!App.lastModel) App.lastModel = (def && real.indexOf(def) !== -1) ? def : (sel.value && sel.value !== 'shell' && sel.value !== 'chat' ? sel.value : (real[0] || ''));
             }
         }).catch(function (e) { banner('listModels failed: ' + e, 'err'); });
     },
@@ -2878,8 +2998,11 @@ var App = {
     realModel: function () {
         var sel = $('#modelSelect');
         var v = sel && sel.value;
-        if (v && v !== 'shell') return v;
-        var opts = sel ? Array.prototype.slice.call(sel.options).map(function (o) { return o.value; }).filter(function (m) { return m !== 'shell'; }) : [];
+        if (v && v !== 'shell' && v !== 'chat') return v;
+        var opts = sel ? Array.prototype.slice.call(sel.options).map(function (o) { return o.value; }).filter(function (m) { return m !== 'shell' && m !== 'chat'; }) : [];
+        // "shell"/"chat" picked → fall back to the last real model you used (remembered),
+        // then the first installed one. So chat always runs on one of YOUR models.
+        if (this.lastModel && opts.indexOf(this.lastModel) !== -1) return this.lastModel;
         return opts[0] || 'llama3.2:latest';
     },
     // Respawn a terminal in a new working folder (the per-terminal folder chip).
@@ -3347,6 +3470,8 @@ var App = {
     // re-add it any time from ＋ Add / right-click).
     closePaneView: function (view) {
         if (!this.popped[view]) return;
+        // Closing the Chat window kills its ollama-run session (don't leave a model loaded).
+        if (view === 'chat' && window.Chat && Chat.dispose) Chat.dispose();
         if (this.zoomed === this.popped[view].id) this.zoomed = null;
         delete this.popped[view];
         this.savePopped();
@@ -3395,6 +3520,7 @@ var App = {
             else if (view === 'graph') { if (Graph.resize) Graph.resize(); Graph.load(); }
             else if (view === 'browser' && window.Browser && Browser.onShow) Browser.onShow();
             else if (view === 'search' && window.CodeSearch && CodeSearch.onShow) CodeSearch.onShow();
+            else if (view === 'chat' && window.Chat) Chat.onShow();   // boot/refit the ollama-run session
             else if (view === 'voice' && window.VoiceCtl) VoiceCtl.refreshTarget();
             else if (view === 'topology' && window.Topology) {
                 // Kick the crew poll so a live (or finished) run renders right away.

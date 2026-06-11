@@ -112,9 +112,10 @@ ollamadev                 <span class="cm"># interactive · or: ollamadev crew "
 
     <p><strong>Using it</strong> — open <code>http://localhost:41434</code> and you get the <em>same</em> ADE as the desktop (identical UI; only the bridge differs). The workspace is one <strong>infinite, pannable/zoomable canvas</strong> — every tool is a draggable window. A quick tour:</p>
     <ol>
-      <li><strong>Add windows</strong> — the <em>＋ Add</em> button (or right-click the canvas) drops a Terminal, Editor, Files, Search, Board, Graph, Browser, Voice, Crew topology, Roles, Skills, or Review window where you click. Drag the header to move, the corner to resize, ⤢ to focus.</li>
+      <li><strong>Add windows</strong> — the <em>＋ Add</em> button (or right-click the canvas) drops a Terminal, Chat, Editor, Files, Search, Board, Graph, Browser, Voice, Crew topology, Roles, Skills, or Review window where you click. Drag the header to move, the corner to resize, ⤢ to focus.</li>
       <li><strong>Open a project</strong> — the <em>☰</em> drawer holds the rail and the <strong>Projects</strong> switcher; pick a folder and the whole canvas (windows, positions, session) is restored per project.</li>
       <li><strong>Terminals</strong> — real PTYs with full-screen TUI support (vim, htop). On a phone, use the touch bar (type a line + Enter, or the Tab/Esc/↑↓/Ctrl-C keys).</li>
+      <li><strong>Chat</strong> — the <strong>💬 Chat</strong> window is a plain chatbot (no agent, no tools, no file access): pick any local model from the in-window picker and just talk. It runs <code>ollamadev chat</code>, streams replies, and remembers your last model.</li>
       <li><strong>Crew + cockpit</strong> — <em>👥 Crew</em> runs a multi-agent task; the <strong>🛰 Crew topology</strong> window shows it live (each coder's branch, the files it's touching, the Auditor's verdict, and ✎/👁/⚡ activity) alongside the Board.</li>
       <li><strong>Voice control</strong> — the <strong>🎙 Voice</strong> window is press-to-talk (bundled Whisper, CPU-only): dictate to a terminal, open windows, or <em>“start a crew to add tests”</em>. Browsers need HTTPS/localhost for the mic — see Self-hosting.</li>
     </ol>
@@ -215,6 +216,7 @@ echo "summarize this" | ollamadev chat<button class="copy-btn">Copy</button></pr
         <tr><td><code>ollamadev models</code></td><td>List installed models; also <code>presets</code> (recommended), <code>pull &lt;alias&gt;</code>, <code>chain</code> (tool-calling fallback)</td></tr>
         <tr><td><code>ollamadev eval</code></td><td>Measure the agent's pass rate on a fixed task suite (<code>list</code>, <code>--only</code>, <code>--model</code>, <code>--keep</code>, <code>--json</code>)</td></tr>
         <tr><td><code>ollamadev crew &lt;task&gt;</code></td><td>Run a multi-agent Crew</td></tr>
+        <tr><td><code>ollamadev chat</code></td><td>Plain conversational chat — no agent, no tools (<code>-m &lt;model&gt;</code>; backs the ADE's <strong>💬 Chat</strong> window)</td></tr>
         <tr><td><code>ollamadev transcribe &lt;file&gt;</code></td><td>Local speech-to-text on an audio file (Whisper); <code>--enabled</code> probes for an engine</td></tr>
         <tr><td><code>ollamadev voice model &lt;size&gt;</code></td><td>Get/set the STT model; also <code>voice install [size]</code> (download the engine), <code>voice history [--json N]</code>, <code>voice status</code>, <code>voice clear-history</code></td></tr>
         <tr><td><code>ollamadev search &lt;query&gt;</code></td><td>Web search — <code>--provider duckduckgo|searxng|brave</code>, <code>--limit N</code>. Blocked when air-gapped.</td></tr>

@@ -10706,6 +10706,88 @@ if ($argc >= 2 && $argv[1] === 'context') {
     exit(0);
 }
 
+// Chat — a plain, tool-free conversation with your local model (general chatting
+// like ChatGPT, 100% local via Ollama). NOT the coding agent: no tools, no file
+// edits, no permissions — just talk. Backs the ADE's "💬 Chat" window and is handy
+// straight from the terminal. Shares the one engine, so your model (-m or
+// ollama.defaultModel), host (--host/--lmstudio), temperature and context settings
+// all apply — `ollama run` with OllamaDev's config + a system persona.
+//   ollamadev chat                     interactive REPL with your default model
+//   ollamadev chat -m qwen2.5:7b       REPL with a specific model
+//   echo '{"messages":[…]}' | ollamadev chat --json    one-shot → prints {reply}
+if ($argc >= 2 && $argv[1] === 'chat') {
+    Config::load();
+    $client = ModelClient::default();   // honors --host / --lmstudio / configured provider
+    $model = (string)($flags['model'] ?? '');
+    if ($model === '') $model = (string)Config::get('ollama.defaultModel', 'llama3.2:latest');
+    // A short, friendly general-assistant persona (distinct from the coding agent's
+    // system prompt). Callers can override it via the JSON payload's "system".
+    $persona = "You are a helpful, friendly AI assistant having a conversation with the user. "
+        . "Answer clearly and naturally; use Markdown when it helps. You are running 100% locally "
+        . "on the user's own machine via Ollama — no data leaves the device. If you're unsure, say so.";
+
+    // One-shot JSON mode: read {model?, system?, messages:[{role,content}…]} on stdin,
+    // print {reply, model}. For programmatic callers (and any future binding).
+    if (in_array('--json', $argv, true)) {
+        $payload = json_decode((string)stream_get_contents(STDIN), true);
+        $sys = is_array($payload) ? trim((string)($payload['system'] ?? '')) : '';
+        if (is_array($payload) && !empty($payload['model'])) $model = (string)$payload['model'];
+        $msgs = [['role' => 'system', 'content' => $sys !== '' ? $sys : $persona]];
+        $inMsgs = (is_array($payload) && is_array($payload['messages'] ?? null)) ? $payload['messages'] : [];
+        foreach ($inMsgs as $m) {
+            if (!is_array($m)) continue;
+            $role = (($m['role'] ?? '') === 'assistant') ? 'assistant' : 'user';
+            $content = trim((string)($m['content'] ?? ''));
+            if ($content !== '') $msgs[] = ['role' => $role, 'content' => $content];
+        }
+        if (count($msgs) <= 1) { echo json_encode(['error' => 'no messages']) . "\n"; exit(0); }
+        if (!$client->checkConnection()) { echo json_encode(['error' => ModelClient::activeLabel() . ' not reachable']) . "\n"; exit(1); }
+        $reply = (string)$client->chatWithModel($model, $msgs);
+        echo json_encode(['reply' => $reply, 'model' => $model], JSON_UNESCAPED_SLASHES) . "\n";
+        exit(0);
+    }
+
+    // Interactive REPL — plain line input, streamed reply. Clean in the embedded
+    // ADE terminal and in a real shell alike.
+    $c = function (string $s, string $code) { return "\033[" . $code . "m" . $s . "\033[0m"; };
+    if (!$client->checkConnection()) {
+        echo $c('✗ ' . ModelClient::activeLabel() . ' not reachable.', '31') . " Is Ollama running?  (start it with: ollama serve)\n";
+        exit(1);
+    }
+    echo $c('💬 OllamaDev chat', '1;36') . '  ·  ' . $c($model, '36') . '  ·  ' . ModelClient::activeLabel() . "\n";
+    echo $c("General chat — no tools, no file edits. Type to talk. /help for commands, /exit (or Ctrl-D) to leave.\n", '2');
+    $history = [['role' => 'system', 'content' => $persona]];
+    while (true) {
+        echo $c("\nyou ▸ ", '1;32');
+        $line = fgets(STDIN);
+        if ($line === false) { echo "\n" . $c("bye 👋\n", '2'); break; }   // Ctrl-D / EOF
+        $line = rtrim($line, "\r\n");
+        $t = trim($line);
+        if ($t === '') continue;
+        if ($t === '/exit' || $t === '/quit' || $t === '/bye' || $t === '/q') { echo $c("bye 👋\n", '2'); break; }
+        if ($t === '/help' || $t === '/?') {
+            echo $c("  /model <name>   switch model      /clear   start a fresh conversation\n", '2');
+            echo $c("  /exit           leave chat        Ctrl-D   leave chat\n", '2');
+            continue;
+        }
+        if ($t === '/clear' || $t === '/new' || $t === '/reset') { $history = [['role' => 'system', 'content' => $persona]]; echo $c("— new conversation —\n", '2'); continue; }
+        if (strncmp($t, '/model', 6) === 0) {
+            $next = trim(substr($t, 6));
+            if ($next !== '') { $model = $next; echo $c("→ model: $model\n", '2'); } else echo $c("current model: $model\n", '2');
+            continue;
+        }
+        $history[] = ['role' => 'user', 'content' => $line];
+        echo $c("\n" . $model . " ▸ ", '1;36');
+        $reply = (string)$client->chatWithModel($model, $history, function (string $delta) { echo $delta; flush(); });
+        echo "\n";
+        if ($reply === '') { echo $c("(no reply — is \"$model\" pulled? try: ollamadev models pull $model)\n", '33'); array_pop($history); continue; }
+        $history[] = ['role' => 'assistant', 'content' => $reply];
+        // Cap the transcript so a long session can't grow unbounded (keep system + last ~48 turns).
+        if (count($history) > 49) $history = array_merge([$history[0]], array_slice($history, -48));
+    }
+    exit(0);
+}
+
 // Transcribe — local speech-to-text via the configured engine (used by the
 // desktop mic button, and usable directly: `ollamadev transcribe clip.wav`).
 if ($argc >= 2 && $argv[1] === 'transcribe') {
