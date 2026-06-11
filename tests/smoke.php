@@ -844,29 +844,29 @@ ok('`echo {} | ollamadev chat --json` → no-messages error', strpos($cout, '"er
 // picker that runs vanilla `ollama run <model>` — NOT the coding agent.
 $ihtmlChat = (string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/index.html');
 $acssChat  = (string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/app.css');
-ok('dedicated Chat window exists (pane + model picker + host + Add-menu entry)',
-    strpos($ihtmlChat, 'id="chatView"') !== false && strpos($ihtmlChat, 'id="chatModel"') !== false &&
-    strpos($ihtmlChat, 'id="chatHost"') !== false && strpos($ihtmlChat, 'data-add="chat"') !== false);
-ok('Chat is a first-class canvas view (draggable/resizable/persisted)',
-    strpos($ade, "'browser', 'topology', 'chat'") !== false && strpos($ade, "chat: '#chatView'") !== false &&
-    strpos($ade, "chat: '💬 Chat'") !== false);
-ok('Chat window runs `ollamadev chat --session <id> -m <model>` (plain chat, no agent/tools)',
-    strpos($ade, 'var Chat = {') !== false && strpos($ade, "' chat --session '") !== false && strpos($ade, "' -m ' + model") !== false &&
-    strpos($ade, 'window.termCreate(id, model, dir)') !== false);
-ok('Chat model picker switches model (restarts the session with it)',
-    strpos($ade, 'setModel: function') !== false && strpos($ade, 'fillModels: function') !== false &&
-    strpos($ade, '_killTerm: function') !== false && strpos($ade, 'this.start(model)') !== false);
-ok('Chat reuses the terminal renderer but hides its inner head',
-    strpos($acssChat, '.chat-term .term-head { display: none; }') !== false);
-ok('closing the Chat window kills its ollama-run session',
-    strpos($ade, "view === 'chat' && window.Chat && Chat.dispose") !== false);
+// Chat is a MULTI-INSTANCE window — a 'chat' terminal kind, not a singleton pane — so you
+// can open as many independent chats as you want (each its own model + session).
+ok('Chat is a multi-instance window (terminal kind, NOT a singleton pane)',
+    strpos($ade, 'spawnChatWindow: function') !== false && strpos($ade, "if (kind === 'chat') { this._spawnGeom") !== false &&
+    strpos($ade, "'browser', 'topology', 'chat'") === false && strpos($ade, "chat: '#chatView'") === false &&
+    strpos($ihtmlChat, 'id="chatView"') === false && strpos($ihtmlChat, 'data-add="chat"') !== false);
+ok('each Chat window runs its own `ollamadev chat --session <id> -m <model>`',
+    strpos($ade, "' chat --session ' + session + ' -m ' + model") !== false &&
+    strpos($ade, "t.kind = 'chat'; t.chatSession = session") !== false);
+ok('Chat window header has a toolbar (model picker + 📎/🧠/⬇)',
+    strpos($ade, '_wireChatBar = function') !== false && strpos($ade, 'class="chat-model"') !== false &&
+    strpos($ade, 'class="chat-iconbtn chat-img"') !== false && strpos($ade, 'class="chat-iconbtn chat-persona"') !== false &&
+    strpos($ade, 'class="chat-iconbtn chat-export"') !== false && strpos($acssChat, '.chat-iconbtn') !== false);
+ok('Chat per-window actions: model switch (/model), image, persona, export',
+    strpos($ade, 'chatSetModel = function') !== false && strpos($ade, 'chatImage = function') !== false &&
+    strpos($ade, 'chatPersona = function') !== false && strpos($ade, 'chatExport = function') !== false);
+ok('Chat windows resume their session on reopen (kind chat + saved session)',
+    strpos($ade, "ti.kind === 'chat') self.spawnChatWindow(ti.model, ti.session)") !== false &&
+    strpos($ade, 'session: t.chatSession') !== false);
 ok('the ollamadev agent terminals are untouched (still launchCli)',
     strpos($ade, 'launchCli: function') !== false && strpos($ade, 'if (!isShell) self.launchCli') !== false);
-ok('desktop remembers your last real model (Chat default)',
+ok('desktop remembers your last real model (chat default)',
     strpos($ade, 'lastModel') !== false && strpos($ade, "localStorage.setItem('ade.lastModel'") !== false);
-ok('Chat remembers its OWN last-used model across restarts',
-    strpos($ade, "localStorage.getItem('ade.chatModel')") !== false && strpos($ade, "localStorage.setItem('ade.chatModel'") !== false &&
-    strpos($ade, 'this.saved()') !== false);
 
 // Behavioral (hermetic): `ollamadev chat` must show a reasoning model's ANSWER, not its
 // chain-of-thought. A tiny fake Ollama server (no GPU/model) emits a `thinking` field;
@@ -930,18 +930,10 @@ if (is_resource($fproc)) {
     ok('fake Ollama server spawns (chat chain-of-thought test)', false, 'could not start php -S');
 }
 @exec('rm -rf ' . escapeshellarg($chatHome) . ' 2>/dev/null');
-// Chat window: clean layout (model picker + New chat) — NO threads sidebar — but the
-// conversation still persists as a resumable session (managed from the terminal).
-$ihtmlChat2 = (string) @file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/index.html');
-$bindChat   = (string) @file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/src/Bindings.php');
-ok('Chat window has a New-chat button and NO threads sidebar',
-    strpos($ihtmlChat2, 'id="chatNew"') !== false && strpos($ihtmlChat2, 'id="chatThreads"') === false && strpos($ihtmlChat2, 'id="chatList"') === false);
-ok('Chat persists a resumable session (new chat + `chat --session <id>`)',
-    strpos($ade, "' chat --session '") !== false && strpos($ade, 'newChat: function') !== false &&
-    strpos($bindChat, 'function chatList') !== false && strpos($bindChat, 'function chatDelete') !== false);
-ok('Chat toolbar: image (vision) / persona / export — buttons, methods, binding',
-    strpos($ihtmlChat2, 'id="chatImageBtn"') !== false && strpos($ihtmlChat2, 'id="chatPersonaBtn"') !== false && strpos($ihtmlChat2, 'id="chatExportBtn"') !== false &&
-    strpos($ade, 'attachImage: function') !== false && strpos($ade, 'setPersona: function') !== false && strpos($ade, 'exportChat: function') !== false &&
+// The chat session bindings back the CLI features (list/delete/export), desktop + web.
+$bindChat = (string) @file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/src/Bindings.php');
+ok('chat session bindings exist (list / delete / export, CLI-backed)',
+    strpos($bindChat, 'function chatList') !== false && strpos($bindChat, 'function chatDelete') !== false &&
     strpos($bindChat, 'function chatExport') !== false);
 ok('chat reuses the shared Vision helper (no duplicate image logic)',
     strpos($src, 'Vision::extract($line)') !== false);

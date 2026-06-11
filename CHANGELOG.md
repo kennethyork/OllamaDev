@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.8.83 (2026-06-11) — multiple Chat windows + an image-input cleanup
+
+### Added
+- **Open as many 💬 Chat windows as you want.** Chat is now a terminal *kind* (not a singleton pane), so each ＋ Chat is its own independent window — its own model, conversation, and resumable `--session`, with the model picker + 📎/🧠/⬇ in its header. Each window resumes its session on reopen, like terminals.
+
+### Changed
+- **Chat image input reuses the engine's `Vision` helper** (`src/77-vision.php`) instead of duplicating base64 logic — and gains `@<path>` mentions: type `look at @photo.png what's wrong?` inline, exactly like the agent.
+
+### Fixed
+- **A terminal could go dead when another pane was opened or closed.** In web mode with SSE streaming (`PHP_CLI_SERVER_WORKERS ≥ 2`), `render()` re-mounts every pane and the re-mount closed the SSE stream without re-opening it — so a terminal (or chat) stopped updating. Mount now re-opens the stream on re-mount (offset resets, so it re-streams from the top). Pre-existing; surfaced by the multi-window chat work.
+
 ## v0.8.82 (2026-06-11) — Chat: image input, custom persona, and export
 
 Three additions to the 💬 Chat (all 100% local, vanilla — no new deps):

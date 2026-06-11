@@ -669,14 +669,26 @@ Terminal.prototype.mount = function (host) {
     var self = this;
     this.offset = 0; this.line = null; this.fg = null; this.bg = null; this.bold = false;
     this.dim = false; this.italic = false; this.underline = false; this.reverse = false; this.cr = false;
+    var wasStreaming = !!this._es;                     // were we on SSE before this (re)mount?
     this._closeStream(); this._triedStream = false;   // re-attempt SSE streaming on (re)mount
+    // Chat windows (kind 'chat') keep the standard draggable head but get a 💬 label and a
+    // toolbar (model picker + 📎/🧠/⬇) below it — so you can open many independent chats,
+    // each its own pane, just like terminals. The toolbar is wired in _wireChatBar().
+    var isChat = this.kind === 'chat';
     host.innerHTML =
-        '<div class="term-head"><span class="nm">' + esc(this.model) + '</span><span class="id">' + this.id.slice(-6) + '</span>' +
+        '<div class="term-head"><span class="nm">' + (isChat ? '💬 Chat' : esc(this.model)) + '</span><span class="id">' + this.id.slice(-6) + '</span>' +
         '<span class="badge ' + this.status + '"><span class="b-dot"></span><span class="b-label">' + this.status + '</span></span>' +
-        '<button class="term-cd" title="Working folder — click to change">📁 ' + esc(this.cwd ? (this.cwd.split('/').filter(Boolean).pop() || '/') : 'project') + '</button>' +
-        '<button class="zoom" title="Focus (make this terminal bigger)">⤢</button>' +
+        (isChat ? '' : '<button class="term-cd" title="Working folder — click to change">📁 ' + esc(this.cwd ? (this.cwd.split('/').filter(Boolean).pop() || '/') : 'project') + '</button>') +
+        '<button class="zoom" title="Focus (make this bigger)">⤢</button>' +
         '<button class="x" title="Close">&times;</button></div>' +
-        '<div class="term-screen" tabindex="0" title="Click and type — this is the live ollamadev CLI"></div>' +
+        (isChat ?
+          '<div class="chat-bar">' +
+            '<select class="chat-model" title="Model — chat with any of your local Ollama models"></select>' +
+            '<button class="chat-iconbtn chat-img" type="button" title="Attach an image (vision model) — also /image &lt;path&gt; or @&lt;path&gt;">📎</button>' +
+            '<button class="chat-iconbtn chat-persona" type="button" title="Set a custom persona / system prompt — also /system &lt;text&gt;">🧠</button>' +
+            '<button class="chat-iconbtn chat-export" type="button" title="Export this chat as Markdown (copy + download .md)">⬇</button>' +
+          '</div>' : '') +
+        '<div class="term-screen" tabindex="0" title="' + (isChat ? 'General chat — no tools. Click and type.' : 'Click and type — this is the live ollamadev CLI') + '"></div>' +
         // Touch input — shown only on small screens (web mode on a phone/tablet).
         // The raw PTY is awful with a soft keyboard, so type a line here + Enter,
         // and use the key bar for control keys a line input can't send.
@@ -699,6 +711,7 @@ Terminal.prototype.mount = function (host) {
     host.querySelectorAll('.term-keys button').forEach(function (b) {
         b.onclick = function () { sendRaw(KEYS[b.dataset.k] || ''); tin.focus(); };
     });
+    if (isChat) this._wireChatBar(host);
     this.badgeEl = host.querySelector('.badge');
     var head = host.querySelector('.term-head');
     head.title = 'Double-click to focus / restore';
@@ -748,6 +761,10 @@ Terminal.prototype.mount = function (host) {
         try { this.canvasR = new CanvasRenderer(this.screen, { fg: '#c9d1d9', bg: '#0d1117' }); } catch (e) { this.canvasR = null; }
     }
     if (!this.polling) this.poll();
+    // Re-mount of a still-"polling" terminal that was on SSE: mount just CLOSED that stream,
+    // so re-open it (offset was reset, so it re-streams from the top). Without this, a
+    // terminal goes dead when another pane is added/removed (render() re-mounts everything).
+    else if (wasStreaming) this.poll();
     setTimeout(function () { self.screen.focus(); self.fit(); }, 0);   // size the pty once laid out
     // Re-fit whenever the pane's actual size changes (mount settle, free-pane drag,
     // zoom, window resize) — no timing guesswork. Fixes a canvas sized off a stale
@@ -765,6 +782,60 @@ Terminal.prototype.mount = function (host) {
             this._ro.observe(this.screen);
         } catch (e) {}
     }
+};
+// ---- Chat-window toolbar (kind 'chat'): each pane runs its own `ollamadev chat
+// --session`, so opening another 💬 Chat is just another terminal — no singleton. ----
+Terminal.prototype._wireChatBar = function (host) {
+    var self = this;
+    var sel = host.querySelector('.chat-model');
+    if (sel) {
+        var src = document.getElementById('modelSelect');
+        var models = src ? [].slice.call(src.options).map(function (o) { return o.value; }).filter(function (m) { return m && m !== 'shell' && m !== 'chat'; }) : [];
+        var want = this.model;
+        if (models.indexOf(want) === -1 && models.length) want = models[0];
+        sel.innerHTML = (models.length ? models : [want]).map(function (m) { return '<option' + (m === want ? ' selected' : '') + '>' + esc(m) + '</option>'; }).join('');
+        if (want) sel.value = want;
+        sel.onchange = function () { self.chatSetModel(sel.value); };
+    }
+    var ib = host.querySelector('.chat-img'); if (ib) ib.onclick = function () { self.chatImage(); };
+    var pb = host.querySelector('.chat-persona'); if (pb) pb.onclick = function () { self.chatPersona(); };
+    var eb = host.querySelector('.chat-export'); if (eb) eb.onclick = function () { self.chatExport(); };
+};
+Terminal.prototype._chatSend = function (s, noNewline) {
+    try { window.termWrite(this.id, strToB64(s + (noNewline ? '' : '\n'))); } catch (e) {}
+    if (this.screen) this.screen.focus();
+};
+Terminal.prototype.chatSetModel = function (m) {
+    if (!m || m === this.model) return;
+    this.model = m;
+    try { if (window.App) { App.lastModel = m; localStorage.setItem('ade.lastModel', m); localStorage.setItem('ade.chatModel', m); } } catch (e) {}
+    this._chatSend('/model ' + m);   // the chat REPL switches model live — no restart
+    banner('💬 chat → ' + m, 'ok');
+};
+Terminal.prototype.chatImage = function () {
+    var p = (window.prompt ? window.prompt('Image file path (on this machine):', '') : '');
+    if (p == null) return; p = (p || '').trim(); if (!p) return;
+    this._chatSend('/image ' + p + ' ', true);   // no newline — type your question, then Enter
+};
+Terminal.prototype.chatPersona = function () {
+    var p = (window.prompt ? window.prompt('Custom persona / system prompt (blank = reset to default):', '') : null);
+    if (p == null) return;
+    this._chatSend(p.trim() === '' ? '/system reset' : '/system ' + p.replace(/[\r\n]+/g, ' ').trim());
+};
+Terminal.prototype.chatExport = function () {
+    if (!this.chatSession || !window.chatExport) { banner('send a message first', 'err'); return; }
+    Promise.resolve(window.chatExport(this.chatSession)).then(function (r) {
+        if (!r || r.error || !r.markdown) { banner('export: ' + ((r && r.error) || 'send a message first'), 'err'); return; }
+        var md = r.markdown, name = ((r.title || 'chat').replace(/[^\w.-]+/g, '_').slice(0, 40) || 'chat') + '.md';
+        try { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(md); } catch (e) {}
+        try {
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }));
+            a.download = name; document.body.appendChild(a); a.click();
+            setTimeout(function () { try { URL.revokeObjectURL(a.href); } catch (e) {} a.remove(); }, 1500);
+        } catch (e) {}
+        banner('⬇ chat exported (copied + .md downloaded)', 'ok');
+    }).catch(function () { banner('export failed', 'err'); });
 };
 Terminal.prototype.setStatus = function (s) {
     this.status = s;
@@ -2163,129 +2234,6 @@ var Stt = {
     }
 };
 
-// ---- 💬 Chat — a dedicated canvas window for plain, tool-free conversation (no agent,
-// no tools, no file access — just talk), with a model picker and a New-chat button. Each
-// conversation runs `ollamadev chat --session <id>`, which persists it to
-// ~/.ollamadev/chats/<id>.json (resumable, and listable from the terminal with
-// `ollamadev chat list`) — but the window stays clean, no thread sidebar. The conversation
-// renders in the embedded Terminal (ANSI + streaming), line-based like the CLI. Fully
-// additive — the agent terminals are untouched. ----
-var Chat = {
-    term: null, id: null, model: '', session: '', started: false,
-    bind: function () {
-        var self = this;
-        var sel = $('#chatModel'); if (sel) sel.onchange = function () { self.setModel(sel.value); };
-        var nb = $('#chatNew'); if (nb) nb.onclick = function () { self.newChat(); };
-        var ib = $('#chatImageBtn'); if (ib) ib.onclick = function () { self.attachImage(); };
-        var pb = $('#chatPersonaBtn'); if (pb) pb.onclick = function () { self.setPersona(); };
-        var eb = $('#chatExportBtn'); if (eb) eb.onclick = function () { self.exportChat(); };
-    },
-    _focusScreen: function () { var h = $('#chatHost'); if (h) { var s = h.querySelector('.term-screen'); if (s) s.focus(); } },
-    // Attach an image (vision models): prime the line with `/image <path> ` — no newline,
-    // so you type your question after it and press Enter. Sends to the chat, which routes
-    // it through the shared Vision helper. (You can also just type `@photo.png …` yourself.)
-    attachImage: function () {
-        if (!this.term || !this.id) { banner('open a chat first', 'err'); return; }
-        var p = (window.prompt ? window.prompt('Image file path (on this machine):', '') : '');
-        if (p == null) return; p = (p || '').trim(); if (!p) return;
-        try { window.termWrite(this.id, strToB64('/image ' + p + ' ')); } catch (e) {}   // no newline — type your question, then Enter
-        this._focusScreen();
-    },
-    // Set a custom persona (system prompt) via `/system <text>`; blank resets to default.
-    setPersona: function () {
-        if (!this.term || !this.id) { banner('open a chat first', 'err'); return; }
-        var p = (window.prompt ? window.prompt('Custom persona / system prompt (blank = reset to default):', '') : null);
-        if (p == null) return;
-        var cmd = p.trim() === '' ? '/system reset' : '/system ' + p.replace(/[\r\n]+/g, ' ').trim();
-        try { window.termWrite(this.id, strToB64(cmd + '\n')); } catch (e) {}
-        this._focusScreen();
-    },
-    // Export the current conversation as Markdown — copy to clipboard + download a .md.
-    exportChat: function () {
-        if (!this.session || !window.chatExport) { banner('nothing to export yet', 'err'); return; }
-        Promise.resolve(window.chatExport(this.session)).then(function (r) {
-            if (!r || r.error || !r.markdown) { banner('export: ' + ((r && r.error) || 'send a message first'), 'err'); return; }
-            var md = r.markdown, name = ((r.title || 'chat').replace(/[^\w.-]+/g, '_').slice(0, 40) || 'chat') + '.md';
-            try { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(md); } catch (e) {}
-            try {
-                var a = document.createElement('a');
-                a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }));
-                a.download = name; document.body.appendChild(a); a.click();
-                setTimeout(function () { try { URL.revokeObjectURL(a.href); } catch (e) {} a.remove(); }, 1500);
-            } catch (e) {}
-            banner('⬇ chat exported (copied + .md downloaded)', 'ok');
-        }).catch(function () { banner('export failed', 'err'); });
-    },
-    newId: function () { return 'chat_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8); },
-    // The chat's OWN last-used model, remembered across restarts — independent of the
-    // session Model dropdown. So a NEW chat defaults to the model you last chatted with.
-    saved: function () { try { return localStorage.getItem('ade.chatModel') || ''; } catch (e) { return ''; } },
-    remember: function (m) { try { if (m) localStorage.setItem('ade.chatModel', m); } catch (e) {} },
-    // Fill the in-window model picker from your installed models (minus the 'shell' helper).
-    fillModels: function () {
-        var sel = $('#chatModel'), src = $('#modelSelect'); if (!sel || !src) return;
-        var models = [].slice.call(src.options).map(function (o) { return o.value; }).filter(function (m) { return m && m !== 'shell' && m !== 'chat'; });
-        if (!models.length) { sel.innerHTML = '<option value="">no models — pull one first</option>'; return; }
-        var want = this.model || this.saved() || App.lastModel || App.realModel();
-        if (models.indexOf(want) === -1) want = models[0];
-        sel.innerHTML = models.map(function (m) { return '<option' + (m === want ? ' selected' : '') + '>' + esc(m) + '</option>'; }).join('');
-        sel.value = want; this.model = want;
-    },
-    // Shown on the canvas: fill the picker and boot a conversation once; later (re)mounts
-    // just re-fit the embedded terminal to the pane size.
-    onShow: function () {
-        this.fillModels();
-        if (!this.started) { if (!this.session) this.session = this.newId(); this.start(this.model); }
-        else if (this.term && this.term.fit) setTimeout(function () { try { Chat.term.fit(); } catch (e) {} }, 30);
-    },
-    // Launch (or resume) a conversation: `ollamadev chat --session <id> -m <model>` in a
-    // fresh embedded terminal. A new id => fresh chat; an existing id => the CLI replays it.
-    start: function (model) {
-        model = model || this.model || App.realModel();
-        var host = $('#chatHost'); if (!host) return;
-        if (!model || model === 'shell' || model === 'chat') {
-            host.innerHTML = '<div class="chat-empty dim">No model yet — pull one first: <code>ollamadev models pull &lt;name&gt;</code></div>';
-            return;
-        }
-        if (!/^[\w./:@-]+$/.test(model)) { host.innerHTML = '<div class="chat-empty dim">Unsupported model name.</div>'; return; }
-        if (!this.session) this.session = this.newId();
-        this._killTerm();
-        this.model = model; this.started = true; this.remember(model);
-        var msel = $('#chatModel'); if (msel && msel.value !== model && [].some.call(msel.options, function (o) { return o.value === model; })) msel.value = model;
-        var pane = document.createElement('div'); pane.className = 'term-pane chat-term'; host.appendChild(pane);
-        var dir = (App.cwd && App.cwd !== '.') ? App.cwd : '';
-        var id = 'chatpty_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
-        var t = new Terminal(id, model, dir); t.kind = 'chat';
-        this.term = t; this.id = id;
-        var cli = App.cli || 'ollamadev', session = this.session;
-        Promise.resolve(window.termCreate(id, model, dir)).then(function () {
-            t.mount(pane);
-            // `--session <id>` persists the conversation (and resumes it next time).
-            setTimeout(function () { try { window.termWrite(id, strToB64(cli + ' chat --session ' + session + ' -m ' + model + '\n')); } catch (e) {} }, 350);
-        }).catch(function () {});
-    },
-    // Start a brand-new conversation (new session id) on your current model.
-    newChat: function () {
-        this.session = this.newId();
-        this.start(this.model);
-        var h = $('#chatHost'); if (h) { var s = h.querySelector('.term-screen'); if (s) s.focus(); }
-        banner('💬 new chat', 'ok');
-    },
-    // Switch the model of the CURRENT conversation (resumes it with the new model).
-    setModel: function (model) {
-        if (!model || model === this.model) return;
-        this.remember(model);
-        try { App.lastModel = model; localStorage.setItem('ade.lastModel', model); } catch (e) {}
-        this.start(model);
-        banner('💬 chat → ' + model, 'ok');
-    },
-    _killTerm: function () {
-        if (this.term) { try { this.term.close(); } catch (e) {} this.term = null; this.id = null; }
-        var host = $('#chatHost'); if (host) host.innerHTML = '';
-    },
-    // Window closed: stop the embedded terminal. Keep `session` so reopening resumes it.
-    dispose: function () { this._killTerm(); this.started = false; }
-};
 
 var App = {
     terminals: [], cwd: '.', layout: 'split', termLayout: 'free', zoomed: null, view: 'code', panel: 'files', crewBoard: null, crewPoll: null,
@@ -2300,19 +2248,17 @@ var App = {
     panX: 0, panY: 0, zoom: 1,
     popped: {},
     // Persistent content windows (saved per-project, in the rail + Add menu).
-    POP_VIEWS: ['files', 'search', 'tasks', 'voice', 'editor', 'board', 'graph', 'browser', 'topology', 'chat'],
+    POP_VIEWS: ['files', 'search', 'tasks', 'voice', 'editor', 'board', 'graph', 'browser', 'topology'],
     // Tool dialogs — now canvas windows too, but transient (not persisted across restart).
     DIALOG_VIEWS: ['crew', 'roles', 'skills', 'hooks', 'diff'],
     POP_SEL: {
         files: '#filesPanel', search: '#searchPanel', tasks: '#tasksPanel', editor: '#editorPane',
         board: '#boardView', graph: '#graphView', browser: '#browserView', voice: '#voicePanel', topology: '#topologyView',
-        chat: '#chatView',
         crew: '#crewModal', roles: '#rolesModal', skills: '#skillsModal', hooks: '#hooksModal', diff: '#diffModal'
     },
     POP_TITLE: {
         files: '▤ Files', search: '🔎 Code search', tasks: '▦ Tasks', editor: '📝 Editor',
         board: '📋 Board', graph: '🕸 Graph', browser: '🌐 Browser', voice: '🎙 Voice', topology: '🛰 Crew topology',
-        chat: '💬 Chat',
         crew: '👥 Crew', roles: '🎭 Roles', skills: '🧩 Skills', hooks: '🪝 Hooks', diff: '⇄ Review'
     },
     // Sensible default size/spot (canvas-world coords) when a window is first opened.
@@ -2321,7 +2267,7 @@ var App = {
         tasks: { x: 16, y: 16, w: 300, h: 340 }, editor: { x: 326, y: 16, w: 640, h: 460 },
         board: { x: 16, y: 16, w: 580, h: 430 }, graph: { x: 16, y: 16, w: 640, h: 470 },
         browser: { x: 16, y: 16, w: 720, h: 500 }, voice: { x: 16, y: 16, w: 320, h: 420 },
-        topology: { x: 16, y: 16, w: 620, h: 480 }, chat: { x: 16, y: 16, w: 560, h: 560 },
+        topology: { x: 16, y: 16, w: 620, h: 480 },
         crew: { x: 80, y: 24, w: 700, h: 580 }, roles: { x: 100, y: 36, w: 620, h: 520 },
         skills: { x: 100, y: 36, w: 640, h: 540 }, hooks: { x: 100, y: 36, w: 640, h: 540 },
         diff: { x: 48, y: 20, w: 860, h: 640 }
@@ -2411,7 +2357,6 @@ var App = {
         Browser.bind();
         CodeSearch.bind();
         Diff.bind();
-        Chat.bind();
         Temp.bind();
         Stt.bind();
         // Add a task from the sidebar.
@@ -3088,12 +3033,34 @@ var App = {
             if (!isShell) self.launchCli(id, model, dir);   // shell: bare prompt, no ollamadev
         }).catch(function (e) { banner('termCreate failed: ' + e, 'err'); });
     },
+    // Open a 💬 Chat window — its OWN pane (a 'chat' terminal) running `ollamadev chat
+    // --session <id>`. Plain, tool-free chat with a model picker + 📎/🧠/⬇ in the header.
+    // Multiple are independent, like terminals. Resuming a saved session replays it.
+    spawnChatWindow: function (model, session) {
+        if (this.terminals.length >= this.MAX_TERMINALS) { banner('maximum of ' + this.MAX_TERMINALS + ' windows', 'err'); return; }
+        model = model || this.realModel();
+        if (!model || model === 'shell' || model === 'chat') { banner('pull a model first — ollamadev models pull <name>', 'err'); return; }
+        if (!/^[\w./:@-]+$/.test(model)) { banner('unsupported model name', 'err'); return; }
+        session = (session && /^[\w.-]+$/.test(session)) ? session : ('chat_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8));
+        var dir = (this.cwd && this.cwd !== '.') ? this.cwd : '';
+        var id = rid();
+        var t = new Terminal(id, model, dir); t.kind = 'chat'; t.chatSession = session;
+        if (this._spawnGeom) { t.x = this._spawnGeom.x; t.y = this._spawnGeom.y; t.w = 560; t.h = 460; t.z = ++this._zTop; this._spawnGeom = null; }
+        var self = this, cli = this.cli || 'ollamadev';
+        Promise.resolve(window.termCreate(id, model, dir)).then(function () {
+            self.live[id] = true; self.terminals.push(t); self.render();
+            setTimeout(function () { try { window.termWrite(id, strToB64(cli + ' chat --session ' + session + ' -m ' + model + '\n')); } catch (e) {} }, 350);
+        }).catch(function (e) { banner('termCreate failed: ' + e, 'err'); });
+        try { App.lastModel = model; localStorage.setItem('ade.chatModel', model); } catch (e) {}
+        banner('💬 new chat', 'ok');
+    },
     // Re-attach the UI to a pty that's still alive from earlier this session
     // (workspace switch). No termCreate, no launchCli — poll resumes its buffer.
-    attachTerminal: function (id, model, kind, cwd) {
+    attachTerminal: function (id, model, kind, cwd, session) {
         if (this.terminals.length >= this.MAX_TERMINALS) return;
         var t = new Terminal(id, model || $('#modelSelect').value || 'llama3.2:latest', cwd || '');
         if (kind) t.kind = kind;
+        if (kind === 'chat' && session) t.chatSession = session;
         this.terminals.push(t);
     },
     closeTerminal: function (id) {
@@ -3143,7 +3110,7 @@ var App = {
         var self = this, panes = {};
         this.POP_VIEWS.forEach(function (v) { var b = self.popped[v]; if (b) panes[v] = { x: b.x, y: b.y, w: b.w, h: b.h }; });
         return {
-            terminals: this.terminals.map(function (t) { return { id: t.id, model: t.model, kind: t.kind || '', cwd: t.cwd || '', x: t.x, y: t.y, w: t.w, h: t.h, z: t.z }; }),
+            terminals: this.terminals.map(function (t) { return { id: t.id, model: t.model, kind: t.kind || '', cwd: t.cwd || '', session: t.chatSession || '', x: t.x, y: t.y, w: t.w, h: t.h, z: t.z }; }),
             editorTabs: Editor.tabs.map(function (t) { return { path: t.path, name: t.name }; }),
             // The canvas layout is now per-project: which view panes are open (+ geometry)
             // and the pan offset travel with the workspace, like the terminals do.
@@ -3187,7 +3154,7 @@ var App = {
         this._geomById = {};
         terms.forEach(function (g) { if (g.id) self._geomById[g.id] = { x: g.x, y: g.y, w: g.w, h: g.h, z: g.z }; if (g.z > self._zTop) self._zTop = g.z; });
         var attached = 0;
-        terms.forEach(function (ti) { if (self.live[ti.id]) { self.attachTerminal(ti.id, ti.model, ti.kind, ti.cwd); attached++; } });
+        terms.forEach(function (ti) { if (self.live[ti.id]) { self.attachTerminal(ti.id, ti.model, ti.kind, ti.cwd, ti.session); attached++; } });
         this.zoomed = state.zoomed || null;
         if (attached) this.render();
         // saved terminals whose pty is gone → respawn (each renders itself). Restore by
@@ -3198,6 +3165,7 @@ var App = {
             if (self.live[ti.id]) return;
             if (ti.kind === 'director') self.spawnCmd('Director', 'director', ti.cwd, cli + ' crew director');
             else if (ti.kind === 'crew') self.spawnCmd(ti.model, 'crew', ti.cwd, cli + ' crew');
+            else if (ti.kind === 'chat') self.spawnChatWindow(ti.model, ti.session);   // resumes the saved chat session
             else self.spawnTerminal(ti.model, ti.cwd);
         });
         if (!terms.length && !this.terminals.length) this.spawnTerminal();
@@ -3412,6 +3380,7 @@ var App = {
     // run their richer opener (loads their data); the rest open/focus a singleton window.
     addPane: function (kind, wx, wy) {
         if (kind === 'terminal') { this._spawnGeom = { x: wx, y: wy }; this.spawnTerminal(); return; }
+        if (kind === 'chat') { this._spawnGeom = { x: wx, y: wy }; this.spawnChatWindow(); return; }   // each ＋ Chat = its own window
         var openers = { crew: this.openCrew, diff: function () { Diff.open(); }, roles: function () { Roles.open(); }, skills: function () { SkillMgr.open(); }, hooks: function () { HookMgr.open(); } };
         if (openers[kind]) { openers[kind].call(this); return; }
         if (this.POP_SEL[kind]) {
@@ -3519,8 +3488,6 @@ var App = {
     // re-add it any time from ＋ Add / right-click).
     closePaneView: function (view) {
         if (!this.popped[view]) return;
-        // Closing the Chat window kills its ollama-run session (don't leave a model loaded).
-        if (view === 'chat' && window.Chat && Chat.dispose) Chat.dispose();
         if (this.zoomed === this.popped[view].id) this.zoomed = null;
         delete this.popped[view];
         this.savePopped();
@@ -3569,7 +3536,6 @@ var App = {
             else if (view === 'graph') { if (Graph.resize) Graph.resize(); Graph.load(); }
             else if (view === 'browser' && window.Browser && Browser.onShow) Browser.onShow();
             else if (view === 'search' && window.CodeSearch && CodeSearch.onShow) CodeSearch.onShow();
-            else if (view === 'chat' && window.Chat) Chat.onShow();   // boot/refit the ollama-run session
             else if (view === 'voice' && window.VoiceCtl) VoiceCtl.refreshTarget();
             else if (view === 'topology' && window.Topology) {
                 // Kick the crew poll so a live (or finished) run renders right away.

@@ -466,17 +466,13 @@ textarea.field { min-height: 84px; resize: vertical; line-height: 1.5; }
    match the session Model dropdown + buttons, so it reads as part of the ADE. The
    embedded terminal reuses the renderer; its inner header is hidden (the pane already
    has its own title chrome). */
-/* Chat window — a clean conversation pane (model picker + New chat + terminal). */
-.chat-view { background: var(--bg); display: flex; flex-direction: column; }
-/* The bar degrades gracefully when the window is narrow: the hint drops first, then the
-   model picker shrinks (with an ellipsis); the 💬 label and New-chat button stay usable. */
-.chat-bar { display: flex; align-items: center; gap: 8px; padding: 7px 11px; border-bottom: 1px solid var(--border); background: var(--bg2); flex: 0 0 auto; min-width: 0; overflow: hidden; }
-.chat-newbar { flex: 0 0 auto; white-space: nowrap; background: var(--bg3); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r-sm); height: 30px; padding: 0 11px; font-size: 12px; line-height: 28px; cursor: pointer; transition: border-color .15s, background-color .15s; }
-.chat-newbar:hover { border-color: var(--accent); background-color: var(--elev); }
-/* Toolbar icon buttons: 📎 attach image · 🧠 persona · ⬇ export. */
+/* Chat windows (terminal kind 'chat') get the standard terminal head + a toolbar row
+   below it (model picker on the left, 📎/🧠/⬇ on the right). It degrades gracefully when
+   the window is narrow — the model picker shrinks with an ellipsis; the icons stay. */
+.chat-bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--bg2); flex: 0 0 auto; min-width: 0; overflow: hidden; }
 .chat-iconbtn { flex: 0 0 auto; min-width: 30px; height: 30px; padding: 0 6px; background: var(--bg3); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r-sm); font-size: 13px; line-height: 28px; cursor: pointer; transition: border-color .15s, background-color .15s; }
 .chat-iconbtn:hover { border-color: var(--accent); background-color: var(--elev); }
-.chat-bar .chat-label { flex: 0 0 auto; font-size: 14px; line-height: 1; }
+.chat-bar .chat-img { margin-left: auto; }   /* push the icon group to the right */
 /* Model picker — same themed look as the top-bar / session model selects. */
 .chat-model {
     -webkit-appearance: none; appearance: none; cursor: pointer;
@@ -491,12 +487,6 @@ textarea.field { min-height: 84px; resize: vertical; line-height: 1.5; }
 .chat-model:hover { border-color: var(--faint); background-color: var(--elev); }
 .chat-model:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .chat-model option { background: var(--bg2); color: var(--fg); }
-.chat-bar .chat-hint { margin-left: auto; flex: 0 100 auto; min-width: 0; overflow: hidden; font-size: 11px; white-space: nowrap; }
-.chat-bar .chat-hint code { font-family: var(--mono); }
-.chat-host { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
-.chat-host > .term-pane.chat-term { flex: 1; min-height: 0; border: none; border-radius: 0; background: transparent; }
-.chat-term .term-head { display: none; }
-.chat-empty { padding: 16px; font-size: 13px; line-height: 1.6; }
 /* Tool dialogs (Crew / Roles / Skills / Hooks / Review) as canvas windows: the .modal
    fills the pane body and scrolls; its own centered-box sizing + title are dropped. */
 .term-pane.pop-pane .pop-pane-body > .modal { width: 100%; max-width: none; height: 100%; border: none; border-radius: 0; box-shadow: none; padding: 16px; overflow: auto; animation: none; }
