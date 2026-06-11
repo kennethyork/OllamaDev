@@ -17,7 +17,7 @@
     'codeSearch', 'codeIndexStatus', 'codeIndexBuild', 'reviewDiff', 'temperature', 'setTemperature',
     'sttModel', 'setSttModel', 'sttHistory', 'sttClearHistory', 'openExternal', 'proxyFetch', 'crewModels', 'setCrewModels',
     'crewSteer', 'skillsList', 'skillsGet', 'skillsSave', 'skillsRemove',
-    'hooksList', 'hooksAdd', 'hooksRemove'];
+    'hooksList', 'hooksAdd', 'hooksRemove', 'chatList', 'chatDelete'];
 
   function rpc(name, args) {
     var headers = { 'Content-Type': 'application/json' };

@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.8.80 (2026-06-11) — chat sessions persist + a desktop-bindings drift fix
+
+### Added
+- **`ollamadev chat` conversations now persist as resumable sessions.** Each chat runs under a `--session <id>` and is saved to `~/.ollamadev/chats/<id>.json`; resuming an id replays the conversation. New **`ollamadev chat list [--json]`** and **`ollamadev chat delete <id>`** subcommands. The ADE Chat window uses this for its **↻ New chat** button (a clean break) and to resume on reopen — the window stays minimal (model picker + New chat), no thread sidebar.
+
+### Fixed
+- **The desktop app (Boson) was silently missing 12 bindings.** `index.php` is a hand-maintained `$b->bind()` list that had drifted from `Bindings::PUBLIC`, so on the desktop **Skills, Hooks, Director-steering, terminal-resize, save-crew-models, and chat list/delete were all dead** (the web build had them). All 12 are now registered. A new smoke **parity test** asserts `index.php` registers every `PUBLIC` binding, so it can't drift again — the web bridge already had such a check, but there was no desktop one.
+
 ## v0.8.79 (2026-06-11) — chat shows the answer, not the chain-of-thought
 
 ### Fixed

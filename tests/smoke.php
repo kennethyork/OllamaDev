@@ -850,12 +850,12 @@ ok('dedicated Chat window exists (pane + model picker + host + Add-menu entry)',
 ok('Chat is a first-class canvas view (draggable/resizable/persisted)',
     strpos($ade, "'browser', 'topology', 'chat'") !== false && strpos($ade, "chat: '#chatView'") !== false &&
     strpos($ade, "chat: '💬 Chat'") !== false);
-ok('Chat window runs `ollamadev chat -m <model>` (plain chat, no agent/tools)',
-    strpos($ade, 'var Chat = {') !== false && strpos($ade, "' chat -m ' + model") !== false &&
+ok('Chat window runs `ollamadev chat --session <id> -m <model>` (plain chat, no agent/tools)',
+    strpos($ade, 'var Chat = {') !== false && strpos($ade, "' chat --session '") !== false && strpos($ade, "' -m ' + model") !== false &&
     strpos($ade, 'window.termCreate(id, model, dir)') !== false);
-ok('Chat model picker switches model (kills + restarts ollama run)',
+ok('Chat model picker switches model (restarts the session with it)',
     strpos($ade, 'setModel: function') !== false && strpos($ade, 'fillModels: function') !== false &&
-    strpos($ade, 'this.dispose();') !== false);
+    strpos($ade, '_killTerm: function') !== false && strpos($ade, 'this.start(model)') !== false);
 ok('Chat reuses the terminal renderer but hides its inner head',
     strpos($acssChat, '.chat-term .term-head { display: none; }') !== false);
 ok('closing the Chat window kills its ollama-run session',
@@ -891,12 +891,36 @@ if (is_resource($fproc)) {
     $rclean = preg_replace('/\x1b\[[0-9;]*m/', '', $rout);
     ok('chat REPL streams the answer, NOT the chain-of-thought',
         strpos($rclean, 'Hello there, world.') !== false && strpos($rclean, 'REASONING_LEAK_SENTINEL') === false, trim($rclean));
+    // Threads/history: a --session run persists the conversation; list + delete work.
+    run_bin(['chat', '--session', 'smoke_thread', '-m', 'fake-reasoner:latest', '--host', $fakeHost], "capital of France?\n/exit\n", $cenv);
+    $sessFile = $chatHome . '/.ollamadev/chats/smoke_thread.json';
+    $sd = is_file($sessFile) ? json_decode((string) @file_get_contents($sessFile), true) : null;
+    ok('chat --session persists the conversation (title + messages)',
+        is_array($sd) && ($sd['title'] ?? '') === 'capital of France?' && count($sd['messages'] ?? []) === 2 && (($sd['messages'][0]['role'] ?? '') === 'user'), json_encode($sd['title'] ?? null));
+    [$lout] = run_bin(['chat', 'list', '--json'], '', $cenv);
+    $ld = json_decode(trim($lout), true);
+    ok('chat list --json returns the saved thread',
+        is_array($ld) && isset($ld['chats']) && count(array_filter($ld['chats'], fn($x) => ($x['id'] ?? '') === 'smoke_thread')) === 1, trim($lout));
+    // Resuming the same session replays its prior turns.
+    [$r2] = run_bin(['chat', '--session', 'smoke_thread', '-m', 'fake-reasoner:latest', '--host', $fakeHost], "/exit\n", $cenv);
+    ok('chat --session resumes (replays the prior conversation)', strpos($r2, 'resumed') !== false && strpos($r2, 'capital of France?') !== false, trim($r2));
+    run_bin(['chat', 'delete', 'smoke_thread'], '', $cenv);
+    ok('chat delete removes the thread', !is_file($sessFile));
     foreach ($fpipes as $p) { if (is_resource($p)) fclose($p); }
     @proc_terminate($fproc); @proc_close($fproc);
 } else {
     ok('fake Ollama server spawns (chat chain-of-thought test)', false, 'could not start php -S');
 }
 @exec('rm -rf ' . escapeshellarg($chatHome) . ' 2>/dev/null');
+// Chat window: clean layout (model picker + New chat) — NO threads sidebar — but the
+// conversation still persists as a resumable session (managed from the terminal).
+$ihtmlChat2 = (string) @file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/index.html');
+$bindChat   = (string) @file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/src/Bindings.php');
+ok('Chat window has a New-chat button and NO threads sidebar',
+    strpos($ihtmlChat2, 'id="chatNew"') !== false && strpos($ihtmlChat2, 'id="chatThreads"') === false && strpos($ihtmlChat2, 'id="chatList"') === false);
+ok('Chat persists a resumable session (new chat + `chat --session <id>`)',
+    strpos($ade, "' chat --session '") !== false && strpos($ade, 'newChat: function') !== false &&
+    strpos($bindChat, 'function chatList') !== false && strpos($bindChat, 'function chatDelete') !== false);
 
 echo "\n== Auto-remember (self-populating memory) ==\n";
 ok('Memory::autoRemember exists + dedupes', strpos($src, 'function autoRemember(') !== false && strpos($src, 'title dedupe') !== false);
@@ -1256,10 +1280,15 @@ ok('free layout is the default (only explicit tiled opts out)',
 // Surface parity: every desktop binding (Bindings::PUBLIC) must be wrapped by the web
 // bridge too, or that feature is dead in web mode (how crewSteer/skills* drifted).
 $bridge = (string) @file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/web/bridge.js');
+$idxBind = (string) @file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/index.php');
 if (preg_match('/PUBLIC\s*=\s*\[(.*?)\];/s', $bind, $pm)) {
     preg_match_all("/'([a-zA-Z][a-zA-Z0-9]*)'/", $pm[1], $pn);
     $missing = array_values(array_filter($pn[1], fn($x) => strpos($bridge, "'" . $x . "'") === false));
     ok('web bridge exposes every desktop binding (cli/desktop/web in sync)', empty($missing), 'missing in bridge.js: ' . implode(', ', $missing));
+    // AND the Boson desktop must register every PUBLIC binding too — otherwise window.<name>
+    // is undefined there and an id-named DOM element can shadow it (how chatList broke).
+    $missingIdx = array_values(array_filter($pn[1], fn($x) => strpos($idxBind, "\$b->bind('" . $x . "'") === false));
+    ok('desktop index.php registers every Bindings::PUBLIC method (Boson in sync)', empty($missingIdx), 'missing in index.php: ' . implode(', ', $missingIdx));
 } else { ok('Bindings PUBLIC list parseable', false); }
 ok('interactive crew loops Crew::run per prompt', strpos($src, "in_array(strtolower(\$line), ['exit', 'quit', 'q', ':q']") !== false);
 

@@ -571,6 +571,40 @@ if ($argc >= 2 && $argv[1] === 'context') {
 //   echo '{"messages":[…]}' | ollamadev chat --json    one-shot → prints {reply}
 if ($argc >= 2 && $argv[1] === 'chat') {
     Config::load();
+    $home = getenv('HOME') ?: sys_get_temp_dir();
+    $chatsDir = $home . '/.ollamadev/chats';   // saved conversations (one JSON per thread)
+    $sub = $argv[2] ?? '';
+    $jsonMode = in_array('--json', $argv, true);
+
+    // `chat list` — saved conversations, newest first. Powers the ADE Chat window's
+    // threads/history sidebar (via the chatList binding); also handy from the terminal.
+    if ($sub === 'list') {
+        $rows = [];
+        foreach ((is_dir($chatsDir) ? (glob($chatsDir . '/*.json') ?: []) : []) as $f) {
+            $d = json_decode((string)@file_get_contents($f), true);
+            if (!is_array($d) || empty($d['messages'])) continue;
+            $rows[] = [
+                'id' => (string)($d['id'] ?? basename($f, '.json')),
+                'title' => (string)($d['title'] ?? 'Chat'),
+                'model' => (string)($d['model'] ?? ''),
+                'updated' => (int)($d['updated'] ?? 0),
+                'count' => count($d['messages']),
+            ];
+        }
+        usort($rows, fn($a, $b) => $b['updated'] <=> $a['updated']);
+        if ($jsonMode) { echo json_encode(['chats' => $rows]) . "\n"; exit(0); }
+        if (!$rows) { echo "No saved chats yet. Start one: ollamadev chat\n"; exit(0); }
+        foreach ($rows as $r) echo sprintf("  \033[36m%s\033[0m  %s  \033[2m(%d msgs · %s)\033[0m\n", $r['id'], $r['title'], $r['count'], $r['model']);
+        exit(0);
+    }
+    // `chat delete <id>` — remove a saved conversation.
+    if ($sub === 'delete' || $sub === 'rm') {
+        $did = $argv[3] ?? '';
+        $ok = $did !== '' && preg_match('/^[\w.-]+$/', $did) && @unlink($chatsDir . '/' . $did . '.json');
+        if ($jsonMode) echo json_encode(['ok' => (bool)$ok]) . "\n"; else echo $ok ? "deleted $did\n" : "not found\n";
+        exit(0);
+    }
+
     $client = ModelClient::default();   // honors --host / --lmstudio / configured provider
     $model = (string)($flags['model'] ?? '');
     if ($model === '') $model = (string)Config::get('ollama.defaultModel', 'llama3.2:latest');
@@ -580,9 +614,9 @@ if ($argc >= 2 && $argv[1] === 'chat') {
         . "Answer clearly and naturally; use Markdown when it helps. You are running 100% locally "
         . "on the user's own machine via Ollama — no data leaves the device. If you're unsure, say so.";
 
-    // One-shot JSON mode: read {model?, system?, messages:[{role,content}…]} on stdin,
-    // print {reply, model}. For programmatic callers (and any future binding).
-    if (in_array('--json', $argv, true)) {
+    // One-shot JSON mode (stateless): read {model?, system?, messages:[{role,content}…]}
+    // on stdin, print {reply, model}. For programmatic callers (and any future binding).
+    if ($jsonMode) {
         $payload = json_decode((string)stream_get_contents(STDIN), true);
         $sys = is_array($payload) ? trim((string)($payload['system'] ?? '')) : '';
         if (is_array($payload) && !empty($payload['model'])) $model = (string)$payload['model'];
@@ -601,6 +635,17 @@ if ($argc >= 2 && $argv[1] === 'chat') {
         exit(0);
     }
 
+    // --- Persisted session, so the ADE sidebar can list + resume a conversation. A
+    // --session id is reused across launches (resume that thread); omit it for a fresh,
+    // auto-named one. The id is also a filename, so keep it to a safe charset.
+    $sessionId = (string)($flags['session'] ?? '');
+    if ($sessionId !== '' && !preg_match('/^[\w.-]+$/', $sessionId)) $sessionId = '';
+    if ($sessionId === '') $sessionId = 'chat_' . date('Ymd_His') . '_' . substr(bin2hex(@random_bytes(4) ?: pack('N', mt_rand())), 0, 6);
+    $sessFile = $chatsDir . '/' . $sessionId . '.json';
+    $loaded = is_file($sessFile) ? json_decode((string)@file_get_contents($sessFile), true) : null;
+    $priorMsgs = (is_array($loaded) && is_array($loaded['messages'] ?? null)) ? $loaded['messages'] : [];
+    $createdAt = is_array($loaded) ? (int)($loaded['created'] ?? time()) : time();
+
     // Interactive REPL — plain line input, streamed reply. Clean in the embedded
     // ADE terminal and in a real shell alike.
     $c = function (string $s, string $code) { return "\033[" . $code . "m" . $s . "\033[0m"; };
@@ -608,9 +653,40 @@ if ($argc >= 2 && $argv[1] === 'chat') {
         echo $c('✗ ' . ModelClient::activeLabel() . ' not reachable.', '31') . " Is Ollama running?  (start it with: ollama serve)\n";
         exit(1);
     }
+    // Full transcript (system + any resumed turns). Saved verbatim; only a recent slice
+    // is sent to the model (below) so context stays bounded on long chats.
+    $history = [['role' => 'system', 'content' => $persona]];
+    foreach ($priorMsgs as $m) {
+        if (!is_array($m)) continue;
+        $role = ($m['role'] ?? '') === 'assistant' ? 'assistant' : (($m['role'] ?? '') === 'user' ? 'user' : '');
+        $content = (string)($m['content'] ?? '');
+        if ($role !== '' && trim($content) !== '') $history[] = ['role' => $role, 'content' => $content];
+    }
+    $saveSession = function () use ($sessFile, $chatsDir, $sessionId, &$model, &$history, $createdAt) {
+        $msgs = array_values(array_filter($history, fn($m) => ($m['role'] ?? '') !== 'system'));
+        if (!$msgs) return;
+        $title = 'Chat';
+        foreach ($msgs as $m) {
+            if (($m['role'] ?? '') === 'user' && trim((string)$m['content']) !== '') {
+                $title = trim(preg_replace('/\s+/', ' ', (string)$m['content']));
+                $title = function_exists('mb_substr') ? mb_substr($title, 0, 64) : substr($title, 0, 64);
+                break;
+            }
+        }
+        @mkdir($chatsDir, 0755, true);
+        @file_put_contents($sessFile, json_encode(['id' => $sessionId, 'model' => $model, 'title' => $title, 'created' => $createdAt, 'updated' => time(), 'messages' => $msgs], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+    };
+
     echo $c('💬 OllamaDev chat', '1;36') . '  ·  ' . $c($model, '36') . '  ·  ' . ModelClient::activeLabel() . "\n";
     echo $c("General chat — no tools, no file edits. Type to talk. /help for commands, /exit (or Ctrl-D) to leave.\n", '2');
-    $history = [['role' => 'system', 'content' => $persona]];
+    // Replay a resumed conversation so you can read it before continuing.
+    if (count($history) > 1) {
+        echo $c("\n— resumed · " . (count($history) - 1) . " messages —\n", '2');
+        foreach ($history as $m) {
+            if ($m['role'] === 'user') echo $c("\nyou ▸ ", '1;32') . $m['content'] . "\n";
+            elseif ($m['role'] === 'assistant') echo $c("\n" . $model . " ▸ ", '1;36') . $m['content'] . "\n";
+        }
+    }
     while (true) {
         echo $c("\nyou ▸ ", '1;32');
         $line = fgets(STDIN);
@@ -632,12 +708,13 @@ if ($argc >= 2 && $argv[1] === 'chat') {
         }
         $history[] = ['role' => 'user', 'content' => $line];
         echo $c("\n" . $model . " ▸ ", '1;36');
-        $reply = (string)$client->chatWithModel($model, $history, function (string $delta) { echo $delta; flush(); }, false);   // answer only, no chain-of-thought
+        // Send a bounded recent window to the model (system + last ~48 turns).
+        $ctx = count($history) > 49 ? array_merge([$history[0]], array_slice($history, -48)) : $history;
+        $reply = (string)$client->chatWithModel($model, $ctx, function (string $delta) { echo $delta; flush(); }, false);   // answer only, no chain-of-thought
         echo "\n";
         if ($reply === '') { echo $c("(no reply — is \"$model\" pulled? try: ollamadev models pull $model)\n", '33'); array_pop($history); continue; }
         $history[] = ['role' => 'assistant', 'content' => $reply];
-        // Cap the transcript so a long session can't grow unbounded (keep system + last ~48 turns).
-        if (count($history) > 49) $history = array_merge([$history[0]], array_slice($history, -48));
+        $saveSession();   // persist after each turn so the threads sidebar reflects it
     }
     exit(0);
 }

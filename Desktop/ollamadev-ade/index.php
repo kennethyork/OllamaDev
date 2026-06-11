@@ -114,6 +114,18 @@ $app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $
     $b->bind('sttClearHistory',  fn(): bool => $bx->sttClearHistory());
     $b->bind('openExternal',     fn(string $url): bool => $bx->openExternal($url));
     $b->bind('proxyFetch',       fn(string $url): array => $bx->proxyFetch($url));
+    $b->bind('termResize',       fn(string $id, int $cols, int $rows): bool => $bx->termResize($id, $cols, $rows));
+    $b->bind('setCrewModels',    fn(array $models): array => $bx->setCrewModels($models));
+    $b->bind('crewSteer',        fn(int $coder, string $msg): array => $bx->crewSteer($coder, $msg));
+    $b->bind('skillsList',       fn(): array => $bx->skillsList());
+    $b->bind('skillsGet',        fn(string $name): array => $bx->skillsGet($name));
+    $b->bind('skillsSave',       fn(string $name, string $description, string $body): array => $bx->skillsSave($name, $description, $body));
+    $b->bind('skillsRemove',     fn(string $name): array => $bx->skillsRemove($name));
+    $b->bind('hooksList',        fn(): array => $bx->hooksList());
+    $b->bind('hooksAdd',         fn(string $event, string $command, string $matcher = ''): array => $bx->hooksAdd($event, $command, $matcher));
+    $b->bind('hooksRemove',      fn(string $event, int $index): array => $bx->hooksRemove($event, $index));
+    $b->bind('chatList',         fn(): array => $bx->chatList());
+    $b->bind('chatDelete',       fn(string $id): array => $bx->chatDelete($id));
 });
 
 $app->run();

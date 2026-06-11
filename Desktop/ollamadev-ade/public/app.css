@@ -466,8 +466,11 @@ textarea.field { min-height: 84px; resize: vertical; line-height: 1.5; }
    match the session Model dropdown + buttons, so it reads as part of the ADE. The
    embedded terminal reuses the renderer; its inner header is hidden (the pane already
    has its own title chrome). */
-.chat-view { background: var(--bg); }
+/* Chat window — a clean conversation pane (model picker + New chat + terminal). */
+.chat-view { background: var(--bg); display: flex; flex-direction: column; }
 .chat-bar { display: flex; align-items: center; gap: 8px; padding: 7px 11px; border-bottom: 1px solid var(--border); background: var(--bg2); flex: 0 0 auto; }
+.chat-newbar { background: var(--bg3); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r-sm); height: 30px; padding: 0 11px; font-size: 12px; line-height: 28px; cursor: pointer; transition: border-color .15s, background-color .15s; }
+.chat-newbar:hover { border-color: var(--accent); background-color: var(--elev); }
 .chat-bar .chat-label { font-size: 14px; line-height: 1; }
 /* Model picker — same themed look as the top-bar / session model selects. */
 .chat-model {
@@ -482,12 +485,6 @@ textarea.field { min-height: 84px; resize: vertical; line-height: 1.5; }
 .chat-model:hover { border-color: var(--faint); background-color: var(--elev); }
 .chat-model:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .chat-model option { background: var(--bg2); color: var(--fg); }
-.chat-restart {
-    background: var(--bg3); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r-sm);
-    height: 30px; padding: 0 11px; font-size: 12px; cursor: pointer; line-height: 28px;
-    transition: border-color .15s, background-color .15s;
-}
-.chat-restart:hover { border-color: var(--accent); background-color: var(--elev); }
 .chat-bar .chat-hint { margin-left: auto; font-size: 11px; white-space: nowrap; }
 .chat-bar .chat-hint code { font-family: var(--mono); }
 .chat-host { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }

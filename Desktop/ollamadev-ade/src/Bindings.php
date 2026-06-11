@@ -31,6 +31,7 @@ final class Bindings
         'openExternal', 'proxyFetch', 'crewModels', 'setCrewModels', 'crewSteer',
         'skillsList', 'skillsGet', 'skillsSave', 'skillsRemove',
         'hooksList', 'hooksAdd', 'hooksRemove',
+        'chatList', 'chatDelete',
     ];
 
     // Dispatch an allow-listed call with positional args (used by server.php).
@@ -204,6 +205,22 @@ final class Bindings
         @mkdir(dirname($f), 0755, true);
         @file_put_contents($f, json_encode($c, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
         return $this->crewModels();
+    }
+
+    // --- Chat threads/history — the 💬 Chat window's sidebar. Backed by the CLI's
+    // `chat list` / `chat delete`, so saved conversations (~/.ollamadev/chats) are the
+    // single source of truth, shared with the terminal. Starting/resuming a thread is
+    // done by the terminal itself (`ollamadev chat --session <id>`), not a binding. ----
+    public function chatList(): array
+    {
+        $out = shell_exec('php ' . escapeshellarg($this->cli) . ' chat list --json 2>/dev/null');
+        $d = json_decode((string) $out, true);
+        return is_array($d) && isset($d['chats']) ? $d : ['chats' => []];
+    }
+    public function chatDelete(string $id): array
+    {
+        if (trim($id) !== '') @shell_exec('php ' . escapeshellarg($this->cli) . ' chat delete ' . escapeshellarg($id) . ' 2>/dev/null');
+        return $this->chatList();
     }
 
     public function homeDir(): string { return getenv('HOME') ?: ''; }

@@ -2157,25 +2157,26 @@ var Stt = {
     }
 };
 
-// ---- 💬 Chat — a dedicated canvas window that runs `ollamadev chat -m <model>` in its
-// OWN terminal, with a model picker in the window. A plain, tool-free chatbot (no agent,
-// no tools, no file access, no permissions — just conversation), line-based like the
-// ollamadev CLI so it renders cleanly here. Fully additive — the ollamadev CLI agent
-// terminals are untouched. The embedded session reuses the Terminal renderer (ANSI +
-// streaming), so it behaves exactly like any other canvas terminal. ----
+// ---- 💬 Chat — a dedicated canvas window for plain, tool-free conversation (no agent,
+// no tools, no file access — just talk), with a model picker and a New-chat button. Each
+// conversation runs `ollamadev chat --session <id>`, which persists it to
+// ~/.ollamadev/chats/<id>.json (resumable, and listable from the terminal with
+// `ollamadev chat list`) — but the window stays clean, no thread sidebar. The conversation
+// renders in the embedded Terminal (ANSI + streaming), line-based like the CLI. Fully
+// additive — the agent terminals are untouched. ----
 var Chat = {
-    term: null, id: null, model: '', started: false,
+    term: null, id: null, model: '', session: '', started: false,
     bind: function () {
         var self = this;
         var sel = $('#chatModel'); if (sel) sel.onchange = function () { self.setModel(sel.value); };
-        var rb = $('#chatRestart'); if (rb) rb.onclick = function () { self.restart(); };
+        var nb = $('#chatNew'); if (nb) nb.onclick = function () { self.newChat(); };
     },
+    newId: function () { return 'chat_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8); },
     // The chat's OWN last-used model, remembered across restarts — independent of the
-    // session Model dropdown. So reopening the chat lands on the model you last chatted with.
+    // session Model dropdown. So a NEW chat defaults to the model you last chatted with.
     saved: function () { try { return localStorage.getItem('ade.chatModel') || ''; } catch (e) { return ''; } },
     remember: function (m) { try { if (m) localStorage.setItem('ade.chatModel', m); } catch (e) {} },
-    // Fill the in-window model picker from your installed models (same source as the
-    // session Model dropdown, minus the 'shell' helper). Defaults to the chat's last model.
+    // Fill the in-window model picker from your installed models (minus the 'shell' helper).
     fillModels: function () {
         var sel = $('#chatModel'), src = $('#modelSelect'); if (!sel || !src) return;
         var models = [].slice.call(src.options).map(function (o) { return o.value; }).filter(function (m) { return m && m !== 'shell' && m !== 'chat'; });
@@ -2185,14 +2186,15 @@ var Chat = {
         sel.innerHTML = models.map(function (m) { return '<option' + (m === want ? ' selected' : '') + '>' + esc(m) + '</option>'; }).join('');
         sel.value = want; this.model = want;
     },
-    // Called when the Chat window is shown on the canvas. Boots the ollama-run session
-    // once; on later (re)mounts just re-fit the embedded terminal to the pane size.
+    // Shown on the canvas: fill the picker and boot a conversation once; later (re)mounts
+    // just re-fit the embedded terminal to the pane size.
     onShow: function () {
         this.fillModels();
-        if (!this.started) this.start(this.model);
+        if (!this.started) { if (!this.session) this.session = this.newId(); this.start(this.model); }
         else if (this.term && this.term.fit) setTimeout(function () { try { Chat.term.fit(); } catch (e) {} }, 30);
     },
-    // Start a vanilla `ollama run <model>` in a fresh pty, rendered in the chat host.
+    // Launch (or resume) a conversation: `ollamadev chat --session <id> -m <model>` in a
+    // fresh embedded terminal. A new id => fresh chat; an existing id => the CLI replays it.
     start: function (model) {
         model = model || this.model || App.realModel();
         var host = $('#chatHost'); if (!host) return;
@@ -2201,41 +2203,42 @@ var Chat = {
             return;
         }
         if (!/^[\w./:@-]+$/.test(model)) { host.innerHTML = '<div class="chat-empty dim">Unsupported model name.</div>'; return; }
-        this.model = model; this.started = true; this.remember(model);   // persist as the chat's model
-        host.innerHTML = '';
+        if (!this.session) this.session = this.newId();
+        this._killTerm();
+        this.model = model; this.started = true; this.remember(model);
         var pane = document.createElement('div'); pane.className = 'term-pane chat-term'; host.appendChild(pane);
         var dir = (App.cwd && App.cwd !== '.') ? App.cwd : '';
-        var id = 'chat_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+        var id = 'chatpty_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
         var t = new Terminal(id, model, dir); t.kind = 'chat';
         this.term = t; this.id = id;
-        var cli = App.cli || 'ollamadev';
+        var cli = App.cli || 'ollamadev', session = this.session;
         Promise.resolve(window.termCreate(id, model, dir)).then(function () {
             t.mount(pane);
-            // Launch `ollamadev chat` — a plain, tool-free chat (no agent, no file access).
-            // It's line-based like the ollamadev CLI, so it renders cleanly in the embedded
-            // terminal (unlike `ollama run`, whose readline TUI can't position the cursor here).
-            setTimeout(function () { try { window.termWrite(id, strToB64(cli + ' chat -m ' + model + '\n')); } catch (e) {} }, 350);
+            // `--session <id>` persists the conversation (and resumes it next time).
+            setTimeout(function () { try { window.termWrite(id, strToB64(cli + ' chat --session ' + session + ' -m ' + model + '\n')); } catch (e) {} }, 350);
         }).catch(function () {});
     },
-    // Switch the chat to another model (kills the old ollama-run, starts a new one).
+    // Start a brand-new conversation (new session id) on your current model.
+    newChat: function () {
+        this.session = this.newId();
+        this.start(this.model);
+        var h = $('#chatHost'); if (h) { var s = h.querySelector('.term-screen'); if (s) s.focus(); }
+        banner('💬 new chat', 'ok');
+    },
+    // Switch the model of the CURRENT conversation (resumes it with the new model).
     setModel: function (model) {
         if (!model || model === this.model) return;
-        this.dispose();
-        this.model = model;
-        var sel = $('#chatModel'); if (sel && sel.value !== model) sel.value = model;   // keep the picker in sync
-        this.remember(model);   // the chat remembers its own model across restarts
+        this.remember(model);
         try { App.lastModel = model; localStorage.setItem('ade.lastModel', model); } catch (e) {}
         this.start(model);
         banner('💬 chat → ' + model, 'ok');
     },
-    // New chat: restart ollama run on the same model (clears the conversation).
-    restart: function () { var m = this.model; this.dispose(); this.start(m); banner('💬 new chat', 'ok'); },
-    // Kill the ollama-run pty + stop polling; clear the host. Called on window close.
-    dispose: function () {
+    _killTerm: function () {
         if (this.term) { try { this.term.close(); } catch (e) {} this.term = null; this.id = null; }
-        this.started = false;
         var host = $('#chatHost'); if (host) host.innerHTML = '';
-    }
+    },
+    // Window closed: stop the embedded terminal. Keep `session` so reopening resumes it.
+    dispose: function () { this._killTerm(); this.started = false; }
 };
 
 var App = {
