@@ -868,6 +868,36 @@ ok('Chat remembers its OWN last-used model across restarts',
     strpos($ade, "localStorage.getItem('ade.chatModel')") !== false && strpos($ade, "localStorage.setItem('ade.chatModel'") !== false &&
     strpos($ade, 'this.saved()') !== false);
 
+// Behavioral (hermetic): `ollamadev chat` must show a reasoning model's ANSWER, not its
+// chain-of-thought. A tiny fake Ollama server (no GPU/model) emits a `thinking` field;
+// the chat must drop it. Guards the OllamaClient $includeThinking fix in BOTH modes.
+$fakeSrv  = __DIR__ . '/fake-ollama.php';
+$fakePort = 41700 + (getmypid() % 180);
+$fakeHost = 'http://127.0.0.1:' . $fakePort;
+$chatHome = sys_get_temp_dir() . '/odv_chat_test_' . getmypid();
+@mkdir($chatHome, 0755, true);
+$fproc = @proc_open(escapeshellarg(PHP_BINARY) . ' -S 127.0.0.1:' . $fakePort . ' ' . escapeshellarg($fakeSrv),
+    [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $fpipes);
+if (is_resource($fproc)) {
+    usleep(500000);   // let the server bind
+    $cenv = ['HOME' => $chatHome];   // clean config → engine defaults (streaming on, etc.)
+    // Non-stream path (chat --json): the reply is the answer only.
+    [$jout] = run_bin(['chat', '--json', '--host', $fakeHost], '{"messages":[{"role":"user","content":"hi"}]}', $cenv);
+    $jr = json_decode(trim($jout), true);
+    ok('chat --json returns the answer, NOT the chain-of-thought',
+        is_array($jr) && ($jr['reply'] ?? '') === 'Hello there, world.' && strpos($jout, 'REASONING_LEAK_SENTINEL') === false, trim($jout));
+    // Streaming REPL path — the exact shape that leaked (a thinking-only chunk first).
+    [$rout] = run_bin(['chat', '-m', 'fake-reasoner:latest', '--host', $fakeHost], "hi\n/exit\n", $cenv);
+    $rclean = preg_replace('/\x1b\[[0-9;]*m/', '', $rout);
+    ok('chat REPL streams the answer, NOT the chain-of-thought',
+        strpos($rclean, 'Hello there, world.') !== false && strpos($rclean, 'REASONING_LEAK_SENTINEL') === false, trim($rclean));
+    foreach ($fpipes as $p) { if (is_resource($p)) fclose($p); }
+    @proc_terminate($fproc); @proc_close($fproc);
+} else {
+    ok('fake Ollama server spawns (chat chain-of-thought test)', false, 'could not start php -S');
+}
+@exec('rm -rf ' . escapeshellarg($chatHome) . ' 2>/dev/null');
+
 echo "\n== Auto-remember (self-populating memory) ==\n";
 ok('Memory::autoRemember exists + dedupes', strpos($src, 'function autoRemember(') !== false && strpos($src, 'title dedupe') !== false);
 ok('crew auto-remembers after a run (run + resume)', strpos($src, 'function rememberFacts(') !== false && substr_count($src, 'self::rememberFacts(') >= 2);
