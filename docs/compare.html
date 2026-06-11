@@ -41,7 +41,28 @@
   </div>
 </header>
 
-<section id="moat">
+<section id="see" style="padding-top:8px;">
+  <div class="wrap">
+    <div class="showcase">
+      <div class="frame">
+        <div class="frame-bar"><span class="d r"></span><span class="d y"></span><span class="d g"></span><span class="url">🛰 live crew topology · 📋 board</span></div>
+        <img src="img/ade-cockpit.png" alt="OllamaDev's live crew topology and board — a local multi-agent crew" loading="lazy" width="2000">
+      </div>
+      <div class="show-text">
+        <span class="eyebrow">Same workflow, your machine</span>
+        <h2>A multi-agent crew — without the cloud.</h2>
+        <p>The cloud agent-canvases (cnvs, BridgeSpace, Plyrium Forge) put a team of agents on a board. OllamaDev does the same — a Director, isolated-worktree coders, an Auditor gate, a live topology — except every agent runs on <b>your</b> hardware: free, offline, nothing uploaded.</p>
+        <ul>
+          <li>Worktree-per-coder isolation + an adversarial <b>Auditor</b> gate</li>
+          <li>A live <b>topology</b>: branches, files, audit verdicts, activity</li>
+          <li>CLI <em>and</em> desktop <em>and</em> web — one shared engine</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="moat" style="border-top:1px solid var(--border);">
   <div class="wrap">
     <div class="section-head">
       <span class="eyebrow">The moat</span>
@@ -86,7 +107,7 @@
           <tr><th>Dimension</th><th class="col-own">OllamaDev</th><th>Hosted / cloud agents</th></tr>
         </thead>
         <tbody>
-          <tr><td class="feat">AI provider</td><td class="own">Local (Ollama / LM Studio)</td><td>Hosted, cloud-only</td></tr>
+          <tr><td class="feat">AI provider</td><td class="own">Local (your Ollama models)</td><td>Hosted, cloud-only</td></tr>
           <tr><td class="feat">Privacy</td><td class="own">100% on-device</td><td>Code sent to servers</td></tr>
           <tr><td class="feat">Cost</td><td class="own">Free</td><td>Subscription / per-token</td></tr>
           <tr><td class="feat">Air-gapped operation</td><td class="own">Yes — enforced &amp; attestable</td><td>No (needs the network)</td></tr>
@@ -108,7 +129,38 @@
   </div>
 </section>
 
-<section id="honest">
+<section id="canvases">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Agent-canvases</span>
+      <h2>vs the cloud agent-canvases</h2>
+      <p>The products OllamaDev's ADE is modeled against — cnvs.dev, BridgeSpace, and Plyrium Forge.</p>
+    </div>
+    <div class="cmp">
+      <table class="compare">
+        <thead>
+          <tr><th></th><th class="col-own">OllamaDev</th><th>cnvs.dev</th><th>BridgeSpace</th><th>Plyrium Forge</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="feat">Models</td><td class="own">Local Ollama</td><td>cloud</td><td>cloud</td><td>cloud + local</td></tr>
+          <tr><td class="feat">Runs offline / air-gapped</td><td class="own">Yes, by default</td><td>No</td><td>No</td><td>optional</td></tr>
+          <tr><td class="feat">Cost</td><td class="own">Free</td><td>paid</td><td>paid</td><td>$19–59/mo</td></tr>
+          <tr><td class="feat">Surfaces</td><td class="own">CLI · desktop · web</td><td>macOS app</td><td>desktop</td><td>Electron</td></tr>
+          <tr><td class="feat">Infinite agent canvas</td><td class="own">Yes</td><td>Yes</td><td>—</td><td>—</td></tr>
+          <tr><td class="feat">Worktree-per-agent + Auditor gate</td><td class="own">Yes</td><td>—</td><td>partial</td><td>Yes</td></tr>
+          <tr><td class="feat">Live agent topology</td><td class="own">Yes</td><td>activity feed</td><td>—</td><td>Yes</td></tr>
+          <tr><td class="feat">Voice-driven crew</td><td class="own">Yes</td><td>Yes</td><td>—</td><td>—</td></tr>
+          <tr><td class="feat">Graph memory (<code>[[links]]</code>)</td><td class="own">Yes</td><td>—</td><td>Yes</td><td>—</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="text-align:center;margin-top:18px;color:var(--fg-dim);font-size:14px;">
+      You give up frontier-model horsepower; you get a private, free, cross-platform crew that runs entirely on your machine.
+    </p>
+  </div>
+</section>
+
+<section id="honest" style="background:var(--bg-soft);border-top:1px solid var(--border);border-bottom:1px solid var(--border);">
   <div class="wrap">
     <div class="section-head">
       <span class="eyebrow">Straight talk</span>

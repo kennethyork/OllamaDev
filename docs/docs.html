@@ -71,7 +71,12 @@
     </div>
 
     <h2 id="three-ways" class="anchor">CLI · Desktop · Web — what each needs</h2>
-    <p>OllamaDev runs three ways, all over the <strong>same local engine</strong> (Ollama/LM Studio), the same agent, tools, crew, and the same shared <code>~/.ollamadev</code> data (sessions, memory, crew packs, skills). Pick one or use all three — work flows between them.</p>
+    <p>OllamaDev runs three ways, all over the <strong>same local engine</strong> (your Ollama models), the same agent, tools, crew, and the same shared <code>~/.ollamadev</code> data (sessions, memory, crew packs, skills). Pick one or use all three — work flows between them. The desktop and web app share one frontend: an <strong>infinite canvas</strong> where every tool is a draggable window.</p>
+
+    <div class="frame" style="margin:18px 0 22px;">
+      <div class="frame-bar"><span class="d r"></span><span class="d y"></span><span class="d g"></span><span class="url">OllamaDev ADE — desktop &amp; web</span></div>
+      <img src="img/ade-canvas.png" alt="The OllamaDev ADE canvas with terminals, editor, live crew topology, voice, browser preview, and a board" loading="lazy" width="2000">
+    </div>
 
     <p><strong>Shared prerequisite (all three):</strong> a local model server running with at least one model:</p>
 <pre class="code">ollama serve              <span class="cm"># or LM Studio's local server</span>
@@ -95,7 +100,7 @@ ollamadev                 <span class="cm"># interactive · or: ollamadev crew "
     <p>From source instead: PHP 8.0+, then <code>make install</code> (see Installation). Needs only <code>php</code> + <code>curl</code>.</p>
 
     <h3>Desktop (ADE)</h3>
-    <p>Native windowed GUI (file tree, terminals, crew board, memory graph). Download the archive for your OS, unzip, and run — it bundles the CLI and the Boson libraries:</p>
+    <p>Native windowed GUI — an infinite canvas of draggable windows (terminals, editor, files, the live crew topology, voice, browser preview, board). Download the archive for your OS, unzip, and run — it bundles the CLI and the Boson libraries:</p>
 <pre class="code">./OllamaDev-ADE           <span class="cm"># Windows: OllamaDev-ADE.bat</span><button class="copy-btn">Copy</button></pre>
     <p><strong>Needs PHP 8.4+</strong> (the Boson WebView runtime). From source: <code>composer install</code> then <code>php index.php</code>.</p>
 
@@ -105,15 +110,15 @@ ollamadev                 <span class="cm"># interactive · or: ollamadev crew "
 <span class="cm"># from source:  cd Desktop/ollamadev-ade && composer serve</span><button class="copy-btn">Copy</button></pre>
     <p><strong>Needs PHP 8.0+</strong> and a browser — web mode doesn't load Boson, so the 8.4 desktop requirement doesn't apply (running it from the prebuilt archive needs no Composer at all). Localhost-only by default; for remote access see <a href="#selfhost">Self-hosting on a VPS</a>.</p>
 
-    <p><strong>Using it</strong> — open <code>http://localhost:41434</code> and you get the <em>same</em> ADE as the desktop (it's the identical UI; only the bridge differs), so everything in these docs applies. A quick tour:</p>
+    <p><strong>Using it</strong> — open <code>http://localhost:41434</code> and you get the <em>same</em> ADE as the desktop (identical UI; only the bridge differs). The workspace is one <strong>infinite, pannable/zoomable canvas</strong> — every tool is a draggable window. A quick tour:</p>
     <ol>
-      <li><strong>Open a project</strong> — click <em>📂 Open</em> and point it at a folder; the file tree, terminals, and Crew all work in that directory.</li>
-      <li><strong>Terminals</strong> — <em>+ Terminal</em> launches the live CLI; ⤢ focuses one full-screen, ⤡ restores it. On a phone, use the touch bar (type a line + Enter, or the Tab/Esc/↑↓/Ctrl-C keys).</li>
-      <li><strong>Crew</strong> — the <em>👥 Crew</em> button runs a multi-agent task; watch it on the <strong>Board</strong> tab (To-do → Doing → Done) with a live pane per coder, and 💡 idea cards when it finishes.</li>
-      <li><strong>Memory &amp; files</strong> — the <strong>Graph</strong> tab shows your knowledge graph; the sidebar edits files (saved straight to disk).</li>
-      <li><strong>Voice</strong> — the 🎤 mic dictates locally (auto-detects a Whisper engine, CPU-only); a header dropdown picks the voice model and 🎙 History lists past transcriptions. Browsers need HTTPS/localhost for the mic — see Self-hosting. Full details under <a href="#context">Context &amp; input</a>.</li>
+      <li><strong>Add windows</strong> — the <em>＋ Add</em> button (or right-click the canvas) drops a Terminal, Editor, Files, Search, Board, Graph, Browser, Voice, Crew topology, Roles, Skills, or Review window where you click. Drag the header to move, the corner to resize, ⤢ to focus.</li>
+      <li><strong>Open a project</strong> — the <em>☰</em> drawer holds the rail and the <strong>Projects</strong> switcher; pick a folder and the whole canvas (windows, positions, session) is restored per project.</li>
+      <li><strong>Terminals</strong> — real PTYs with full-screen TUI support (vim, htop). On a phone, use the touch bar (type a line + Enter, or the Tab/Esc/↑↓/Ctrl-C keys).</li>
+      <li><strong>Crew + cockpit</strong> — <em>👥 Crew</em> runs a multi-agent task; the <strong>🛰 Crew topology</strong> window shows it live (each coder's branch, the files it's touching, the Auditor's verdict, and ✎/👁/⚡ activity) alongside the Board.</li>
+      <li><strong>Voice control</strong> — the <strong>🎙 Voice</strong> window is press-to-talk (bundled Whisper, CPU-only): dictate to a terminal, open windows, or <em>“start a crew to add tests”</em>. Browsers need HTTPS/localhost for the mic — see Self-hosting.</li>
     </ol>
-    <p>Because it shares <code>~/.ollamadev</code> with the CLI and desktop, your sessions, memory, and crew packs are the same across all three.</p>
+    <p>Because it shares <code>~/.ollamadev</code> with the CLI and desktop, your sessions, memory, crew packs, and skills are the same across all three.</p>
 
     <h2 id="installation" class="anchor">Installation</h2>
     <h3>Download a binary (easiest)</h3>
@@ -312,14 +317,15 @@ ollamadev crew "big refactor" --hosts host-a,host-b --panes<button class="copy-b
       <li><strong>Per-subtask roles</strong> — the Director tags each subtask with a <strong>role</strong> from a catalog (built-ins: <code>coder</code>, <code>tester</code>, <code>docs</code>, <code>refactor</code>, <code>security</code>), and each coder runs with that role's persona, optional pinned model, and permission mode. The role shows on each card of the live board.</li>
       <li><strong>Custom roles</strong> — add your own: <code>crew role add &lt;name&gt; "&lt;persona&gt;" [--desc "…"] [--model &lt;m&gt;] [--readonly]</code>; manage with <code>crew role list | show | remove</code>. Or use the <strong>🎭 Manage roles</strong> panel in the desktop/web Crew screen. Roles are plain JSON in <code>~/.ollamadev/crew-roles/</code>, one catalog shared by CLI, desktop, and web.</li>
       <li><strong>Per-role models</strong> — <code>--director-model</code>, <code>--coder-model</code>, <code>--auditor-model</code>, <code>--researcher-model</code> (a role can also pin its own).</li>
-      <li><strong>Parallel + multi-host</strong> — <code>--hosts a,b,c</code> spreads Coders across local model servers.</li>
-      <li><strong>Live panes</strong> — <code>--panes</code> opens one tmux pane per Coder (logs still written without tmux).</li>
+      <li><strong>Parallel coders</strong> — <code>--parallel [N]</code> runs coders concurrently on one box (bounded pool; set <code>OLLAMA_NUM_PARALLEL</code> for true concurrent inference), or <code>--hosts a,b,c</code> spreads them across local model servers.</li>
+      <li><strong>Live topology (cockpit)</strong> — in the ADE, the <strong>🛰 Crew topology</strong> window maps the run live: each coder's branch, the files it's touching, the Auditor's verdict, and real-time activity (✎ editing / 👁 reading / ⚡ running). Steer a coder from the Director box, or <code>--panes</code> for one tmux pane per Coder.</li>
+      <li><strong>Voice-driven</strong> — in the ADE, launch and steer the crew by voice: <em>“start a crew to add tests”</em>, <em>“tell coder 2 to focus on edge cases”</em>.</li>
       <li><strong>Review gating</strong> — <code>--review</code> holds every branch for review; nothing auto-merges. Self-repo edits are gated automatically.</li>
-      <li><strong>Team skill packs</strong> — Crews are seeded with relevant skills by focus; disable with <code>--no-skills</code>.</li>
+      <li><strong>Team skill packs</strong> — Crews are seeded with relevant skills by focus; every by-project-type team also auto-loads its own skill. Disable with <code>--no-skills</code>.</li>
     </ul>
 
     <h2 id="skills" class="anchor">Skills</h2>
-    <p>Skills are reusable instruction packs (<code>SKILL.md</code> folders) the model loads on demand via progressive disclosure — only the catalog of names/descriptions sits in the prompt; the full body is fetched when a skill is invoked. You can author your own and share them.</p>
+    <p>Skills are reusable instruction packs (<code>SKILL.md</code> folders) the model loads on demand via progressive disclosure — only the catalog of names/descriptions sits in the prompt; the full body is fetched when a skill is invoked. <strong>60+ ship built in</strong>: <em>capability</em> skills (payments-money, testing-discipline, auth-security…) that crews load by focus, plus a <em>per-team starter</em> for every crew team. View, create, edit, or delete any of them in the ADE's <strong>🧩 Skills</strong> window (customizing a built-in saves an override), or author your own from the CLI and share them.</p>
 <pre class="code">ollamadev skills                       <span class="cm"># list discovered skills</span>
 ollamadev skills new my-skill          <span class="cm"># scaffold a SKILL.md</span>
 ollamadev skills install &lt;dir|git-url|.tar.gz|.zip&gt;
