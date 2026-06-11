@@ -903,12 +903,18 @@ Terminal.prototype.fit = function () {
         if (g && (g.cols !== this._cols || g.rows !== this._rows)) { this._cols = g.cols; this._rows = g.rows; try { window.termResize(this.id, g.cols, g.rows); } catch (e) {} }
         return;
     }
+    // Were we pinned to the bottom before this reflow? (The content has already
+    // re-wrapped to the new width by the time the ResizeObserver fires.)
+    var atBottom = this.screen.scrollHeight - this.screen.scrollTop - this.screen.clientHeight < 60;
     var cols = Math.max(20, Math.floor((this.screen.clientWidth - 6) / m.cw));
     var rows = Math.max(6, Math.floor((this.screen.clientHeight - 4) / m.ch));
     if (cols === this._cols && rows === this._rows) return;
     this._cols = cols; this._rows = rows;
     try { window.termResize(this.id, cols, rows); } catch (e) {}
     if (this.alt && this.grid) { this.grid.resize(cols, rows); this.renderGrid(); }
+    // Stay pinned to the bottom so the live prompt stays in view when the window is
+    // made narrower/shorter (the reflow would otherwise leave you scrolled up).
+    else if (atBottom) { var s = this.screen; (window.requestAnimationFrame || setTimeout)(function () { s.scrollTop = s.scrollHeight; }); }
 };
 Terminal.prototype.poll = function () {
     var self = this; this.polling = true;

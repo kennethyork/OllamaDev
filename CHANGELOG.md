@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.8.81 (2026-06-11) — the Chat window fits small windows
+
+### Fixed
+- **The Chat window's toolbar no longer overflows when the window is narrow.** The "chat · no tools" hint drops first, then the model picker shrinks (with an ellipsis); the 💬 label and ↻ New-chat button stay usable all the way down to the minimum window width. A terminal now also stays **pinned to the bottom on resize**, so the live prompt stays in view when you shrink the window instead of leaving you scrolled up.
+
 ## v0.8.80 (2026-06-11) — chat sessions persist + a desktop-bindings drift fix
 
 ### Added
