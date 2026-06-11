@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.8.79 (2026-06-11) — chat shows the answer, not the chain-of-thought
+
+### Fixed
+- **`ollamadev chat` no longer prints a reasoning model's chain-of-thought** — it streams only the final answer. Reasoning models (gpt-oss, qwen3, …) put their internal reasoning in Ollama's `thinking` field, which was leaking into the conversation; a plain chat should show the reply, not the reasoning. `OllamaClient::chatWithModel` gained an `$includeThinking` flag (default **on**; the `chat` command turns it **off**) — the agent path is unchanged.
+
+### Changed
+- The website's Chat demo now features **gpt-oss:20b**.
+
 ## v0.8.78 (2026-06-11) — a plain Chat window (ollamadev chat)
 
 ### Added
