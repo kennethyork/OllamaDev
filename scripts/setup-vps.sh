@@ -7,23 +7,26 @@
 # cache stays small on limited RAM. Run it ON the VPS.
 #
 # Usage:
-#   scripts/setup-vps.sh                 # qwen2.5-coder:7b  (~4.7 GB, fastest on CPU — default)
+#   scripts/setup-vps.sh                 # qwen3.5:9b       (~6.6 GB, tool-capable, default — matches local crew)
+#   scripts/setup-vps.sh --coder7b       # qwen2.5-coder:7b (~4.7 GB, leanest / fastest on CPU)
 #   scripts/setup-vps.sh --coder14b      # qwen2.5-coder:14b (~9 GB, stronger but slower)
-#   scripts/setup-vps.sh --coder7b       # explicit 7b
 #   scripts/setup-vps.sh --ctx 4096      # override the context cap (default 8192)
 #
-# Why these choices: the 22 GB+ models (qwen3.6, *:32b, *:35b) do NOT fit alongside
-# anything on 24 GB and are painfully slow on CPU, so this script refuses to use them.
+# Why these choices: qwen3.5:9b reports a `tools` capability and fits in 24 GB with
+# room to spare, so one model can back every crew role (no swap thrash). The 22 GB+
+# models (qwen3.6, *:32b, *:35b) do NOT fit alongside anything on 24 GB and are
+# painfully slow on CPU, so this script refuses to use them.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-MODEL="qwen2.5-coder:7b"
+MODEL="qwen3.5:9b"
 CTX=8192
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --coder14b) MODEL="qwen2.5-coder:14b" ;;
     --coder7b)  MODEL="qwen2.5-coder:7b" ;;
+    --qwen35)   MODEL="qwen3.5:9b" ;;
     --ctx)      CTX="${2:-8192}"; shift ;;
     -h|--help)  grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1 (try --help)" >&2; exit 1 ;;
