@@ -1252,6 +1252,20 @@ $GLOBALS['currentSessionModel'] = null;
         return false;
     }
 
+    // Broader: the model expressed FIRST-PERSON intent to use a tool (run/read/
+    // search/…) but called none this turn — the "describes instead of acting" quit
+    // that makes a local agent stop early. Edits are the strong sub-case above.
+    // Deliberately first-person ("I'll run", "let me check") so advice phrasings
+    // like "you can run npm test" in a finished answer don't trigger a false nudge.
+    private static function looksLikeUnactedAction(string $response): bool {
+        if (self::looksLikeUnactedEdit($response)) return true;
+        if (preg_match('/\busing the\s+\w+\s+tool\b/i', $response)) return true;
+        return (bool)preg_match(
+            '/\b(?:I[\'\x{2019}]?(?:ll| will| am going to| need to| should| can)|let me|next,?\s+I[\'\x{2019}]?ll|now,?\s+I[\'\x{2019}]?ll)\s+(?:now\s+|then\s+|first\s+)?(?:run|use|call|execute|check|read|list|search|look|view|open|grep|find|create|write|edit|inspect|examine|explore|start by)\b/iu',
+            $response
+        );
+    }
+
     private function agenticLoop(?callable $emit): string {
         $maxIter = (int)Config::get('agents.maxIterations', 8);
         $final = '';
@@ -1284,9 +1298,12 @@ $GLOBALS['currentSessionModel'] = null;
                 // make a change, but issued no tool call, so nothing happened — the
                 // single most common small-model failure. Nudge it ONCE to actually
                 // call write/edit, then let it retry instead of ending the turn.
-                if (!$nudgedAct && $i < $maxIter - 1 && !$this->agent->isChatMode() && self::looksLikeUnactedEdit($response)) {
+                if (!$nudgedAct && $i < $maxIter - 1 && !$this->agent->isChatMode() && self::looksLikeUnactedAction($response)) {
                     $nudgedAct = true;
-                    $this->addMessage('user', "You described the change but did NOT call a tool, so nothing was actually written. Make the change NOW by calling the write or edit tool with the file's full contents. Output ONLY the tool call — no prose, no ``` fences.");
+                    $msg = self::looksLikeUnactedEdit($response)
+                        ? "You described the change but did NOT call a tool, so nothing was actually written. Make the change NOW by calling the write or edit tool with the file's full contents. Output ONLY the tool call — no prose, no ``` fences."
+                        : "You described an action but did NOT call any tool, so nothing actually happened. If a tool call is needed to finish the task, make it NOW — output ONLY the tool call, no prose. If you are genuinely finished, reply with your final answer instead.";
+                    $this->addMessage('user', $msg);
                     continue;
                 }
                 if ($emit) $emit($clean !== '' ? $clean : trim($response));
