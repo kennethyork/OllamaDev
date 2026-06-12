@@ -2179,6 +2179,29 @@ var Temp = {
     }
 };
 
+// Tool-approval picker — a DESKTOP-ONLY preference (stored in localStorage), passed
+// to each terminal via the OLLAMADEV_PERMISSION env in launchCli. Deliberately NOT
+// backed by the CLI config, so changing it here never alters the standalone CLI's
+// own default. Default 'ask' (matches the CLI). Applies to terminals opened after.
+var Perm = {
+    bind: function () {
+        var sel = $('#permSelect'); if (!sel) return;
+        var saved = 'ask';
+        try { saved = localStorage.getItem('ade.permMode') || 'ask'; } catch (e) {}
+        if (saved !== 'auto' && saved !== 'ask' && saved !== 'readonly') saved = 'ask';
+        App.permMode = saved;
+        if (sel.querySelector('option[value="' + saved + '"]')) sel.value = saved;
+        sel.addEventListener('change', function () {
+            var m = sel.value;
+            App.permMode = m;
+            try { localStorage.setItem('ade.permMode', m); } catch (e) {}
+            var note = m === 'auto' ? 'runs tools without asking'
+                : (m === 'ask' ? 'confirms each change (type y in the terminal)' : 'blocks all changes');
+            if (window.banner) banner('tool approval → ' + m + ' · ' + note + ' (applies to new terminals)', 'ok');
+        });
+    }
+};
+
 // Voice (STT) settings — model picker + transcription history. Reads/writes the
 // shared stt.model via the CLI (window.sttModel/setSttModel), so CLI, desktop and
 // web stay in lockstep. Both controls reveal only when a local STT engine exists.
@@ -2358,6 +2381,7 @@ var App = {
         CodeSearch.bind();
         Diff.bind();
         Temp.bind();
+        Perm.bind();
         Stt.bind();
         // Add a task from the sidebar.
         var ti = $('#taskInput');
@@ -2984,7 +3008,21 @@ var App = {
     launchCli: function (id, model, cwd) {
         // SIMPLE_INPUT: the CLI uses plain line input so the embedded terminal
         // (which the host pty echoes into) renders cleanly without raw-mode escapes.
-        var cmd = this.cdPrefix(cwd) + 'OLLAMADEV_SIMPLE_INPUT=1 ' + (this.cli || 'ollamadev') + (model ? ' -m ' + model : '') + '\n';
+        // Tool-approval mode (the "Tool approval" picker in the Session drawer):
+        //   auto     — run tools without the blocking y/n confirmation prompts. In the
+        //              desktop GUI those single-key prompts (Permission::prompt /
+        //              DiffView::confirm, both fgets(STDIN)) are invisible/awkward, so
+        //              the agent appeared to stall on the first write/edit/bash —
+        //              "tools don't go". Auto still PRINTS every diff preview; it just
+        //              doesn't gate the change behind a hidden keypress. Matches Crew.
+        //   ask      — confirm each mutating tool (type y/Enter in the terminal).
+        //   readonly — block all changes.
+        // Default ask (matches the CLI's safe default); the picker lets you opt into auto.
+        // Passed via OLLAMADEV_PERMISSION (a per-launch env), NOT a --flag — so the
+        // desktop's pick governs only this terminal and never rewrites the shared
+        // config that the standalone CLI reads for its own default.
+        var mode = (this.permMode === 'auto' || this.permMode === 'readonly') ? this.permMode : 'ask';
+        var cmd = this.cdPrefix(cwd) + 'OLLAMADEV_SIMPLE_INPUT=1 OLLAMADEV_PERMISSION=' + mode + ' ' + (this.cli || 'ollamadev') + (model ? ' -m ' + model : '') + '\n';
         // Small delay so the pty shell is ready to receive the command.
         setTimeout(function () { try { window.termWrite(id, strToB64(cmd)); } catch (e) {} }, 350);
     },

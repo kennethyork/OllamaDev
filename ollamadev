@@ -5107,8 +5107,8 @@ User: run the tests
             return ['content' => $response, 'calls' => $this->parseToolCalls($response)];
         }
 
-        // Native (explicit tools.mode=native only). Try native tools unless we
-        // already learned this model lacks support.
+        // Native function-calling (the 'auto' default, and explicit tools.mode=native).
+        // Try native tools unless we already learned this model lacks support.
         if (($GLOBALS['nativeTools'][$this->model] ?? null) !== false) {
             $res = $this->client->chatWithTools($this->model, $allMessages, Tools::schemas());
             if (!empty($res['ok'])) {
@@ -5150,12 +5150,21 @@ User: run the tests
     }
 
     // Resolve the configured tools.mode, turning 'auto' into the best available
-    // mechanism: schema-constrained decoding when the backend supports it (most
-    // reliable), else the text protocol. Native function-calling is opt-in only
-    // (tools.mode=native) — it's the fragile, version-dependent one.
+    // mechanism. We PREFER Ollama's native function-calling: modern Ollama ships a
+    // per-model tool template, so it reliably emits structured tool_calls for any
+    // tool-capable model (gemma, llama, qwen, mistral, …). The old text / schema
+    // parsing is brittle — many perfectly capable models describe the action in
+    // prose and emit nothing parseable, so the agent "calls a tool" that never runs
+    // and the turn dead-ends. Native carries its own graceful fallback (a model
+    // Ollama reports as tool-unsupported drops to a fallback model, then to the text
+    // protocol), so preferring it never dead-ends.
     private function effectiveToolMode(): string {
         $m = Config::get('tools.mode', 'auto');
-        if ($m !== 'auto') return $m; // native | text | structured (explicit)
+        if ($m !== 'auto') return $m; // native | text | structured (explicit override)
+        // Native first, until we've learned THIS model can't do it.
+        if (($GLOBALS['nativeTools'][$this->model] ?? null) !== false && method_exists($this->client, 'chatWithTools')) {
+            return 'native';
+        }
         $key = get_class($this->client);
         if (($GLOBALS['structuredCap'][$key] ?? null) === false) return 'text';
         return method_exists($this->client, 'chatStructured') ? 'structured' : 'text';
@@ -12822,6 +12831,18 @@ if ($cmd === 'chat') {
     // resumed session's saved model — otherwise reopening always reverts to the old
     // model and "changing the model from the desktop" silently does nothing.
     if (!empty($flags['model'])) $session->useModel($flags['model']);
+    // Embedded hosts (the desktop ADE) pass the tool-approval mode for THIS launch
+    // via OLLAMADEV_PERMISSION, applied to the session WITHOUT touching the shared
+    // config — so the GUI's pick (e.g. Auto) never changes the standalone CLI's own
+    // default. An explicit --auto/--ask/etc flag still wins (it ran above and set
+    // the mode via config). The Session constructor already applied the config
+    // default; this overrides it just for this process.
+    if (empty($flags['permission'])) {
+        $envPerm = getenv('OLLAMADEV_PERMISSION');
+        if ($envPerm !== false && in_array($envPerm, ['auto', 'ask', 'readonly', 'plan'], true)) {
+            Permission::setMode($envPerm);
+        }
+    }
     $session->start();
 } else {
     echo "Unknown command: $cmd\n";

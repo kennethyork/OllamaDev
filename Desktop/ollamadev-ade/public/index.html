@@ -65,6 +65,13 @@
                         <option value="1">1.0 · Wild</option>
                     </select>
                 </label>
+                <label class="side-field">Tool approval
+                    <select id="permSelect" title="How the agent runs tools. Ask = confirm each file write/edit and shell command (type y/Enter in the terminal). Auto = run every tool without asking (like Crew). Read-only = block all changes.">
+                        <option value="ask">✋ Ask · confirm each change</option>
+                        <option value="auto">⚡ Auto · run tools without asking</option>
+                        <option value="readonly">🔒 Read-only · no changes</option>
+                    </select>
+                </label>
                 <label class="side-field" id="sttField" hidden>Voice model
                     <select id="sttSelect" title="Voice model — speech-to-text accuracy (CPU-only, 100% local). Lower = faster, higher = more accurate.">
                         <option value="tiny">🎙 tiny · fastest</option>

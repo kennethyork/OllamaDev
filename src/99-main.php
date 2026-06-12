@@ -2673,6 +2673,18 @@ if ($cmd === 'chat') {
     // resumed session's saved model — otherwise reopening always reverts to the old
     // model and "changing the model from the desktop" silently does nothing.
     if (!empty($flags['model'])) $session->useModel($flags['model']);
+    // Embedded hosts (the desktop ADE) pass the tool-approval mode for THIS launch
+    // via OLLAMADEV_PERMISSION, applied to the session WITHOUT touching the shared
+    // config — so the GUI's pick (e.g. Auto) never changes the standalone CLI's own
+    // default. An explicit --auto/--ask/etc flag still wins (it ran above and set
+    // the mode via config). The Session constructor already applied the config
+    // default; this overrides it just for this process.
+    if (empty($flags['permission'])) {
+        $envPerm = getenv('OLLAMADEV_PERMISSION');
+        if ($envPerm !== false && in_array($envPerm, ['auto', 'ask', 'readonly', 'plan'], true)) {
+            Permission::setMode($envPerm);
+        }
+    }
     $session->start();
 } else {
     echo "Unknown command: $cmd\n";
