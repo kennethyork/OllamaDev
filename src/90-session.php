@@ -214,30 +214,12 @@ class Session {
             'retry', 'regenerate' => $this->retryLast(),
             'commands' => UserCmds::render(),
             'plan' => $this->togglePlan($args),
-            'think' => $this->toggleThink($args),
             'output-style', 'outputstyle', 'style' => $this->setOutputStyle($args),
             'statusline' => $this->setStatusLine($args),
             'agents' => AgentDefs::render(),
             'hooks' => Hooks::editorCommand(preg_split('/\s+/', trim($args), -1, PREG_SPLIT_NO_EMPTY) ?: []),
             default => UserCmds::exists($cmd) ? ('PROMPT:' . UserCmds::expand($cmd, $args)) : false
         };
-    }
-
-    // /think on|off|auto — control chain-of-thought for thinking models (gemma4,
-    // qwen3.x, deepseek-r1, …). auto (default) = OFF for agent/crew work (faster,
-    // cleaner output), the model's own default for plain chat. Persisted in config.
-    private function toggleThink(string $args): string {
-        $a = strtolower(trim($args));
-        if ($a === '') {
-            $cur = strtolower(trim((string)Config::get('ollama.think', 'auto')));
-            return "Thinking: {$cur}\n  /think on   — always reason (slower, best for hard problems)\n  /think off  — never reason (fastest, cleanest)\n  /think auto — off for agent/crew, on for chat (default)\n";
-        }
-        if (!in_array($a, ['on', 'off', 'auto'], true)) return "Usage: /think <on|off|auto>\n";
-        Config::set('ollama.think', $a);
-        $why = $a === 'off' ? 'never reason — fastest, cleanest output'
-            : ($a === 'on' ? 'always reason — slower, best for hard problems'
-            : 'off for agent/crew, on for chat');
-        return "\033[36m🧠 Thinking: {$a}\033[0m — {$why}\n";
     }
 
     // Plan mode: research-only until you approve a plan. /plan toggles; the agent
@@ -430,7 +412,6 @@ class Session {
         $out .= $row('/memory', 'browse the project knowledge graph (recall/remember)');
         $out .= $row('/permission <…>', 'manage tool approval (auto|ask|readonly|plan)');
         $out .= $row('/plan', 'plan mode — research read-only, propose a plan, then implement on approval');
-        $out .= $row('/think [on|off|auto]', 'chain-of-thought for thinking models (auto = off for agent/crew, on for chat)');
         $out .= $row('/output-style [name]', 'tone/verbosity preset (default·concise·explanatory·formal·bullets)');
         $out .= $row('/statusline [tpl]', 'set the prompt status line ({model} {cwd} {branch} {mode}, or a command)');
         $out .= $row('/agents', 'list file-defined custom agent types (.ollamadev/agents/*.md)');
@@ -870,7 +851,7 @@ return "Available: " . implode(', ', array_keys($gitAliases)) . "\n";
         if ($firstWord) {
             $base = ['/help', '/model', '/models', '/pull', '/chat', '/agent', '/retry', '/regenerate', '/new', '/clear', '/compact',
                 '/save', '/session', '/git', '/status', '/tools', '/context', '/pwd', '/cd', '/ls',
-                '/permission', '/verbose', '/undo', '/checkpoints', '/init', '/crew', '/skills', '/memory', '/image', '/voice', '/commands', '/plan', '/think', '/exit', '/quit',
+                '/permission', '/verbose', '/undo', '/checkpoints', '/init', '/crew', '/skills', '/memory', '/image', '/voice', '/commands', '/plan', '/exit', '/quit',
                 'help', 'exit', 'quit', 'clear', 'model', 'models', 'tools', 'git', 'status', 'compact', 'context', 'new', 'cd', 'ls', 'init'];
             foreach ($base as $c) if ($token === '' || str_starts_with($c, $token)) $cands[] = $c;
         } else {

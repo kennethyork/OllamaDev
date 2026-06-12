@@ -18,16 +18,6 @@ class Crew {
         if (!self::isGitRepo()) { echo "\033[31mcrew needs a git repository.\033[0m  Run `git init` first.\n"; return 1; }
         if (!self::gitWorktreeSupported()) { echo "\033[31mcrew needs `git worktree` (git 2.5+).\033[0m\n"; return 1; }
 
-        // Crew is tool/build work, not conversation: default thinking OFF for the
-        // whole run (Director plan, Auditor verdict, and the coder agents) — faster
-        // on local hardware and no chain-of-thought to muddy structured output.
-        // `/think on` (config ollama.think=on) opts back in. The coder agents also
-        // re-assert this per turn via Agent::applyThink().
-        if (class_exists('OllamaClient')) {
-            $tk = strtolower(trim((string)Config::get('ollama.think', 'auto')));
-            OllamaClient::setThink($tk === 'on' ? true : false);
-        }
-
         $agent = new Agent();
         if (!$agent->checkConnection()) { echo "\033[31mCannot reach Ollama.\033[0m Start it with: ollama serve\n"; return 1; }
         $model = $agent->getModel();

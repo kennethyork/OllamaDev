@@ -161,19 +161,6 @@ User: run the tests
         return in_array('tools', $caps, true);
     }
 
-    // Decide whether THIS turn should let a thinking model reason, and push it to
-    // the client. Config `ollama.think` (set by /think): on | off | auto (default).
-    // auto = OFF for agent/tool + crew turns (faster, and no chain-of-thought to
-    // leak into the answer) and the model's own default for plain chat. No effect
-    // on models without a `thinking` capability, or on backends without setThink().
-    private function applyThink(): void {
-        if (!method_exists($this->client, 'setThink')) return;
-        $cfg = strtolower(trim((string)Config::get('ollama.think', 'auto')));
-        if ($cfg === 'on')  { $this->client::setThink(true);  return; }
-        if ($cfg === 'off') { $this->client::setThink(false); return; }
-        $this->client::setThink($this->chatMode ? null : false);
-    }
-
     // Summarize a transcript with the model itself (one-shot, no tools). Used by
     // session compaction. Returns '' on any failure so the caller can fall back.
     public function summarize(string $transcript): string {
@@ -226,7 +213,6 @@ User: run the tests
         // plan still reads as plan mode and the model keeps refusing to edit.
         if (class_exists('Permission') && Permission::inPlanMode() !== $this->builtPlanMode) $this->systemPrompt = $this->buildSystemPrompt();
         $allMessages = array_merge([$this->systemPrompt], $this->wire($messages));
-        $this->applyThink();
 
         // Chat mode: pure conversation, no tools offered or parsed.
         if ($this->chatMode) {

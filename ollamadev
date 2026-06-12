@@ -1057,20 +1057,6 @@ class OllamaClient {
     private static int $lastCtx = 0;     // last effective num_ctx we sent
     private static array $capCache = []; // model => capability tags from /api/show
 
-    // Per-process override for Ollama's `think` parameter (thinking models):
-    //   null  → don't send it (model's own default — thinking models think)
-    //   false → think:false (skip chain-of-thought: faster + clean output)
-    //   true  → think:true (force it on)
-    // The agent sets this per turn (off for tool/agent + crew work, on for chat),
-    // and `/think on|off|auto` overrides via config. See Agent::applyThink().
-    private static ?bool $think = null;
-    public static function setThink(?bool $v): void { self::$think = $v; }
-    // Add the top-level `think` field to a request payload when an override is set.
-    private static function withThink(array $params): array {
-        if (self::$think !== null) $params['think'] = self::$think;
-        return $params;
-    }
-
     // Generation options applied to every chat request. Crucially this sets
     // num_ctx: without it Ollama silently caps context at 2048 tokens, which
     // truncates the system prompt and tool history out from under the agent.
@@ -1168,7 +1154,7 @@ class OllamaClient {
         // Stream when a handler is present so tokens appear as they're produced;
         // fall back to a single blocking response when no handler wants chunks.
         $stream = $handler !== null && (bool)Config::get('ollama.stream', true);
-        $params = self::withThink(['model' => $model, 'messages' => $messages, 'stream' => $stream, 'options' => self::chatOptions($model, $this->host)]);
+        $params = ['model' => $model, 'messages' => $messages, 'stream' => $stream, 'options' => self::chatOptions($model, $this->host)];
         $ch = curl_init($this->host . '/api/chat');
         $opts = [
             CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
@@ -1226,7 +1212,7 @@ class OllamaClient {
     // decoded object, or null on failure. Used by Crew's Director/Auditor so
     // local models reliably emit parseable plans/verdicts.
     public function chatJson(string $model, array $messages): ?array {
-        $params = self::withThink(['model' => $model, 'messages' => $messages, 'stream' => false, 'format' => 'json', 'options' => self::chatOptions($model, $this->host)]);
+        $params = ['model' => $model, 'messages' => $messages, 'stream' => false, 'format' => 'json', 'options' => self::chatOptions($model, $this->host)];
         $ch = curl_init($this->host . '/api/chat');
         curl_setopt_array($ch, [
             CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
@@ -1247,7 +1233,7 @@ class OllamaClient {
     // tools.mode=structured to make tool calls reliable on local models. Returns
     // the decoded object, or null on failure.
     public function chatStructured(string $model, array $messages, array $schema): ?array {
-        $params = self::withThink(['model' => $model, 'messages' => $messages, 'stream' => false, 'format' => $schema, 'options' => self::chatOptions($model, $this->host)]);
+        $params = ['model' => $model, 'messages' => $messages, 'stream' => false, 'format' => $schema, 'options' => self::chatOptions($model, $this->host)];
         $ch = curl_init($this->host . '/api/chat');
         curl_setopt_array($ch, [
             CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
@@ -1268,7 +1254,7 @@ class OllamaClient {
     //   ['ok'=>true, 'content'=>string, 'calls'=>[['name'=>,'params'=>], ...]]
     //   ['ok'=>false, 'unsupported'=>bool, 'error'=>string]
     public function chatWithTools(string $model, array $messages, array $tools): array {
-        $params = self::withThink(['model' => $model, 'messages' => $messages, 'tools' => $tools, 'stream' => false, 'options' => self::chatOptions($model, $this->host)]);
+        $params = ['model' => $model, 'messages' => $messages, 'tools' => $tools, 'stream' => false, 'options' => self::chatOptions($model, $this->host)];
         $ch = curl_init($this->host . '/api/chat');
         curl_setopt_array($ch, [
             CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
@@ -5050,19 +5036,6 @@ User: run the tests
         return in_array('tools', $caps, true);
     }
 
-    // Decide whether THIS turn should let a thinking model reason, and push it to
-    // the client. Config `ollama.think` (set by /think): on | off | auto (default).
-    // auto = OFF for agent/tool + crew turns (faster, and no chain-of-thought to
-    // leak into the answer) and the model's own default for plain chat. No effect
-    // on models without a `thinking` capability, or on backends without setThink().
-    private function applyThink(): void {
-        if (!method_exists($this->client, 'setThink')) return;
-        $cfg = strtolower(trim((string)Config::get('ollama.think', 'auto')));
-        if ($cfg === 'on')  { $this->client::setThink(true);  return; }
-        if ($cfg === 'off') { $this->client::setThink(false); return; }
-        $this->client::setThink($this->chatMode ? null : false);
-    }
-
     // Summarize a transcript with the model itself (one-shot, no tools). Used by
     // session compaction. Returns '' on any failure so the caller can fall back.
     public function summarize(string $transcript): string {
@@ -5115,7 +5088,6 @@ User: run the tests
         // plan still reads as plan mode and the model keeps refusing to edit.
         if (class_exists('Permission') && Permission::inPlanMode() !== $this->builtPlanMode) $this->systemPrompt = $this->buildSystemPrompt();
         $allMessages = array_merge([$this->systemPrompt], $this->wire($messages));
-        $this->applyThink();
 
         // Chat mode: pure conversation, no tools offered or parsed.
         if ($this->chatMode) {
@@ -6718,16 +6690,6 @@ class Crew {
         if ($task === '') { echo "Usage: ollamadev crew \"<high-level task>\"\n"; return 1; }
         if (!self::isGitRepo()) { echo "\033[31mcrew needs a git repository.\033[0m  Run `git init` first.\n"; return 1; }
         if (!self::gitWorktreeSupported()) { echo "\033[31mcrew needs `git worktree` (git 2.5+).\033[0m\n"; return 1; }
-
-        // Crew is tool/build work, not conversation: default thinking OFF for the
-        // whole run (Director plan, Auditor verdict, and the coder agents) — faster
-        // on local hardware and no chain-of-thought to muddy structured output.
-        // `/think on` (config ollama.think=on) opts back in. The coder agents also
-        // re-assert this per turn via Agent::applyThink().
-        if (class_exists('OllamaClient')) {
-            $tk = strtolower(trim((string)Config::get('ollama.think', 'auto')));
-            OllamaClient::setThink($tk === 'on' ? true : false);
-        }
 
         $agent = new Agent();
         if (!$agent->checkConnection()) { echo "\033[31mCannot reach Ollama.\033[0m Start it with: ollama serve\n"; return 1; }
@@ -9108,30 +9070,12 @@ class Session {
             'retry', 'regenerate' => $this->retryLast(),
             'commands' => UserCmds::render(),
             'plan' => $this->togglePlan($args),
-            'think' => $this->toggleThink($args),
             'output-style', 'outputstyle', 'style' => $this->setOutputStyle($args),
             'statusline' => $this->setStatusLine($args),
             'agents' => AgentDefs::render(),
             'hooks' => Hooks::editorCommand(preg_split('/\s+/', trim($args), -1, PREG_SPLIT_NO_EMPTY) ?: []),
             default => UserCmds::exists($cmd) ? ('PROMPT:' . UserCmds::expand($cmd, $args)) : false
         };
-    }
-
-    // /think on|off|auto — control chain-of-thought for thinking models (gemma4,
-    // qwen3.x, deepseek-r1, …). auto (default) = OFF for agent/crew work (faster,
-    // cleaner output), the model's own default for plain chat. Persisted in config.
-    private function toggleThink(string $args): string {
-        $a = strtolower(trim($args));
-        if ($a === '') {
-            $cur = strtolower(trim((string)Config::get('ollama.think', 'auto')));
-            return "Thinking: {$cur}\n  /think on   — always reason (slower, best for hard problems)\n  /think off  — never reason (fastest, cleanest)\n  /think auto — off for agent/crew, on for chat (default)\n";
-        }
-        if (!in_array($a, ['on', 'off', 'auto'], true)) return "Usage: /think <on|off|auto>\n";
-        Config::set('ollama.think', $a);
-        $why = $a === 'off' ? 'never reason — fastest, cleanest output'
-            : ($a === 'on' ? 'always reason — slower, best for hard problems'
-            : 'off for agent/crew, on for chat');
-        return "\033[36m🧠 Thinking: {$a}\033[0m — {$why}\n";
     }
 
     // Plan mode: research-only until you approve a plan. /plan toggles; the agent
@@ -9324,7 +9268,6 @@ class Session {
         $out .= $row('/memory', 'browse the project knowledge graph (recall/remember)');
         $out .= $row('/permission <…>', 'manage tool approval (auto|ask|readonly|plan)');
         $out .= $row('/plan', 'plan mode — research read-only, propose a plan, then implement on approval');
-        $out .= $row('/think [on|off|auto]', 'chain-of-thought for thinking models (auto = off for agent/crew, on for chat)');
         $out .= $row('/output-style [name]', 'tone/verbosity preset (default·concise·explanatory·formal·bullets)');
         $out .= $row('/statusline [tpl]', 'set the prompt status line ({model} {cwd} {branch} {mode}, or a command)');
         $out .= $row('/agents', 'list file-defined custom agent types (.ollamadev/agents/*.md)');
@@ -9764,7 +9707,7 @@ return "Available: " . implode(', ', array_keys($gitAliases)) . "\n";
         if ($firstWord) {
             $base = ['/help', '/model', '/models', '/pull', '/chat', '/agent', '/retry', '/regenerate', '/new', '/clear', '/compact',
                 '/save', '/session', '/git', '/status', '/tools', '/context', '/pwd', '/cd', '/ls',
-                '/permission', '/verbose', '/undo', '/checkpoints', '/init', '/crew', '/skills', '/memory', '/image', '/voice', '/commands', '/plan', '/think', '/exit', '/quit',
+                '/permission', '/verbose', '/undo', '/checkpoints', '/init', '/crew', '/skills', '/memory', '/image', '/voice', '/commands', '/plan', '/exit', '/quit',
                 'help', 'exit', 'quit', 'clear', 'model', 'models', 'tools', 'git', 'status', 'compact', 'context', 'new', 'cd', 'ls', 'init'];
             foreach ($base as $c) if ($token === '' || str_starts_with($c, $token)) $cands[] = $c;
         } else {
