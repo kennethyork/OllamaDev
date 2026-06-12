@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.8.84 (2026-06-11) — reliable tool calls on any model + desktop permission isolation
+
+### Fixed
+- **Tool calls now actually run on any tool-capable Ollama model.** `tools.mode=auto` led with brittle text/JSON parsing of the model's prose — so capable models (gemma4, qwen2.5-coder, qwen3.6) would *describe* a tool call, emit nothing parseable, and the turn dead-ended back at the prompt ("it goes to the tool and just stops"). `auto` now **prefers Ollama's native function-calling** (`src/75-agent.php::effectiveToolMode`), which has a per-model tool template and returns structured `tool_calls`. It keeps a graceful ladder — a model Ollama reports as tool-unsupported drops to a fallback model, then to structured (schema-constrained) decoding, then to the text protocol — so it never dead-ends. Verified 3/3 on write/read/bash across gemma4:31b, qwen2.5-coder:7b, and qwen3.6:latest (each checked by a real file on disk or an unguessable token, not the model's say-so).
+
+### Changed
+- **The desktop ADE's tool-approval choice no longer leaks into the standalone CLI.** It now rides a per-launch `OLLAMADEV_PERMISSION` env var + `localStorage` (`src/99-main.php` honors it without persisting), so picking *Auto* in the desktop governs only that terminal — your terminal CLI keeps its own `ask` default.
+
+### Added
+- **Tool-approval picker** in the desktop Session drawer (✋ Ask / ⚡ Auto / 🔒 Read-only), defaulting to Ask to match the CLI.
+- **`scripts/setup-vps.sh`** — one command to wire a single shared coder model into every crew role and cap the context window for small / CPU-only hosts (e.g. a 24 GB, 12-core VPS). Refuses 22 GB+ models that can't fit there. `--coder7b` (default) or `--coder14b`.
+
 ## v0.8.83 (2026-06-11) — multiple Chat windows + an image-input cleanup
 
 ### Added
