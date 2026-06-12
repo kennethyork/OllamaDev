@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.8.87 (2026-06-11) — VPS setup script: qwen3.5:9b only
+
+### Changed
+- **`scripts/setup-vps.sh` is now single-model.** Dropped the `--coder7b` / `--coder14b` (qwen2.5-coder) options — `qwen3.5:9b` is the one VPS crew model, and `--ctx` is the only remaining flag.
+
 ## v0.8.86 (2026-06-11) — VPS setup defaults to qwen3.5:9b
 
 ### Changed
