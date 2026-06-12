@@ -1285,6 +1285,7 @@ $GLOBALS['currentSessionModel'] = null;
         } : null;
         if (class_exists('Interrupt')) Interrupt::begin();
         try {
+        $toolsUsed = false;   // has the model actually run any tool this turn-chain?
         for ($i = 0; $i < $maxIter; $i++) {
             if (class_exists('Interrupt') && Interrupt::aborted()) break;
             $turn = $this->agent->chatTurn($this->getMessages(), $live);
@@ -1334,7 +1335,7 @@ $GLOBALS['currentSessionModel'] = null;
                 // make a change, but issued no tool call, so nothing happened — the
                 // single most common small-model failure. Nudge it ONCE to actually
                 // call write/edit, then let it retry instead of ending the turn.
-                if (!$nudgedAct && $i < $maxIter - 1 && !$this->agent->isChatMode() && self::looksLikeUnactedAction($response)) {
+                if (!$nudgedAct && !$toolsUsed && $i < $maxIter - 1 && !$this->agent->isChatMode() && self::looksLikeUnactedAction($response)) {
                     $nudgedAct = true;
                     $msg = self::looksLikeUnactedEdit($response)
                         ? "You described the change but did NOT call a tool, so nothing was actually written. Make the change NOW by calling the write or edit tool with the file's full contents. Output ONLY the tool call — no prose, no ``` fences."
@@ -1346,6 +1347,7 @@ $GLOBALS['currentSessionModel'] = null;
                 return $clean !== '' ? $clean : trim($response);
             }
 
+            $toolsUsed = true;   // the model has acted → a later no-tool turn is a real answer, not "described but didn't act"
             // Show the model's reasoning text (without the tool markup) before
             // results. When it already streamed live, just close the line.
             if ($streamed) { if ($clean !== '' && $emit) $emit("\n", 'tool'); }

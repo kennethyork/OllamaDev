@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.8.95 (2026-06-12) — CLI/crew route reasoning to the dimmed thinking channel
+
+### Changed
+- **Thinking models now stream their chain-of-thought through Ollama's dedicated `thinking` channel** (`think:true`), so in the CLI agent and crew it shows *dimmed* and stays out of the answer — instead of the model narrating reasoning into the reply where it reads as part of the answer. Gated strictly on the model reporting a `thinking` capability (`OllamaClient::thinkParams`): qwen3.5:9b and gemma4:31b get it; non-thinking models (qwen2.5-coder, mistral, llama3.2) never do — because sending `think` to them is a hard HTTP 400. Disable with `config set ollama.think false`. (A model may still narrate some reasoning into `content`; that part is model-dependent.)
+
+### Fixed
+- **The "described but didn't act" nudge no longer fires after the model has already used a tool.** Once a thinking model read a file and was writing its final answer, the nudge could misfire and send it into a confused "did I forget to call a tool?" spiral. The nudge is now suppressed once any tool has run this turn — it only rescues a model that hasn't acted at all.
+
 ## v0.8.94 (2026-06-12) — watch the model think (chat / CLI / crew) and Ctrl-C to cancel
 
 ### Added

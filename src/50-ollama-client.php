@@ -180,6 +180,18 @@ class OllamaClient {
         return in_array('tools', self::modelCapabilities($model, $host), true);
     }
 
+    // Request params that turn ON Ollama's dedicated reasoning channel, so a thinking
+    // model routes its chain-of-thought to the `thinking` field (shown dimmed) and
+    // keeps `content` as the clean final answer — instead of narrating reasoning
+    // INTO content, where it reads as part of the reply. Returns ['think'=>true]
+    // ONLY when the model reports a `thinking` capability (sending it to a model that
+    // doesn't is a hard HTTP 400 "does not support thinking") and config allows it.
+    // Disable with: config set ollama.think false.
+    public static function thinkParams(string $model, string $host = ''): array {
+        if (!Config::get('ollama.think', true)) return [];
+        return in_array('thinking', self::modelCapabilities($model, $host), true) ? ['think' => true] : [];
+    }
+
     // $includeThinking=false drops a reasoning model's chain-of-thought (the `thinking`
     // field) and returns only the final answer (`content`) — used by `ollamadev chat`
     // so a plain chat shows the reply, not the model's internal reasoning.
@@ -193,7 +205,8 @@ class OllamaClient {
         // Stream when a handler is present so tokens appear as they're produced;
         // fall back to a single blocking response when no handler wants chunks.
         $stream = ($handler !== null || $onThinking !== null) && (bool)Config::get('ollama.stream', true);
-        $params = ['model' => $model, 'messages' => $messages, 'stream' => $stream, 'options' => self::chatOptions($model, $this->host)];
+        $params = ['model' => $model, 'messages' => $messages, 'stream' => $stream, 'options' => self::chatOptions($model, $this->host)]
+            + self::thinkParams($model, $this->host);   // thinking models: emit reasoning in the `thinking` field, content stays the clean answer
         $ch = curl_init($this->host . '/api/chat');
         $opts = [
             CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
@@ -302,7 +315,8 @@ class OllamaClient {
     // tool_calls still arrive structured and are accumulated across the stream.
     public function chatWithTools(string $model, array $messages, array $tools, ?callable $onDelta = null): array {
         $stream = $onDelta !== null && (bool)Config::get('ollama.stream', true);
-        $params = ['model' => $model, 'messages' => $messages, 'tools' => $tools, 'stream' => $stream, 'options' => self::chatOptions($model, $this->host)];
+        $params = ['model' => $model, 'messages' => $messages, 'tools' => $tools, 'stream' => $stream, 'options' => self::chatOptions($model, $this->host)]
+            + self::thinkParams($model, $this->host);   // route reasoning to the dimmed `thinking` channel (thinking models only)
         $ch = curl_init($this->host . '/api/chat');
         $base = [
             CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
