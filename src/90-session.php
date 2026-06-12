@@ -1249,7 +1249,7 @@ $GLOBALS['currentSessionModel'] = null;
     // $emit is an optional callback for streaming output to the terminal.
     // Heuristic: did the model output a real code block / explicit "I'll create the
     // file" intent, but (this turn) call no tool? Used to nudge it to actually act.
-    private static function looksLikeUnactedEdit(string $response): bool {
+    public static function looksLikeUnactedEdit(string $response): bool {
         if (preg_match('/```[\s\S]{40,}/', $response)) return true;                 // a substantial fenced block
         if (preg_match('/<\?php|#!\/|^\s*(?:function|def|class)\s+\w+/mi', $response)) return true;  // bare source
         return false;
@@ -1260,7 +1260,7 @@ $GLOBALS['currentSessionModel'] = null;
     // that makes a local agent stop early. Edits are the strong sub-case above.
     // Deliberately first-person ("I'll run", "let me check") so advice phrasings
     // like "you can run npm test" in a finished answer don't trigger a false nudge.
-    private static function looksLikeUnactedAction(string $response): bool {
+    public static function looksLikeUnactedAction(string $response): bool {
         if (self::looksLikeUnactedEdit($response)) return true;
         if (preg_match('/\busing the\s+\w+\s+tool\b/i', $response)) return true;
         return (bool)preg_match(

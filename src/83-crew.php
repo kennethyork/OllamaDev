@@ -600,6 +600,7 @@ class Crew {
                 "Your subtask: " . ($st['title'] ?? '') . "\n" . ($st['prompt'] ?? '') . $ctx;
             $messages = [['role' => 'user', 'content' => $prompt]];
             $dbg = (bool)getenv('CREW_DEBUG');
+            $nudged = false;   // one-shot "you described it but didn't call a tool" rescue
             for ($i = 0; $i < $maxIter; $i++) {
                 if ($steerN > 0) self::injectSteerFor($messages, $steerFile, $steerN, $agent);   // separate Director redirects (incl. "model <name>" hot-swap)
                 echo "\033[2m·\033[0m"; @flush();   // heartbeat
@@ -608,8 +609,24 @@ class Crew {
                 $think = trim(preg_replace('/\s+/', ' ', $agent->stripToolMarkup((string)($turn['content'] ?? ''))));
                 if ($dbg) fwrite(STDERR, "    [coder iter $i] calls=" . count($calls) . " content=" . substr($think, 0, 120) . "\n");
                 if ($think !== '') $log("· " . substr($think, 0, 300) . "\n");
-                $messages[] = ['role' => 'assistant', 'content' => (string)($turn['content'] ?? '')];
-                if (empty($calls)) break;
+                // Attach tool_calls in Ollama's wire shape so follow-up tool results
+                // correlate to the originating call (native function-calling expects it).
+                $aExtra = empty($calls) ? [] : ['tool_calls' => array_map(
+                    fn($c) => ['function' => ['name' => $c['name'], 'arguments' => (object)($c['params'] ?? [])]], $calls)];
+                $messages[] = array_merge(['role' => 'assistant', 'content' => (string)($turn['content'] ?? '')], $aExtra);
+                if (empty($calls)) {
+                    // Described-not-acted: the coder wrote prose / a code block but
+                    // issued NO tool call, so nothing was written and the worktree
+                    // stays empty (the qwen3.5:9b "I'll create the file…" then quit).
+                    // Nudge ONCE to actually call the tool instead of ending the
+                    // subtask with no changes (mirrors the main agent loop).
+                    if (!$nudged && $i < $maxIter - 1 && class_exists('Session') && Session::looksLikeUnactedAction((string)($turn['content'] ?? ''))) {
+                        $nudged = true;
+                        $messages[] = ['role' => 'user', 'content' => "You described the change but did NOT call a tool, so nothing was actually written to the worktree. Make the change NOW by calling write/edit (or bash) with the real file contents. Output ONLY the tool call — no prose, no ``` fences."];
+                        continue;
+                    }
+                    break;
+                }
                 foreach ($agent->executeCalls($calls) as $rr) {
                     $name = $rr['name'] ?? '?';
                     $args = isset($rr['arguments']) && is_array($rr['arguments']) ? implode(' ', array_map(fn($v) => is_scalar($v) ? substr((string)$v, 0, 40) : '', $rr['arguments'])) : '';

@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.8.92 (2026-06-12) — crew coder no longer quits without editing (qwen3.5:9b)
+
+### Fixed
+- **Crew coders no longer end a subtask with "no changes" when the model describes the edit instead of calling a tool.** The coder loop broke the instant a turn produced no tool call — so a model like `qwen3.5:9b` that opened with "I'll create greet.py…" (prose, no `write` call) left the worktree empty and the subtask merged nothing (it only succeeded after escalating to a heavier model). The coder loop now carries the same one-shot "you described it but didn't act" nudge as the main agent loop (`Session::looksLikeUnactedAction`, now reusable), so the coder is told to actually call write/edit and retries instead of quitting. It also attaches `tool_calls` to the stored assistant turn in Ollama's wire shape so tool results correlate to the originating call during native function-calling. Verified end-to-end with the recommended crew model (`qwen3.5:9b`): Director → Coder → Auditor → merged.
+
 ## v0.8.91 (2026-06-12) — status badge driven by the prompt, not a timer
 
 ### Fixed
