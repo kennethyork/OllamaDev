@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.8.86 (2026-06-11) — VPS setup defaults to qwen3.5:9b
+
+### Changed
+- **`scripts/setup-vps.sh` now defaults to `qwen3.5:9b`** (≈6.6 GB) instead of `qwen2.5-coder:7b`. It reports a `tools` capability and fits in 24 GB with room to back *every* crew role on one model — so a small / CPU-only host (e.g. a 24 GB, 12-core VPS) runs the whole crew without swap thrash, matching the recommended local crew default. `qwen2.5-coder:7b` / `:14b` remain selectable via `--coder7b` / `--coder14b` (and `--qwen35` is explicit). The 22 GB+ models stay refused.
+
 ## v0.8.85 (2026-06-11) — detect tool support from the engine, not a hardcoded list
 
 ### Fixed
