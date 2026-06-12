@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.8.85 (2026-06-11) — detect tool support from the engine, not a hardcoded list
+
+### Fixed
+- **No more false "⚠ <model> is unreliable at tool use" warnings.** The check flagged any model absent from a hardcoded preset list — so capable models like `gemma4`, `glm`, and `mistral-nemo` were wrongly nagged (and pushed toward chat mode) even though they call tools fine. The CLI now asks the engine directly — Ollama's `/api/show` `capabilities` (`src/75-agent.php::modelSupportsTools`, mirroring the existing vision detection): a model that reports a `tools` capability is trusted, one whose capabilities omit `tools` still gets the nudge (e.g. completion-only `codellama`), and an unknown/unreachable engine errs toward no warning. No preset list is involved in the verdict.
+
 ## v0.8.84 (2026-06-11) — reliable tool calls on any model + desktop permission isolation
 
 ### Fixed
