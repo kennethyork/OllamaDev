@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.8.90 (2026-06-12) — desktop status badge tracks work correctly
+
+### Fixed
+- **The desktop (ADE) terminal status badge no longer sits on "idle" while the agent is working.** The badge only flipped to "running" when the app *programmatically* sent text (voice/task hand-off/Send button) — a prompt typed directly into the terminal and submitted with Enter never left "idle" the whole time the model worked. Submitting a line now marks the terminal busy (`Terminal.markBusy`), for both agent and chat panes. Output that resumes after the badge had gone "done" (e.g. a slow model finishing load and starting to stream) re-arms it to "running", so a cold-start think gap no longer strands it.
+
 ## v0.8.89 (2026-06-12) — live streaming + robust tool-calling across all models
 
 ### Fixed

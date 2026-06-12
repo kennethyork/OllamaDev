@@ -704,7 +704,7 @@ Terminal.prototype.mount = function (host) {
     // Wire the touch input: send the typed line (+newline) and the control keys.
     var sendRaw = function (s) { try { window.termWrite(self.id, strToB64(s)); } catch (e) {} };
     var tin = host.querySelector('.term-input');
-    var sendLine = function () { sendRaw(tin.value + '\n'); tin.value = ''; tin.focus(); };
+    var sendLine = function () { sendRaw(tin.value + '\n'); self.markBusy(); tin.value = ''; tin.focus(); };
     tin.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); sendLine(); } });
     host.querySelector('.term-send').onclick = sendLine;
     var KEYS = { tab: '\t', esc: '\x1b', up: '\x1b[A', down: '\x1b[B', cc: '\x03', cd: '\x04' };
@@ -745,7 +745,12 @@ Terminal.prototype.mount = function (host) {
     // The screen IS the terminal: forward every keystroke straight to the pty.
     this.screen.addEventListener('keydown', function (e) {
         var data = keyToBytes(e);
-        if (data !== null) { e.preventDefault(); try { window.termWrite(self.id, strToB64(data)); } catch (err) {} }
+        if (data !== null) {
+            e.preventDefault();
+            try { window.termWrite(self.id, strToB64(data)); } catch (err) {}
+            // Submitting a line (Enter) kicks off agent work → leave 'idle'.
+            if (data.indexOf('\r') !== -1) self.markBusy();
+        }
     });
     this.screen.addEventListener('paste', function (e) {
         var t = (e.clipboardData || window.clipboardData).getData('text');
@@ -844,6 +849,11 @@ Terminal.prototype.setStatus = function (s) {
         var lbl = this.badgeEl.querySelector('.b-label'); if (lbl) lbl.textContent = s;
     }
 };
+// Mark the terminal as actively working. Called when a line is submitted (Enter)
+// so the badge leaves 'idle' the moment the agent starts — previously only the
+// programmatic send paths set 'running', so directly-typed prompts stayed 'idle'
+// the whole time the agent worked.
+Terminal.prototype.markBusy = function () { this.setStatus('running'); this.lastData = Date.now(); };
 Terminal.prototype.newLine = function () { this.line = document.createElement('div'); this.line.className = 'term-line'; this.screen.appendChild(this.line); };
 // Remove the last character of the current line (handles the pty's \b \b erase).
 Terminal.prototype.backspace = function () {
@@ -994,6 +1004,9 @@ Terminal.prototype.poll = function () {
     if (window.__odvOpenStream && !this._triedStream) {
         this._triedStream = true;
         this._es = window.__odvOpenStream(this.id, this.offset, function (data, offset) {
+            // Output resumed after we'd marked it 'done' (e.g. a slow model finished
+            // loading and started streaming) → it's working again.
+            if (self.status === 'done') self.setStatus('running');
             self.write(b64ToStr(data)); self.offset = offset; self.lastData = Date.now();
             if (self.status === 'running' && self.lastData && Date.now() - self.lastData > 2500) self.setStatus('done');
         }, function () { self._es = null; if (self.polling) self._pollLoop(); });
@@ -1008,7 +1021,10 @@ Terminal.prototype._pollLoop = function () {
     function tick() {
         if (!self.polling) return;
         Promise.resolve(window.termRead(self.id, self.offset)).then(function (r) {
-            if (r && r.data) { self.write(b64ToStr(r.data)); self.offset = r.offset; self.lastData = Date.now(); }
+            if (r && r.data) {
+                if (self.status === 'done') self.setStatus('running'); // output resumed
+                self.write(b64ToStr(r.data)); self.offset = r.offset; self.lastData = Date.now();
+            }
             // Agent "running" → "done" once output has been quiet for ~2.5s.
             if (self.status === 'running' && self.lastData && Date.now() - self.lastData > 2500) self.setStatus('done');
         }).catch(function () {}).then(function () { if (self.polling) setTimeout(tick, 80); });
