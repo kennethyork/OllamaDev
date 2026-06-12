@@ -90,6 +90,20 @@ class OllamaClient {
     private static int $lastCtx = 0;     // last effective num_ctx we sent
     private static array $capCache = []; // model => capability tags from /api/show
 
+    // Per-process override for Ollama's `think` parameter (thinking models):
+    //   null  → don't send it (model's own default — thinking models think)
+    //   false → think:false (skip chain-of-thought: faster + clean output)
+    //   true  → think:true (force it on)
+    // The agent sets this per turn (off for tool/agent + crew work, on for chat),
+    // and `/think on|off|auto` overrides via config. See Agent::applyThink().
+    private static ?bool $think = null;
+    public static function setThink(?bool $v): void { self::$think = $v; }
+    // Add the top-level `think` field to a request payload when an override is set.
+    private static function withThink(array $params): array {
+        if (self::$think !== null) $params['think'] = self::$think;
+        return $params;
+    }
+
     // Generation options applied to every chat request. Crucially this sets
     // num_ctx: without it Ollama silently caps context at 2048 tokens, which
     // truncates the system prompt and tool history out from under the agent.
@@ -187,7 +201,7 @@ class OllamaClient {
         // Stream when a handler is present so tokens appear as they're produced;
         // fall back to a single blocking response when no handler wants chunks.
         $stream = $handler !== null && (bool)Config::get('ollama.stream', true);
-        $params = ['model' => $model, 'messages' => $messages, 'stream' => $stream, 'options' => self::chatOptions($model, $this->host)];
+        $params = self::withThink(['model' => $model, 'messages' => $messages, 'stream' => $stream, 'options' => self::chatOptions($model, $this->host)]);
         $ch = curl_init($this->host . '/api/chat');
         $opts = [
             CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
@@ -245,7 +259,7 @@ class OllamaClient {
     // decoded object, or null on failure. Used by Crew's Director/Auditor so
     // local models reliably emit parseable plans/verdicts.
     public function chatJson(string $model, array $messages): ?array {
-        $params = ['model' => $model, 'messages' => $messages, 'stream' => false, 'format' => 'json', 'options' => self::chatOptions($model, $this->host)];
+        $params = self::withThink(['model' => $model, 'messages' => $messages, 'stream' => false, 'format' => 'json', 'options' => self::chatOptions($model, $this->host)]);
         $ch = curl_init($this->host . '/api/chat');
         curl_setopt_array($ch, [
             CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
@@ -266,7 +280,7 @@ class OllamaClient {
     // tools.mode=structured to make tool calls reliable on local models. Returns
     // the decoded object, or null on failure.
     public function chatStructured(string $model, array $messages, array $schema): ?array {
-        $params = ['model' => $model, 'messages' => $messages, 'stream' => false, 'format' => $schema, 'options' => self::chatOptions($model, $this->host)];
+        $params = self::withThink(['model' => $model, 'messages' => $messages, 'stream' => false, 'format' => $schema, 'options' => self::chatOptions($model, $this->host)]);
         $ch = curl_init($this->host . '/api/chat');
         curl_setopt_array($ch, [
             CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
@@ -287,7 +301,7 @@ class OllamaClient {
     //   ['ok'=>true, 'content'=>string, 'calls'=>[['name'=>,'params'=>], ...]]
     //   ['ok'=>false, 'unsupported'=>bool, 'error'=>string]
     public function chatWithTools(string $model, array $messages, array $tools): array {
-        $params = ['model' => $model, 'messages' => $messages, 'tools' => $tools, 'stream' => false, 'options' => self::chatOptions($model, $this->host)];
+        $params = self::withThink(['model' => $model, 'messages' => $messages, 'tools' => $tools, 'stream' => false, 'options' => self::chatOptions($model, $this->host)]);
         $ch = curl_init($this->host . '/api/chat');
         curl_setopt_array($ch, [
             CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
