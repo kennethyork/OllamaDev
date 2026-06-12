@@ -128,7 +128,12 @@ echo "\n== Tool-call parser (regression) ==\n";
 // Extract both parser methods into a throwaway class and exercise them.
 if (preg_match('/public static function extractJsonToolCalls\(string \$content\): array \{.*?\n    \}/s', $src, $e1)
  && preg_match('/public function parseToolCalls\(string \$content\): array \{.*?\n    \}/s', $src, $e2)) {
-    eval('class _PC { ' . $e1[0] . "\n" . $e2[0] . ' }');
+    // parseToolCalls now also falls back to function-call syntax; pull those
+    // helpers in too (they no-op when Tools isn't present in the throwaway class).
+    preg_match('/public static function extractCallSyntax\(string \$content\): array \{.*?\n    \}/s', $src, $e3);
+    preg_match('/private static function parseCallArgs\(string \$inner, string \$tool\): \?array \{.*?\n    \}/s', $src, $e4);
+    preg_match('/private static function firstToolParam\(string \$tool\): string \{.*?\n    \}/s', $src, $e5);
+    eval('class _PC { ' . $e1[0] . "\n" . $e2[0] . "\n" . ($e3[0] ?? '') . "\n" . ($e4[0] ?? '') . "\n" . ($e5[0] ?? '') . ' }');
     $pc = new _PC();
     $a = $pc->parseToolCalls('<tool_code>{"name":"ls","arguments":{"path":"."}}</tool_code>');
     ok('parses a wrapped JSON tool call', count($a) === 1 && $a[0]['name'] === 'ls');
@@ -136,6 +141,30 @@ if (preg_match('/public static function extractJsonToolCalls\(string \$content\)
     ok('parses the text name/params format', count($b) === 1 && $b[0]['name'] === 'write' && ($b[0]['params']['file_path'] ?? '') === 'a.txt');
     $c = $pc->parseToolCalls("Sure! I'll find the file and list the diff for you.");
     ok('plain prose does NOT trigger false tool calls', count($c) === 0);
+
+    // Function-call syntax fallback (mistral-style `view(...)`). extractCallSyntax
+    // needs a Tools class for the known-name allowlist + first-param lookup; stub a
+    // minimal one so prose like view(file_path="x") resolves to a real call while
+    // ordinary parentheses don't.
+    if (!class_exists('Tools')) {
+        eval('class Tools {
+            public static function all() { return ["view","write","bash"]; }
+            public static function schemas() { return [
+                ["function"=>["name"=>"view","parameters"=>["properties"=>["file_path"=>["type"=>"string"]]]]],
+                ["function"=>["name"=>"bash","parameters"=>["properties"=>["command"=>["type"=>"string"]]]]],
+            ]; }
+        }');
+    }
+    if (class_exists('Tools')) {
+        $d = $pc->parseToolCalls('To read it I will use view(file_path="build.txt") now.');
+        ok('parses toolname(arg="val") function-call syntax',
+            count($d) === 1 && $d[0]['name'] === 'view' && ($d[0]['params']['file_path'] ?? '') === 'build.txt');
+        $e = $pc->parseToolCalls('view("notes.md")');
+        ok('maps a single positional arg to the first schema param',
+            count($e) === 1 && ($e[0]['params']['file_path'] ?? '') === 'notes.md');
+        $f = $pc->parseToolCalls("This function helps you understand the code better.");
+        ok('prose with unknown name( does NOT false-fire', count($f) === 0);
+    }
 } else {
     ok('parser methods extractable', false, 'methods not found');
 }

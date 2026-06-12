@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.8.89 (2026-06-12) — live streaming + robust tool-calling across all models
+
+### Fixed
+- **The CLI no longer "stops mid answer" with a raw Ollama error.** When a model (notably gemma4) emitted a malformed native tool-call, Ollama's server rejected it with a Go-side `Value looks like object, but can't find closing '}' symbol` 500 — and the agent surfaced that raw error *as the answer* and ended the turn. The native path now retries once (the bad JSON is usually stochastic) and, if it still fails, falls through to the tolerant text parser + `repairJson` instead of dead-ending (`src/75-agent.php`).
+- **Small but tool-capable models can finally use tools.** Sessions forced *every* small model (≤~3.5 GB / `3b`-ish names) into tools-off chat mode by size alone — so `llama3.2:3b`, which Ollama reports as tool-capable and calls natively just fine, could never read a file. Chat-mode default is now capability-aware (`Agent::shouldDefaultToChat`): tool-capable → agent mode regardless of size; only a *small AND non-tool* model defaults to pure chat.
+- **Capable models no longer emit text pseudo-calls that silently no-op.** In native mode the system prompt was still showing the `<tool_code>{…}` text protocol and few-shot examples, luring models like mistral into writing `write{…}` / `view(…)` in prose that bypassed Ollama's structured `tool_calls`. The native prompt now tells the model to use its native function-calling and omits the text format; the `<tool_code>` few-shot block is restricted to actual text mode.
+- **Prose function-call syntax is now recognized.** A new tolerant parser catches `toolname(arg="val", …)` syntax (constrained to known tool names so ordinary prose never false-fires) — recovering calls from weaker models that degrade to that form when the native tool catalog is large.
+- **No more spinning on a stuck tool call.** A weak model that re-issued the *exact same* failing call (e.g. `edit` with a missing `old_string`) every iteration burned all `maxIterations` and looked hung. The loop now detects an all-repeat turn, nudges once to change approach, and stops cleanly if it repeats again.
+
+### Added
+- **Live token streaming in the agentic loop.** Native tool-calling ran with `stream:false`, so the screen sat blank while a slow model (e.g. gemma4:31b on CPU) generated a whole turn. `chatWithTools` now streams: content appears token-by-token as it's produced and reasoning shows dimmed as progress, while `tool_calls` are still collected structurally. The markdown restyle only buffers answer content (not thinking/tool lines), so it stays correct.
+
 ## v0.8.88 (2026-06-11) — agent persistence + cleaner thinking-model output
 
 ### Fixed

@@ -24,7 +24,7 @@ class Session {
         // Load this session's cumulative token totals so /status survives resumes.
         Usage::bindSession($this->id);
         // Small models do tool-calling poorly; default them to pure chat.
-        $this->agent->setChatMode($this->agent->isSmallModel());
+        $this->agent->setChatMode($this->agent->shouldDefaultToChat());
     }
 
     // Apply an explicit model to this session, overriding whatever a resumed session
@@ -37,7 +37,7 @@ class Session {
         $this->agent->setModel($resolved);
         $this->model = $resolved;
         $GLOBALS['currentSessionModel'] = $resolved;
-        $this->agent->setChatMode($this->agent->isSmallModel());
+        $this->agent->setChatMode($this->agent->shouldDefaultToChat());
     }
 
     private function ensureDataDir(): void { $dir = Config::sessionsDir(); if (!is_dir($dir)) mkdir($dir, 0755, true); }
@@ -720,7 +720,7 @@ ART;
         $this->model = $resolved;
         $GLOBALS['currentSessionModel'] = $resolved;
         // Re-evaluate chat mode for the new model's size.
-        $this->agent->setChatMode($this->agent->isSmallModel());
+        $this->agent->setChatMode($this->agent->shouldDefaultToChat());
         // Clear the screen and redraw the banner so the header always reflects
         // the current model (the original banner is frozen in scrollback).
         return "\033[2J\033[H" . $this->renderBanner() . "\033[32m  ✓ switched to $resolved\033[0m\n";
@@ -735,7 +735,7 @@ ART;
         $this->save();
         echo "\033[2m  regenerating…\033[0m";
         $cleared = false;
-        $this->agenticLoop(function($chunk) use (&$cleared) {
+        $this->agenticLoop(function($chunk, $kind = 'content') use (&$cleared) {
             if (!$cleared) { echo "\r\033[K"; $cleared = true; }
             echo $chunk;
         });
@@ -1084,9 +1084,12 @@ $GLOBALS['currentSessionModel'] = null;
             // skip the restyle there (raw markdown streams cleanly); real ttys keep it.
             $renderMd = Render::enabled() && !getenv('OLLAMADEV_SIMPLE_INPUT');
             $finalBuf = '';
-            $final = $this->agenticLoop(function($chunk) use (&$cleared, &$finalBuf, $renderMd) {
+            $final = $this->agenticLoop(function($chunk, $kind = 'content') use (&$cleared, &$finalBuf, $renderMd) {
                 if (!$cleared) { echo "\r\033[K"; $cleared = true; }
-                if ($renderMd) { $finalBuf .= $chunk; }
+                // Only buffer answer content for the post-stream markdown restyle —
+                // dimmed thinking and tool lines must not be counted, or the cursor
+                // math that repositions over the final answer goes wrong.
+                if ($renderMd && $kind === 'content') { $finalBuf .= $chunk; }
                 echo $chunk;
             });
             if (!$cleared) echo "\r\033[K";
@@ -1270,13 +1273,24 @@ $GLOBALS['currentSessionModel'] = null;
         $maxIter = (int)Config::get('agents.maxIterations', 8);
         $final = '';
         $nudgedAct = false;   // one-shot "you described it but didn't call a tool" nudge
+        $seenCalls = [];      // signatures of calls already made → detect stuck loops
+        $loopNudged = false;  // one-shot nudge when the model repeats an identical call
+        // Live token streamer: the model's reply appears as it's generated instead
+        // of the screen sitting blank until the whole turn finishes. Content tokens
+        // are shown normally (and tagged 'content' so the caller can buffer them for
+        // the markdown restyle); thinking tokens are shown dimmed as progress and
+        // tagged 'thinking' so they're NOT mistaken for the answer.
+        $live = $emit ? function($delta, $isThinking) use ($emit) {
+            $emit($isThinking ? "\033[2m{$delta}\033[0m" : $delta, $isThinking ? 'thinking' : 'content');
+        } : null;
         if (class_exists('Interrupt')) Interrupt::begin();
         try {
         for ($i = 0; $i < $maxIter; $i++) {
             if (class_exists('Interrupt') && Interrupt::aborted()) break;
-            $turn = $this->agent->chatTurn($this->getMessages());
+            $turn = $this->agent->chatTurn($this->getMessages(), $live);
             $response = $turn['content'];
             $calls = $turn['calls'];
+            $streamed = !empty($turn['streamed']);  // content already shown live?
 
             $clean = $this->agent->stripToolMarkup($response);
             // Store the assistant turn (cleaned, so markup doesn't pollute history).
@@ -1292,6 +1306,28 @@ $GLOBALS['currentSessionModel'] = null;
             }
             $this->addMessage('assistant', $clean !== '' ? $clean : $response, $assistantExtra);
 
+            // Stuck-loop guard: a weak model often re-issues the EXACT same failing
+            // call (e.g. `edit` with a missing old_string) every iteration, burning
+            // all maxIterations and looking hung. If every call this turn duplicates
+            // one already made, nudge once to change approach; if it repeats again,
+            // stop and return rather than spinning.
+            if (!empty($calls)) {
+                $sigs = array_map(fn($c) => $c['name'] . '|' . md5(json_encode($c['params'] ?? [])), $calls);
+                $allRepeat = true;
+                foreach ($sigs as $s) { if (!isset($seenCalls[$s])) $allRepeat = false; }
+                foreach ($sigs as $s) { $seenCalls[$s] = true; }
+                if ($allRepeat) {
+                    if (!$loopNudged) {
+                        $loopNudged = true;
+                        $this->addMessage('user', "That exact tool call was already tried and didn't move things forward. Do something DIFFERENT — fix the arguments, try another tool, or if you have enough information, give your final answer now. Do not repeat the same call.");
+                        continue;
+                    }
+                    if ($emit && !$streamed && $clean !== '') $emit($clean . "\n");
+                    if ($emit) $emit("\033[2m  ⓘ stopped: the model kept repeating the same tool call.\033[0m\n", 'tool');
+                    return $clean !== '' ? $clean : $final;
+                }
+            }
+
             $toolResults = $this->agent->executeCalls($calls);
             if (empty($toolResults)) {
                 // Described-not-called: the model wrote a code block / said it would
@@ -1306,12 +1342,14 @@ $GLOBALS['currentSessionModel'] = null;
                     $this->addMessage('user', $msg);
                     continue;
                 }
-                if ($emit) $emit($clean !== '' ? $clean : trim($response));
+                if ($emit && !$streamed) $emit($clean !== '' ? $clean : trim($response));
                 return $clean !== '' ? $clean : trim($response);
             }
 
-            // Show the model's reasoning text (without the tool markup) before results.
-            if ($clean !== '' && $emit) $emit($clean . "\n");
+            // Show the model's reasoning text (without the tool markup) before
+            // results. When it already streamed live, just close the line.
+            if ($streamed) { if ($clean !== '' && $emit) $emit("\n", 'tool'); }
+            elseif ($clean !== '' && $emit) $emit($clean . "\n");
             $maxOut = (int)Config::get('agents.maxToolOutput', 12000);
             foreach ($toolResults as $result) {
                 // Cap result size so a single big read/grep can't overflow the
@@ -1332,12 +1370,12 @@ $GLOBALS['currentSessionModel'] = null;
                         $preview = ($m[1] === 'WRITE' ? 'wrote ' : 'edited ') . $m[2];
                     }
                     if (strlen($preview) > 100) $preview = substr($preview, 0, 100) . '…';
-                    $emit("\033[2m  ⏺ {$name}  {$preview}\033[0m\n");
+                    $emit("\033[2m  ⏺ {$name}  {$preview}\033[0m\n", 'tool');
                 }
             }
             $final = $clean;
         }
-        if (!(class_exists('Interrupt') && Interrupt::aborted()) && $emit) $emit("\n(reached max tool iterations)\n");
+        if (!(class_exists('Interrupt') && Interrupt::aborted()) && $emit) $emit("\n(reached max tool iterations)\n", 'tool');
         } finally {
             if (class_exists('Interrupt')) Interrupt::end();
         }

@@ -53,16 +53,24 @@ class Agent {
             return ['role' => 'system', 'content' => $prompt . $projectMemory];
         }
 
-$tools = "You have tools available for acting on the project: read/view files, write/edit files, list/search (ls, glob, grep, find), run shell commands (bash), git operations, and code navigation. When a capable model is used these are provided automatically; otherwise call one with:
-<tool_code>{\"name\": \"TOOL\", \"arguments\": {\"PARAM\": \"VALUE\"}}</tool_code>
-
-Use a tool ONLY when the request needs it. For greetings, questions, or explanations, just reply in plain text - do not call a tool.";
+        // Resolve the tool mechanism up front: the system prompt for NATIVE mode
+        // must NOT show the text-format <tool_code> protocol. Doing so lures capable
+        // models (mistral, qwen, …) into emitting a text pseudo-call like
+        // `write{"file_path":…}` that bypasses Ollama's structured tool_calls and our
+        // parser never sees — so the action silently no-ops. In native mode we just
+        // tell the model the tools are wired in and to call them natively.
+        $toolMode = $this->effectiveToolMode();
+        $toolList = "read/view files, write/edit files, list/search (ls, glob, grep, find), run shell commands (bash), git operations, and code navigation";
+        if ($toolMode === 'native') {
+            $tools = "You have tools available for acting on the project: {$toolList}. They are wired directly into this conversation — invoke them with your native function/tool-calling. Do NOT write tool calls as text, JSON, or code blocks; just call the tool.\n\nUse a tool ONLY when the request needs it. For greetings, questions, or explanations, just reply in plain text - do not call a tool.";
+        } else {
+            $tools = "You have tools available for acting on the project: {$toolList}. When a capable model is used these are provided automatically; otherwise call one with:\n<tool_code>{\"name\": \"TOOL\", \"arguments\": {\"PARAM\": \"VALUE\"}}</tool_code>\n\nUse a tool ONLY when the request needs it. For greetings, questions, or explanations, just reply in plain text - do not call a tool.";
+        }
 
         // Text-protocol tool-calling (tools.mode=text): we don't rely on Ollama's
         // native function-calling at all — the model emits tool calls as JSON and
         // our own parser extracts them. Give it the exact format + a tool catalog
         // so it knows what's callable without the native schema.
-        $toolMode = $this->effectiveToolMode();
         if ($toolMode === 'text' || $toolMode === 'structured') {
             $tools .= "\n\nAVAILABLE TOOLS (required args bare, [optional] in brackets):\n" . Tools::textCatalog();
         }
@@ -75,10 +83,12 @@ Use a tool ONLY when the request needs it. For greetings, questions, or explanat
                 . "To act, add entries to tool_calls (using the exact tool names and params above); leave it [] when you're just replying. Put any prose in message. Work one step at a time and read tool results before continuing." . $actNudge;
         }
 
-        // Small models can't use native tool-calling, so give them explicit
-        // few-shot examples of the <tool_code> format. Never in structured mode
-        // (which uses the {message,tool_calls} envelope, not <tool_code>).
-        if ($toolMode !== 'structured' && ($this->isSmallModel() || $toolMode === 'text')) {
+        // Few-shot examples of the <tool_code> text format — ONLY in text mode,
+        // which is the only mode that actually parses that format. In native mode
+        // these examples would teach the model to emit text-format calls that bypass
+        // the structured tool_calls API (the mistral `write{…}` failure), and
+        // structured mode uses the {message,tool_calls} envelope instead.
+        if ($toolMode === 'text') {
             $tools .= "
 
 When an action IS needed, output ONLY the tool call line in exactly this format - no other text:
@@ -144,6 +154,17 @@ User: run the tests
         // Fall back to a name hint (e.g. 1b/2b/3b/mini/tiny/small).
         return (bool)preg_match('/(?:^|[:\-_ ])(0\.\d|1|1\.\d|2|2\.\d|3|3\.\d)b\b|mini|tiny|small|smollm/i', $this->model);
     }
+    // Should this model DEFAULT to pure chat (tools off) when a session opens?
+    // Only when it genuinely can't be trusted with tools: a small model that the
+    // engine does NOT report as tool-capable. A small-but-tool-capable model
+    // (llama3.2:3b, qwen2.5-coder:3b, …) keeps tools on — Ollama's native
+    // function-calling is reliable for them. Big models always get tools (native
+    // carries its own graceful fallback). The user can still flip with /chat /agent.
+    public function shouldDefaultToChat(): bool {
+        if ($this->modelSupportsTools() === true) return false; // engine: tool-capable → agent mode
+        if (!$this->isSmallModel()) return false;               // big model → trust native + fallback
+        return true;                                            // small AND not tool-capable → pure chat
+    }
     public function getModel(): string { return $this->model; }
     public function listModels(): array { return $this->client->listModels(); }
     public function listModelsDetailed(): array { return $this->client->listModelsDetailed(); }
@@ -206,7 +227,7 @@ User: run the tests
     // One model turn. Uses Ollama's native function-calling when the model
     // supports it (structured tool_calls, no parsing); otherwise falls back to
     // text-format parsing. Returns ['content'=>string, 'calls'=>[...]].
-    public function chatTurn(array $messages): array {
+    public function chatTurn(array $messages, ?callable $stream = null): array {
         // Keep the prompt in sync with plan mode: when a tool (exit_plan_mode) or
         // command flips plan mode mid-session, rebuild so the "PLAN MODE: read-only"
         // directive is added/dropped on the very next turn — otherwise an approved
@@ -214,11 +235,16 @@ User: run the tests
         if (class_exists('Permission') && Permission::inPlanMode() !== $this->builtPlanMode) $this->systemPrompt = $this->buildSystemPrompt();
         $allMessages = array_merge([$this->systemPrompt], $this->wire($messages));
 
-        // Chat mode: pure conversation, no tools offered or parsed.
+        // Chat mode: pure conversation, no tools offered or parsed. Stream tokens
+        // live (content is clean prose here) so the screen isn't blank while a slow
+        // model generates.
         if ($this->chatMode) {
             $resp = '';
-            $this->client->chatWithModel($this->model, $allMessages, function($c) use (&$resp) { $resp .= $c; });
-            return ['content' => $resp, 'calls' => []];
+            $this->client->chatWithModel($this->model, $allMessages, function($c) use (&$resp, $stream) {
+                $resp .= $c;
+                if ($stream) $stream($c, false);
+            });
+            return ['content' => $resp, 'calls' => [], 'streamed' => $stream !== null];
         }
 
         // Bail out before issuing another request if the user pressed Ctrl-C.
@@ -251,13 +277,13 @@ User: run the tests
         // Native function-calling (the 'auto' default, and explicit tools.mode=native).
         // Try native tools unless we already learned this model lacks support.
         if (($GLOBALS['nativeTools'][$this->model] ?? null) !== false) {
-            $res = $this->client->chatWithTools($this->model, $allMessages, Tools::schemas());
+            $res = $this->client->chatWithTools($this->model, $allMessages, Tools::schemas(), $stream);
             if (!empty($res['ok'])) {
                 $GLOBALS['nativeTools'][$this->model] = true;
                 $calls = $res['calls'];
                 // Some models emit text-format calls even in native mode; catch them.
                 if (empty($calls)) $calls = $this->parseToolCalls($res['content']);
-                return ['content' => $res['content'], 'calls' => $calls];
+                return ['content' => $res['content'], 'calls' => $calls, 'streamed' => $stream !== null];
             }
             if (!empty($res['unsupported'])) {
                 $GLOBALS['nativeTools'][$this->model] = false; // remember and stop retrying
@@ -280,8 +306,20 @@ User: run the tests
                     }
                 }
             } else {
-                // Transient/other error: surface as empty turn rather than looping.
-                return ['content' => $res['error'] ?? '', 'calls' => []];
+                // Native call errored mid-flight — most commonly the model emitted
+                // malformed tool-call JSON that Ollama's server-side template parser
+                // rejects with a 500 ("Value looks like object, but can't find closing
+                // '}' symbol"); gemma is prone to this on multi-line/nested arguments.
+                // Do NOT surface Ollama's raw Go error as the answer, and do NOT
+                // dead-end the turn. Retry native once (the bad JSON is usually
+                // stochastic), then fall through to the text-format path below, whose
+                // tolerant parser + repairJson can recover the call.
+                $res2 = $this->client->chatWithTools($this->model, $allMessages, Tools::schemas());
+                if (!empty($res2['ok'])) {
+                    $calls = $res2['calls'] ?: $this->parseToolCalls($res2['content']);
+                    return ['content' => $res2['content'], 'calls' => $calls];
+                }
+                // still failing → text-format fallback (do not return the raw error)
             }
         }
 
@@ -448,6 +486,11 @@ User: run the tests
         foreach (self::extractJsonToolCalls($content) as $c) {
             $content = str_replace($c['raw'], '', $content);
         }
+        // Also strip toolname(args) function-call syntax we recognized as a call,
+        // so a model that "narrated" the call in prose doesn't leak it into display.
+        foreach (self::extractCallSyntax($content) as $c) {
+            if (!empty($c['raw'])) $content = str_replace($c['raw'], '', $content);
+        }
         // Strip the wrapper tags in every delimiter style models emit, including
         // gemma's pipe-delimited forms: <tool_call>, </tool_call>, <tool_call|>,
         // <|tool_call|>, <|tool_call>. The optional pipes/whitespace are what the
@@ -479,7 +522,94 @@ public function parseToolCalls(string $content): array {
                 $calls[] = ['name' => trim($m[1]), 'params' => $params];
             }
         }
+        // Final fallback: Python/JS function-call syntax some models emit in prose
+        // instead of structured tool_calls — e.g. view(file_path="build.txt") or
+        // write(file_path="a.txt", content="hi"). Small tool-capable models
+        // (mistral:7b, …) degrade to this when the native tool catalog is large.
+        if (empty($calls)) $calls = self::extractCallSyntax($content);
         return $calls;
+    }
+
+    // Extract `toolname(arg="val", arg2='val2')` function-call syntax. Constrained
+    // to KNOWN registered tool names so ordinary prose with parentheses never
+    // false-fires. Handles keyword args (quoted or bare) and a single positional
+    // string (mapped to the tool's first schema property). String-aware paren
+    // balancing so a value containing ')' doesn't truncate the call.
+    public static function extractCallSyntax(string $content): array {
+        if (!class_exists('Tools')) return [];
+        $names = Tools::all();
+        if (empty($names)) return [];
+        $calls = [];
+        $len = strlen($content);
+        foreach ($names as $name) {
+            $off = 0;
+            while (($p = strpos($content, $name, $off)) !== false) {
+                $off = $p + 1;
+                // require a word boundary before and `(` (optional spaces) after
+                if ($p > 0 && (ctype_alnum($content[$p-1]) || $content[$p-1] === '_')) continue;
+                $q = $p + strlen($name);
+                while ($q < $len && ($content[$q] === ' ' || $content[$q] === "\t")) $q++;
+                if ($q >= $len || $content[$q] !== '(') continue;
+                // balanced ) scan, respecting quotes
+                $depth = 0; $inStr = false; $quote = ''; $esc = false; $end = -1;
+                for ($j = $q; $j < $len; $j++) {
+                    $c = $content[$j];
+                    if ($inStr) {
+                        if ($esc) $esc = false;
+                        elseif ($c === '\\') $esc = true;
+                        elseif ($c === $quote) $inStr = false;
+                        continue;
+                    }
+                    if ($c === '"' || $c === "'") { $inStr = true; $quote = $c; }
+                    elseif ($c === '(') $depth++;
+                    elseif ($c === ')') { $depth--; if ($depth === 0) { $end = $j; break; } }
+                }
+                if ($end < 0) continue;
+                $inner = trim(substr($content, $q + 1, $end - $q - 1));
+                $params = self::parseCallArgs($inner, $name);
+                if ($params !== null) {
+                    $calls[] = ['name' => $name, 'params' => $params, 'raw' => substr($content, $p, $end - $p + 1)];
+                    $off = $end + 1;
+                }
+            }
+        }
+        return $calls;
+    }
+
+    // Parse the inside of toolname(...) into a params array. Accepts a JSON object,
+    // keyword args (key="v", key='v', key=bare), or a single positional string that
+    // maps to the tool's first schema property. Returns null if nothing parseable
+    // (so a bare `foo()` with no args still yields []).
+    private static function parseCallArgs(string $inner, string $tool): ?array {
+        if ($inner === '') return [];
+        if ($inner[0] === '{') { $j = json_decode($inner, true); if (is_array($j)) return $j; }
+        $params = [];
+        if (preg_match_all('/([A-Za-z_]\w*)\s*[=:]\s*("(?:[^"\\\\]|\\\\.)*"|\'(?:[^\'\\\\]|\\\\.)*\'|[^,]+)/', $inner, $kv, PREG_SET_ORDER)) {
+            foreach ($kv as $p) {
+                $v = trim($p[2]);
+                if (strlen($v) >= 2 && ($v[0] === '"' || $v[0] === "'")) $v = stripcslashes(substr($v, 1, -1));
+                $params[$p[1]] = $v;
+            }
+            if (!empty($params)) return $params;
+        }
+        // single positional string → first schema property of the tool
+        if (preg_match('/^"((?:[^"\\\\]|\\\\.)*)"$|^\'((?:[^\'\\\\]|\\\\.)*)\'$/', $inner, $m)) {
+            $val = stripcslashes($m[1] ?? ($m[2] ?? ''));
+            $first = self::firstToolParam($tool);
+            if ($first !== '') return [$first => $val];
+        }
+        return null;
+    }
+
+    // The first declared parameter name for a tool (from its registered schema),
+    // used to place a single positional call arg. '' if unknown.
+    private static function firstToolParam(string $tool): string {
+        foreach (Tools::schemas() as $s) {
+            if (($s['function']['name'] ?? '') !== $tool) continue;
+            $props = $s['function']['parameters']['properties'] ?? [];
+            if (is_array($props) && $props) return (string)array_key_first($props);
+        }
+        return '';
     }
 
     public function parseGptOssToolCalls(string $content): array {

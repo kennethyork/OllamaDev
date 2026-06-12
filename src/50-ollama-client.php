@@ -286,14 +286,65 @@ class OllamaClient {
     // Native Ollama function-calling. Returns:
     //   ['ok'=>true, 'content'=>string, 'calls'=>[['name'=>,'params'=>], ...]]
     //   ['ok'=>false, 'unsupported'=>bool, 'error'=>string]
-    public function chatWithTools(string $model, array $messages, array $tools): array {
-        $params = ['model' => $model, 'messages' => $messages, 'tools' => $tools, 'stream' => false, 'options' => self::chatOptions($model, $this->host)];
+    // $onDelta, when given, streams the reply so the user sees tokens appear live
+    // instead of a blank screen while a slow model generates. It's called as
+    // $onDelta(string $text, bool $isThinking) for each content/thinking delta;
+    // tool_calls still arrive structured and are accumulated across the stream.
+    public function chatWithTools(string $model, array $messages, array $tools, ?callable $onDelta = null): array {
+        $stream = $onDelta !== null && (bool)Config::get('ollama.stream', true);
+        $params = ['model' => $model, 'messages' => $messages, 'tools' => $tools, 'stream' => $stream, 'options' => self::chatOptions($model, $this->host)];
         $ch = curl_init($this->host . '/api/chat');
-        curl_setopt_array($ch, [
+        $base = [
             CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
             CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 300,
-        ]);
+        ];
+
+        if ($stream) {
+            // Parse Ollama's NDJSON stream: emit content/thinking deltas live and
+            // accumulate tool_calls (which Ollama delivers structured, usually in
+            // the final message). A non-200 can't be read from headers mid-stream,
+            // so we sniff the first line for an {"error":…} object.
+            $content = ''; $buf = ''; $calls = []; $err = ''; $sawAny = false;
+            $base[CURLOPT_WRITEFUNCTION] = function($ch, $data) use (&$content, &$buf, &$calls, &$err, &$sawAny, $onDelta) {
+                if (class_exists('Interrupt') && Interrupt::aborted()) return 0;
+                $buf .= $data;
+                while (($nl = strpos($buf, "\n")) !== false) {
+                    $line = trim(substr($buf, 0, $nl));
+                    $buf = substr($buf, $nl + 1);
+                    if ($line === '') continue;
+                    $j = json_decode($line, true);
+                    if (!is_array($j)) continue;
+                    if (isset($j['error'])) { $err = (string)$j['error']; continue; }
+                    $sawAny = true;
+                    $msg = $j['message'] ?? [];
+                    $cd = $msg['content'] ?? '';
+                    if ($cd !== '') { $content .= $cd; $onDelta($cd, false); }
+                    $td = $msg['thinking'] ?? '';
+                    if ($td !== '') $onDelta($td, true);
+                    foreach (($msg['tool_calls'] ?? []) as $tc) {
+                        $f = $tc['function'] ?? [];
+                        $name = $f['name'] ?? '';
+                        $args = $f['arguments'] ?? [];
+                        if (is_string($args)) $args = json_decode($args, true) ?: [];
+                        if ($name !== '') $calls[] = ['name' => $name, 'params' => is_array($args) ? $args : []];
+                    }
+                    if (!empty($j['done'])) Usage::record($j);
+                }
+                return strlen($data);
+            };
+            curl_setopt_array($ch, $base);
+            curl_exec($ch);
+            $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            if ($err !== '' || ($code !== 200 && !$sawAny)) {
+                $err = $err ?: "HTTP $code";
+                return ['ok' => false, 'unsupported' => stripos($err, 'tool') !== false || stripos($err, 'does not support') !== false, 'error' => $err];
+            }
+            return ['ok' => true, 'content' => $content, 'calls' => $calls];
+        }
+
+        curl_setopt_array($ch, $base);
         $resp = curl_exec($ch);
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
