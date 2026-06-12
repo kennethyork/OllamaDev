@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.8.88 (2026-06-11) — agent persistence + cleaner thinking-model output
+
+### Fixed
+- **The agent no longer stops early when the model talks instead of acting.** The loop ended the moment a turn produced prose but no tool call, and the rescue nudge only covered unacted *edits* — so a model that said "I'll run `ls`…" or "let me check…" without emitting a tool call just quit. `looksLikeUnactedAction` now also catches first-person tool intent (run/read/search/…) and nudges once to actually call the tool. It's first-person only, so a finished answer's advice ("you can run `npm test`") doesn't false-trigger; it fires at most once per turn and touches no request params.
+- **gemma4 (and other thinking models) no longer leak `<tool_call|>` markup into replies.** `stripToolMarkup` now strips the pipe-delimited delimiter variants (`<tool_call|>`, `<|tool_call|>`).
+- **No more duplicated answer in the desktop ADE.** The post-stream markdown restyle repositioned the cursor by counting newlines, which miscounts wrapped lines and printed a second copy; it's now skipped in the embedded terminal (`OLLAMADEV_SIMPLE_INPUT`), where raw markdown streams cleanly. Real ttys keep the restyle.
+
+### Changed
+- Default `agents.maxIterations` headroom guidance raised to 20 for longer multi-step tasks (set per-machine via `config set agents.maxIterations`).
+
 ## v0.8.87 (2026-06-11) — VPS setup script: qwen3.5:9b only
 
 ### Changed
