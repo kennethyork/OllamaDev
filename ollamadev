@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '0.8.93');
+define('OLLAMADEV_VERSION', '0.8.94');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -1150,10 +1150,16 @@ class OllamaClient {
     // $includeThinking=false drops a reasoning model's chain-of-thought (the `thinking`
     // field) and returns only the final answer (`content`) — used by `ollamadev chat`
     // so a plain chat shows the reply, not the model's internal reasoning.
-    public function chatWithModel(string $model, array $messages, ?callable $handler = null, bool $includeThinking = true): string {
+    // $onThinking, when given, receives the model's chain-of-thought deltas as they
+    // stream — so the caller can SHOW the reasoning (e.g. dimmed) live, letting the
+    // user watch where it's heading and Ctrl-C if it's wrong — WITHOUT folding that
+    // reasoning into the returned answer (the saved reply stays answer-only). When
+    // it's null the legacy behavior holds: with $includeThinking, thinking is used
+    // as the visible content only when there's no content delta.
+    public function chatWithModel(string $model, array $messages, ?callable $handler = null, bool $includeThinking = true, ?callable $onThinking = null): string {
         // Stream when a handler is present so tokens appear as they're produced;
         // fall back to a single blocking response when no handler wants chunks.
-        $stream = $handler !== null && (bool)Config::get('ollama.stream', true);
+        $stream = ($handler !== null || $onThinking !== null) && (bool)Config::get('ollama.stream', true);
         $params = ['model' => $model, 'messages' => $messages, 'stream' => $stream, 'options' => self::chatOptions($model, $this->host)];
         $ch = curl_init($this->host . '/api/chat');
         $opts = [
@@ -1166,7 +1172,7 @@ class OllamaClient {
         if ($stream) {
             // Parse Ollama's NDJSON stream line-by-line, emitting content deltas.
             $content = ''; $buf = '';
-            $opts[CURLOPT_WRITEFUNCTION] = function($ch, $data) use (&$content, &$buf, $handler, $includeThinking) {
+            $opts[CURLOPT_WRITEFUNCTION] = function($ch, $data) use (&$content, &$buf, $handler, $includeThinking, $onThinking) {
                 // Ctrl-C during streaming: return 0 to make curl abort the transfer.
                 if (class_exists('Interrupt') && Interrupt::aborted()) return 0;
                 $buf .= $data;
@@ -1176,9 +1182,13 @@ class OllamaClient {
                     if ($line === '') continue;
                     $j = json_decode($line, true);
                     if (!is_array($j)) continue;
-                    $delta = $j['message']['content'] ?? '';
-                    if ($delta === '' && $includeThinking && !empty($j['message']['thinking'])) $delta = $j['message']['thinking'];
-                    if ($delta !== '') { $content .= $delta; if ($handler) $handler($delta); }
+                    $cd = $j['message']['content'] ?? '';
+                    if ($cd !== '') { $content .= $cd; if ($handler) $handler($cd); }
+                    $th = $j['message']['thinking'] ?? '';
+                    if ($th !== '') {
+                        if ($onThinking) $onThinking($th);                                 // show reasoning live, keep it out of the answer
+                        elseif ($includeThinking && $cd === '') { $content .= $th; if ($handler) $handler($th); }  // legacy: thinking stands in for content
+                    }
                     if (!empty($j['done'])) Usage::record($j);
                 }
                 return strlen($data);
@@ -7073,7 +7083,7 @@ class Crew {
             foreach ($jobs as $idx => $job) {
                 $host = $spread ? $hosts[$idx % count($hosts)] : '';
                 echo "\n{$b}▸ Coder {$job['n']}{$r} {$d}[" . ($job['st']['role'] ?? 'coder') . "] {$job['branch']}" . ($host !== '' ? " · {$host}" : '') . "{$r}\n";
-                self::runCoder($job['wt'], $job['st'], $mCoder, $maxIter, $research, $task, $focus, $host, $job['log']);
+                self::runCoder($job['wt'], $job['st'], $mCoder, $maxIter, $research, $task, $focus, $host, $job['log'], true);
                 $res = self::collectCoderResult($job, $baseCommit);
                 // Empty diff = the model didn't actually edit. Retry with a firm nudge,
                 // and AUTO-ESCALATE to a bigger installed model when one exists — so a
@@ -7088,7 +7098,7 @@ class Crew {
                     echo "  {$y}no changes — retry {$try}/{$coderRetries} (model didn't edit the files){$r}{$esc}\n";
                     $retry = $job['st'];
                     $retry['prompt'] = (string)($job['st']['prompt'] ?? '') . "\n\nIMPORTANT: Your previous attempt made NO file changes. You MUST actually create/edit the files by CALLING your write/edit/bash tools now — do not merely describe the change in text.";
-                    self::runCoder($job['wt'], $retry, $retryModel, $maxIter, $research, $task, $focus, $host, $job['log']);
+                    self::runCoder($job['wt'], $retry, $retryModel, $maxIter, $research, $task, $focus, $host, $job['log'], true);
                     $res = self::collectCoderResult($job, $baseCommit);
                 }
                 echo "  " . ($res['empty'] ? "{$d}no changes{$r}" : count($res['files']) . " file(s) changed") . "\n";
@@ -7417,7 +7427,7 @@ class Crew {
 
     // Coder: a bounded agent loop in the worktree (auto permissions, isolated).
     // $host pins this coder to a specific Ollama host for parallel runs.
-    private static function runCoder(string $wt, array $st, string $model, int $maxIter, string $research = '', string $goal = '', string $focus = '', string $host = '', string $logFile = ''): void {
+    private static function runCoder(string $wt, array $st, string $model, int $maxIter, string $research = '', string $goal = '', string $focus = '', string $host = '', string $logFile = '', bool $live = false): void {
         // The Director tagged this subtask with a role; run with its persona, its
         // pinned model (if any, else the crew's coder model), and its permission mode.
         $role = CrewRoles::get((string)($st['role'] ?? 'coder'));
@@ -7456,10 +7466,17 @@ class Crew {
             $messages = [['role' => 'user', 'content' => $prompt]];
             $dbg = (bool)getenv('CREW_DEBUG');
             $nudged = false;   // one-shot "you described it but didn't call a tool" rescue
+            // When running live (sequential, on the console) stream the coder's
+            // reasoning dimmed + its reply so you can watch what it's about to do and
+            // Ctrl-C if it's wrong. Forked/parallel coders write to their log instead
+            // (streaming N children to one terminal would interleave into noise).
+            $streamer = $live ? function ($delta, $isThinking) {
+                echo $isThinking ? "\033[2m{$delta}\033[0m" : $delta; @flush();
+            } : null;
             for ($i = 0; $i < $maxIter; $i++) {
                 if ($steerN > 0) self::injectSteerFor($messages, $steerFile, $steerN, $agent);   // separate Director redirects (incl. "model <name>" hot-swap)
-                echo "\033[2m·\033[0m"; @flush();   // heartbeat
-                $turn = $agent->chatTurn($messages);
+                if (!$live) { echo "\033[2m·\033[0m"; @flush(); }   // heartbeat (live mode streams real text instead)
+                $turn = $agent->chatTurn($messages, $streamer);
                 $calls = $turn['calls'] ?? [];
                 $think = trim(preg_replace('/\s+/', ' ', $agent->stripToolMarkup((string)($turn['content'] ?? ''))));
                 if ($dbg) fwrite(STDERR, "    [coder iter $i] calls=" . count($calls) . " content=" . substr($think, 0, 120) . "\n");
@@ -7482,12 +7499,14 @@ class Crew {
                     }
                     break;
                 }
+                if ($live) echo "\n";   // close the streamed reasoning line before the tool actions
                 foreach ($agent->executeCalls($calls) as $rr) {
                     $name = $rr['name'] ?? '?';
                     $args = isset($rr['arguments']) && is_array($rr['arguments']) ? implode(' ', array_map(fn($v) => is_scalar($v) ? substr((string)$v, 0, 40) : '', $rr['arguments'])) : '';
                     $snippet = substr(preg_replace('/\s+/', ' ', (string)($rr['content'] ?? '')), 0, 100);
                     if ($dbg) fwrite(STDERR, "      -> $name: " . substr($snippet, 0, 80) . "\n");
                     $log("  → $name " . trim($args) . ($snippet !== '' ? "  ⇒ $snippet" : '') . "\n");
+                    if ($live) { $prev = preg_match('/^FILE_(WRITE|EDIT):(.+)/', $snippet, $mm) ? ($mm[1] === 'WRITE' ? 'wrote ' : 'edited ') . $mm[2] : substr($snippet, 0, 80); echo "\033[2m  → {$name} " . trim($args) . ($prev !== '' ? "  ⇒ {$prev}" : '') . "\033[0m\n"; }
                     $messages[] = ['role' => 'tool', 'content' => (string)($rr['content'] ?? ''), 'tool_name' => $name];
                 }
             }
@@ -11200,11 +11219,34 @@ if ($argc >= 2 && $argv[1] === 'chat') {
             echo "\n";
         }
         $history[] = $userMsg;
-        echo $c("\n" . $model . " ▸ ", '1;36');
+        // Stream the model's reasoning dimmed before the answer, so on a thinking
+        // model (qwen3.5:9b) you can watch where it's heading and Ctrl-C if it's
+        // wrong — instead of a blank line for the whole think phase. The reasoning
+        // is shown only; the saved reply stays answer-only. A "thinking…" cue covers
+        // the gap before the first token (and non-reasoning models that emit none).
+        echo $c("\n" . $model . " ▸ ", '1;36') . $c("thinking…", '2'); flush();
+        $prefix = "\r\033[K" . $c($model . " ▸ ", '1;36');   // redraw the prompt (same line) once output starts
+        $started = false; $wasThinking = false;
+        $onTok = function (string $delta) use (&$started, &$wasThinking, $prefix) {
+            if (!$started) { echo $prefix; $started = true; }
+            if ($wasThinking) { echo "\n"; $wasThinking = false; }   // separate the answer from the reasoning
+            echo $delta; flush();
+        };
+        $onThink = function (string $t) use (&$started, &$wasThinking, $prefix, $c) {
+            if (!$started) { echo $prefix; $started = true; }
+            $wasThinking = true;
+            echo $c($t, '2'); flush();   // dimmed chain-of-thought
+        };
         // Send a bounded recent window to the model (system + last ~48 turns).
         $ctx = count($history) > 49 ? array_merge([$history[0]], array_slice($history, -48)) : $history;
-        $reply = (string)$client->chatWithModel($model, $ctx, function (string $delta) { echo $delta; flush(); }, false);   // answer only, no chain-of-thought
+        if (class_exists('Interrupt')) Interrupt::begin();   // make Ctrl-C cancel this reply
+        $reply = (string)$client->chatWithModel($model, $ctx, $onTok, false, $onThink);   // answer only; reasoning shown via $onThink
+        $interrupted = class_exists('Interrupt') && Interrupt::aborted();
+        if (class_exists('Interrupt')) Interrupt::end();
+        if (!$started) echo "\r\033[K" . $c($model . " ▸ ", '1;36');   // nothing streamed — drop the cue
+        if ($interrupted) { Interrupt::reset(); echo $c("  ⏹ cancelled", '2'); }
         echo "\n";
+        if ($interrupted) { array_pop($history); continue; }
         if ($reply === '') { echo $c("(no reply — is \"$model\" pulled? try: ollamadev models pull $model)\n", '33'); array_pop($history); continue; }
         $history[] = ['role' => 'assistant', 'content' => $reply];
         $saveSession();   // persist after each turn so the threads sidebar reflects it

@@ -218,7 +218,7 @@ class Crew {
             foreach ($jobs as $idx => $job) {
                 $host = $spread ? $hosts[$idx % count($hosts)] : '';
                 echo "\n{$b}▸ Coder {$job['n']}{$r} {$d}[" . ($job['st']['role'] ?? 'coder') . "] {$job['branch']}" . ($host !== '' ? " · {$host}" : '') . "{$r}\n";
-                self::runCoder($job['wt'], $job['st'], $mCoder, $maxIter, $research, $task, $focus, $host, $job['log']);
+                self::runCoder($job['wt'], $job['st'], $mCoder, $maxIter, $research, $task, $focus, $host, $job['log'], true);
                 $res = self::collectCoderResult($job, $baseCommit);
                 // Empty diff = the model didn't actually edit. Retry with a firm nudge,
                 // and AUTO-ESCALATE to a bigger installed model when one exists — so a
@@ -233,7 +233,7 @@ class Crew {
                     echo "  {$y}no changes — retry {$try}/{$coderRetries} (model didn't edit the files){$r}{$esc}\n";
                     $retry = $job['st'];
                     $retry['prompt'] = (string)($job['st']['prompt'] ?? '') . "\n\nIMPORTANT: Your previous attempt made NO file changes. You MUST actually create/edit the files by CALLING your write/edit/bash tools now — do not merely describe the change in text.";
-                    self::runCoder($job['wt'], $retry, $retryModel, $maxIter, $research, $task, $focus, $host, $job['log']);
+                    self::runCoder($job['wt'], $retry, $retryModel, $maxIter, $research, $task, $focus, $host, $job['log'], true);
                     $res = self::collectCoderResult($job, $baseCommit);
                 }
                 echo "  " . ($res['empty'] ? "{$d}no changes{$r}" : count($res['files']) . " file(s) changed") . "\n";
@@ -562,7 +562,7 @@ class Crew {
 
     // Coder: a bounded agent loop in the worktree (auto permissions, isolated).
     // $host pins this coder to a specific Ollama host for parallel runs.
-    private static function runCoder(string $wt, array $st, string $model, int $maxIter, string $research = '', string $goal = '', string $focus = '', string $host = '', string $logFile = ''): void {
+    private static function runCoder(string $wt, array $st, string $model, int $maxIter, string $research = '', string $goal = '', string $focus = '', string $host = '', string $logFile = '', bool $live = false): void {
         // The Director tagged this subtask with a role; run with its persona, its
         // pinned model (if any, else the crew's coder model), and its permission mode.
         $role = CrewRoles::get((string)($st['role'] ?? 'coder'));
@@ -601,10 +601,17 @@ class Crew {
             $messages = [['role' => 'user', 'content' => $prompt]];
             $dbg = (bool)getenv('CREW_DEBUG');
             $nudged = false;   // one-shot "you described it but didn't call a tool" rescue
+            // When running live (sequential, on the console) stream the coder's
+            // reasoning dimmed + its reply so you can watch what it's about to do and
+            // Ctrl-C if it's wrong. Forked/parallel coders write to their log instead
+            // (streaming N children to one terminal would interleave into noise).
+            $streamer = $live ? function ($delta, $isThinking) {
+                echo $isThinking ? "\033[2m{$delta}\033[0m" : $delta; @flush();
+            } : null;
             for ($i = 0; $i < $maxIter; $i++) {
                 if ($steerN > 0) self::injectSteerFor($messages, $steerFile, $steerN, $agent);   // separate Director redirects (incl. "model <name>" hot-swap)
-                echo "\033[2m·\033[0m"; @flush();   // heartbeat
-                $turn = $agent->chatTurn($messages);
+                if (!$live) { echo "\033[2m·\033[0m"; @flush(); }   // heartbeat (live mode streams real text instead)
+                $turn = $agent->chatTurn($messages, $streamer);
                 $calls = $turn['calls'] ?? [];
                 $think = trim(preg_replace('/\s+/', ' ', $agent->stripToolMarkup((string)($turn['content'] ?? ''))));
                 if ($dbg) fwrite(STDERR, "    [coder iter $i] calls=" . count($calls) . " content=" . substr($think, 0, 120) . "\n");
@@ -627,12 +634,14 @@ class Crew {
                     }
                     break;
                 }
+                if ($live) echo "\n";   // close the streamed reasoning line before the tool actions
                 foreach ($agent->executeCalls($calls) as $rr) {
                     $name = $rr['name'] ?? '?';
                     $args = isset($rr['arguments']) && is_array($rr['arguments']) ? implode(' ', array_map(fn($v) => is_scalar($v) ? substr((string)$v, 0, 40) : '', $rr['arguments'])) : '';
                     $snippet = substr(preg_replace('/\s+/', ' ', (string)($rr['content'] ?? '')), 0, 100);
                     if ($dbg) fwrite(STDERR, "      -> $name: " . substr($snippet, 0, 80) . "\n");
                     $log("  → $name " . trim($args) . ($snippet !== '' ? "  ⇒ $snippet" : '') . "\n");
+                    if ($live) { $prev = preg_match('/^FILE_(WRITE|EDIT):(.+)/', $snippet, $mm) ? ($mm[1] === 'WRITE' ? 'wrote ' : 'edited ') . $mm[2] : substr($snippet, 0, 80); echo "\033[2m  → {$name} " . trim($args) . ($prev !== '' ? "  ⇒ {$prev}" : '') . "\033[0m\n"; }
                     $messages[] = ['role' => 'tool', 'content' => (string)($rr['content'] ?? ''), 'tool_name' => $name];
                 }
             }

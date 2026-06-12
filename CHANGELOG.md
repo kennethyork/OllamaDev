@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.8.94 (2026-06-12) — watch the model think (chat / CLI / crew) and Ctrl-C to cancel
+
+### Added
+- **The model's reasoning now streams live so you can see where it's heading and cancel if it's wrong.**
+  - **Chat:** a reasoning model (qwen3.5:9b) used to sit on a blank line through its whole think phase. It now streams its chain-of-thought *dimmed* before the answer, with a "thinking…" cue covering the gap before the first token. The reasoning is shown only — the saved reply stays answer-only. **Ctrl-C** cancels the in-flight reply (the turn is dropped from history).
+  - **CLI (agent):** already streams content/reasoning live during the agentic loop (v0.8.89); Ctrl-C interrupts.
+  - **Crew:** sequential coders now stream their reasoning (dimmed) and tool actions to the console instead of just heartbeat dots, so you can watch each coder work and Ctrl-C to stop a run that's going the wrong way. Forked/parallel coders keep writing to their per-coder logs (streaming many to one terminal would interleave into noise).
+- New thinking-aware streaming hook on `OllamaClient::chatWithModel` (`$onThinking`) that surfaces reasoning deltas without folding them into the returned answer.
+
 ## v0.8.93 (2026-06-12) — qwen3.5:9b is the recommended default
 
 ### Changed

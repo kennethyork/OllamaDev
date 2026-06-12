@@ -760,11 +760,34 @@ if ($argc >= 2 && $argv[1] === 'chat') {
             echo "\n";
         }
         $history[] = $userMsg;
-        echo $c("\n" . $model . " ▸ ", '1;36');
+        // Stream the model's reasoning dimmed before the answer, so on a thinking
+        // model (qwen3.5:9b) you can watch where it's heading and Ctrl-C if it's
+        // wrong — instead of a blank line for the whole think phase. The reasoning
+        // is shown only; the saved reply stays answer-only. A "thinking…" cue covers
+        // the gap before the first token (and non-reasoning models that emit none).
+        echo $c("\n" . $model . " ▸ ", '1;36') . $c("thinking…", '2'); flush();
+        $prefix = "\r\033[K" . $c($model . " ▸ ", '1;36');   // redraw the prompt (same line) once output starts
+        $started = false; $wasThinking = false;
+        $onTok = function (string $delta) use (&$started, &$wasThinking, $prefix) {
+            if (!$started) { echo $prefix; $started = true; }
+            if ($wasThinking) { echo "\n"; $wasThinking = false; }   // separate the answer from the reasoning
+            echo $delta; flush();
+        };
+        $onThink = function (string $t) use (&$started, &$wasThinking, $prefix, $c) {
+            if (!$started) { echo $prefix; $started = true; }
+            $wasThinking = true;
+            echo $c($t, '2'); flush();   // dimmed chain-of-thought
+        };
         // Send a bounded recent window to the model (system + last ~48 turns).
         $ctx = count($history) > 49 ? array_merge([$history[0]], array_slice($history, -48)) : $history;
-        $reply = (string)$client->chatWithModel($model, $ctx, function (string $delta) { echo $delta; flush(); }, false);   // answer only, no chain-of-thought
+        if (class_exists('Interrupt')) Interrupt::begin();   // make Ctrl-C cancel this reply
+        $reply = (string)$client->chatWithModel($model, $ctx, $onTok, false, $onThink);   // answer only; reasoning shown via $onThink
+        $interrupted = class_exists('Interrupt') && Interrupt::aborted();
+        if (class_exists('Interrupt')) Interrupt::end();
+        if (!$started) echo "\r\033[K" . $c($model . " ▸ ", '1;36');   // nothing streamed — drop the cue
+        if ($interrupted) { Interrupt::reset(); echo $c("  ⏹ cancelled", '2'); }
         echo "\n";
+        if ($interrupted) { array_pop($history); continue; }
         if ($reply === '') { echo $c("(no reply — is \"$model\" pulled? try: ollamadev models pull $model)\n", '33'); array_pop($history); continue; }
         $history[] = ['role' => 'assistant', 'content' => $reply];
         $saveSession();   // persist after each turn so the threads sidebar reflects it

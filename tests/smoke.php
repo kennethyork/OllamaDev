@@ -916,10 +916,18 @@ if (is_resource($fproc)) {
     ok('chat --json returns the answer, NOT the chain-of-thought',
         is_array($jr) && ($jr['reply'] ?? '') === 'Hello there, world.' && strpos($jout, 'REASONING_LEAK_SENTINEL') === false, trim($jout));
     // Streaming REPL path — the exact shape that leaked (a thinking-only chunk first).
-    [$rout] = run_bin(['chat', '-m', 'fake-reasoner:latest', '--host', $fakeHost], "hi\n/exit\n", $cenv);
+    // Reasoning is now SHOWN dimmed in the live output (so you can watch it and Ctrl-C),
+    // but it must stay OUT of the saved answer / conversation history. Guard the saved
+    // assistant turn is answer-only.
+    [$rout] = run_bin(['chat', '--session', 'smoke_think', '-m', 'fake-reasoner:latest', '--host', $fakeHost], "hi\n/exit\n", $cenv);
     $rclean = preg_replace('/\x1b\[[0-9;]*m/', '', $rout);
-    ok('chat REPL streams the answer, NOT the chain-of-thought',
-        strpos($rclean, 'Hello there, world.') !== false && strpos($rclean, 'REASONING_LEAK_SENTINEL') === false, trim($rclean));
+    $tf = $chatHome . '/.ollamadev/chats/smoke_think.json';
+    $td = is_file($tf) ? json_decode((string) @file_get_contents($tf), true) : null;
+    $asst = '';
+    if (is_array($td)) foreach (($td['messages'] ?? []) as $mm) { if (($mm['role'] ?? '') === 'assistant') $asst = (string)($mm['content'] ?? ''); }
+    ok('chat REPL shows the answer and keeps reasoning out of the saved reply',
+        strpos($rclean, 'Hello there, world.') !== false && $asst === 'Hello there, world.' && strpos($asst, 'REASONING_LEAK_SENTINEL') === false, trim($asst));
+    run_bin(['chat', 'delete', 'smoke_think'], '', $cenv);
     // Threads/history: a --session run persists the conversation; list + delete work.
     run_bin(['chat', '--session', 'smoke_thread', '-m', 'fake-reasoner:latest', '--host', $fakeHost], "capital of France?\n/exit\n", $cenv);
     $sessFile = $chatHome . '/.ollamadev/chats/smoke_thread.json';

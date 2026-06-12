@@ -183,10 +183,16 @@ class OllamaClient {
     // $includeThinking=false drops a reasoning model's chain-of-thought (the `thinking`
     // field) and returns only the final answer (`content`) — used by `ollamadev chat`
     // so a plain chat shows the reply, not the model's internal reasoning.
-    public function chatWithModel(string $model, array $messages, ?callable $handler = null, bool $includeThinking = true): string {
+    // $onThinking, when given, receives the model's chain-of-thought deltas as they
+    // stream — so the caller can SHOW the reasoning (e.g. dimmed) live, letting the
+    // user watch where it's heading and Ctrl-C if it's wrong — WITHOUT folding that
+    // reasoning into the returned answer (the saved reply stays answer-only). When
+    // it's null the legacy behavior holds: with $includeThinking, thinking is used
+    // as the visible content only when there's no content delta.
+    public function chatWithModel(string $model, array $messages, ?callable $handler = null, bool $includeThinking = true, ?callable $onThinking = null): string {
         // Stream when a handler is present so tokens appear as they're produced;
         // fall back to a single blocking response when no handler wants chunks.
-        $stream = $handler !== null && (bool)Config::get('ollama.stream', true);
+        $stream = ($handler !== null || $onThinking !== null) && (bool)Config::get('ollama.stream', true);
         $params = ['model' => $model, 'messages' => $messages, 'stream' => $stream, 'options' => self::chatOptions($model, $this->host)];
         $ch = curl_init($this->host . '/api/chat');
         $opts = [
@@ -199,7 +205,7 @@ class OllamaClient {
         if ($stream) {
             // Parse Ollama's NDJSON stream line-by-line, emitting content deltas.
             $content = ''; $buf = '';
-            $opts[CURLOPT_WRITEFUNCTION] = function($ch, $data) use (&$content, &$buf, $handler, $includeThinking) {
+            $opts[CURLOPT_WRITEFUNCTION] = function($ch, $data) use (&$content, &$buf, $handler, $includeThinking, $onThinking) {
                 // Ctrl-C during streaming: return 0 to make curl abort the transfer.
                 if (class_exists('Interrupt') && Interrupt::aborted()) return 0;
                 $buf .= $data;
@@ -209,9 +215,13 @@ class OllamaClient {
                     if ($line === '') continue;
                     $j = json_decode($line, true);
                     if (!is_array($j)) continue;
-                    $delta = $j['message']['content'] ?? '';
-                    if ($delta === '' && $includeThinking && !empty($j['message']['thinking'])) $delta = $j['message']['thinking'];
-                    if ($delta !== '') { $content .= $delta; if ($handler) $handler($delta); }
+                    $cd = $j['message']['content'] ?? '';
+                    if ($cd !== '') { $content .= $cd; if ($handler) $handler($cd); }
+                    $th = $j['message']['thinking'] ?? '';
+                    if ($th !== '') {
+                        if ($onThinking) $onThinking($th);                                 // show reasoning live, keep it out of the answer
+                        elseif ($includeThinking && $cd === '') { $content .= $th; if ($handler) $handler($th); }  // legacy: thinking stands in for content
+                    }
                     if (!empty($j['done'])) Usage::record($j);
                 }
                 return strlen($data);
