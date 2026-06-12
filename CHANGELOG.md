@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.8.93 (2026-06-12) — qwen3.5:9b is the recommended default
+
+### Changed
+- **`qwen3.5:9b` is now the shipped default model.** It's the first-run `ollama.defaultModel`, the head of the tool-calling fallback chain (`Models::defaultChain`, so `bestInstalled` prefers it), and the top catalog preset marked "Recommended default" — reliable native tool-calling, fits a 24 GB / CPU-only host, and already backs every crew role. The `/models` recommendation hint and pull example now lead with it. `qwen2.5-coder:7b` remains in the catalog and chain as the next preference. (Existing configs/sessions are untouched — set yours with `config set ollama.defaultModel qwen3.5:9b` or `/model`.)
+
 ## v0.8.92 (2026-06-12) — crew coder no longer quits without editing (qwen3.5:9b)
 
 ### Fixed

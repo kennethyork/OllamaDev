@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '0.8.92');
+define('OLLAMADEV_VERSION', '0.8.93');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -103,7 +103,7 @@ class Config {
         $defaults = [
             'provider' => getenv('OLLAMADEV_PROVIDER') ?: 'ollama', // 'ollama' | 'lmstudio'
             'lmstudio' => ['host' => getenv('LMSTUDIO_HOST') ?: 'http://localhost:1234/v1'],
-            'ollama' => ['host' => getenv('OLLAMA_HOST') ?: 'http://localhost:11434', 'hosts' => [], 'defaultModel' => getenv('OLLAMA_MODEL') ?: 'llama3.2:latest', 'contextWindow' => (int)(getenv('OLLAMA_NUM_CTX') ?: 16384), 'maxContextWindow' => (int)(getenv('OLLAMA_MAX_NUM_CTX') ?: 32768), 'autoContext' => true, 'temperature' => 0.3, 'stream' => true],
+            'ollama' => ['host' => getenv('OLLAMA_HOST') ?: 'http://localhost:11434', 'hosts' => [], 'defaultModel' => getenv('OLLAMA_MODEL') ?: 'qwen3.5:9b', 'contextWindow' => (int)(getenv('OLLAMA_NUM_CTX') ?: 16384), 'maxContextWindow' => (int)(getenv('OLLAMA_MAX_NUM_CTX') ?: 32768), 'autoContext' => true, 'temperature' => 0.3, 'stream' => true],
             'agents' => ['coder' => ['temperature' => 0.7, 'maxTokens' => 4096], 'maxIterations' => 12, 'maxToolOutput' => 12000, 'subagentPermission' => 'readonly'],
             'session' => ['autoResume' => true], // bare `ollamadev` resumes this repo's last session (use `new`/--new for a fresh one)
             'memory' => ['autoRemember' => true], // distill durable facts into graph memory after real work (--no-memory / false to disable)
@@ -1352,7 +1352,8 @@ class Models {
     // `tools` = reliably supports native function-calling (the agentic path).
     public static function presets(): array {
         return [
-            'qwen2.5-coder'    => ['tag' => 'qwen2.5-coder:7b',   'size' => '~4.7 GB', 'tools' => true,  'role' => 'agentic coding', 'note' => 'Best all-round local coder for tool use. Recommended default.'],
+            'qwen3.5'          => ['tag' => 'qwen3.5:9b',         'size' => '~6.6 GB', 'tools' => true,  'role' => 'agentic coding', 'note' => 'Recommended default — reliable native tool-calling, fits 24 GB / CPU-only. Backs every crew role.'],
+            'qwen2.5-coder'    => ['tag' => 'qwen2.5-coder:7b',   'size' => '~4.7 GB', 'tools' => true,  'role' => 'agentic coding', 'note' => 'Best all-round local coder for tool use.'],
             'qwen2.5-coder-14b'=> ['tag' => 'qwen2.5-coder:14b',  'size' => '~9 GB',   'tools' => true,  'role' => 'agentic coding', 'note' => 'Stronger reasoning; needs more VRAM.'],
             'qwen2.5-coder-32b'=> ['tag' => 'qwen2.5-coder:32b',  'size' => '~20 GB',  'tools' => true,  'role' => 'agentic coding', 'note' => 'Top local coder; for big GPUs / lots of RAM.'],
             'llama3.1'         => ['tag' => 'llama3.1:8b',        'size' => '~4.9 GB', 'tools' => true,  'role' => 'general + tools', 'note' => 'Solid tool-caller and generalist.'],
@@ -1371,7 +1372,7 @@ class Models {
     // to pick a sane default when none is configured and to choose a fallback
     // when the active model can't do native tools.
     public static function defaultChain(): array {
-        return ['qwen2.5-coder:7b', 'llama3.1:8b', 'mistral:latest', 'qwen2.5-coder:14b', 'codestral:latest', 'deepseek-coder-v2:16b'];
+        return ['qwen3.5:9b', 'qwen2.5-coder:7b', 'llama3.1:8b', 'mistral:latest', 'qwen2.5-coder:14b', 'codestral:latest', 'deepseek-coder-v2:16b'];
     }
 
     // The configured fallback chain (config model.fallback, array or CSV string),
@@ -9724,7 +9725,7 @@ ART;
             $out .= sprintf("  %s %-22s %s%s%s\n", $star, $name, $d, $size . $r, $cur);
         }
         $out .= "\n  {$c}★{$r} {$d}= recommended for agentic/tool use{$r}\n";
-        $out .= "  {$d}Best local agents: qwen2.5-coder, mistral, codestral — e.g. `ollama pull qwen2.5-coder`{$r}\n";
+        $out .= "  {$d}Best local agents: qwen3.5:9b (default), qwen2.5-coder, mistral — e.g. `ollama pull qwen3.5:9b`{$r}\n";
         return $out;
     }
 

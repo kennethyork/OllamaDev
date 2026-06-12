@@ -670,7 +670,7 @@ ART;
             $out .= sprintf("  %s %-22s %s%s%s\n", $star, $name, $d, $size . $r, $cur);
         }
         $out .= "\n  {$c}★{$r} {$d}= recommended for agentic/tool use{$r}\n";
-        $out .= "  {$d}Best local agents: qwen2.5-coder, mistral, codestral — e.g. `ollama pull qwen2.5-coder`{$r}\n";
+        $out .= "  {$d}Best local agents: qwen3.5:9b (default), qwen2.5-coder, mistral — e.g. `ollama pull qwen3.5:9b`{$r}\n";
         return $out;
     }
 

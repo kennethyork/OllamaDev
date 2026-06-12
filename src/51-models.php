@@ -14,7 +14,8 @@ class Models {
     // `tools` = reliably supports native function-calling (the agentic path).
     public static function presets(): array {
         return [
-            'qwen2.5-coder'    => ['tag' => 'qwen2.5-coder:7b',   'size' => '~4.7 GB', 'tools' => true,  'role' => 'agentic coding', 'note' => 'Best all-round local coder for tool use. Recommended default.'],
+            'qwen3.5'          => ['tag' => 'qwen3.5:9b',         'size' => '~6.6 GB', 'tools' => true,  'role' => 'agentic coding', 'note' => 'Recommended default — reliable native tool-calling, fits 24 GB / CPU-only. Backs every crew role.'],
+            'qwen2.5-coder'    => ['tag' => 'qwen2.5-coder:7b',   'size' => '~4.7 GB', 'tools' => true,  'role' => 'agentic coding', 'note' => 'Best all-round local coder for tool use.'],
             'qwen2.5-coder-14b'=> ['tag' => 'qwen2.5-coder:14b',  'size' => '~9 GB',   'tools' => true,  'role' => 'agentic coding', 'note' => 'Stronger reasoning; needs more VRAM.'],
             'qwen2.5-coder-32b'=> ['tag' => 'qwen2.5-coder:32b',  'size' => '~20 GB',  'tools' => true,  'role' => 'agentic coding', 'note' => 'Top local coder; for big GPUs / lots of RAM.'],
             'llama3.1'         => ['tag' => 'llama3.1:8b',        'size' => '~4.9 GB', 'tools' => true,  'role' => 'general + tools', 'note' => 'Solid tool-caller and generalist.'],
@@ -33,7 +34,7 @@ class Models {
     // to pick a sane default when none is configured and to choose a fallback
     // when the active model can't do native tools.
     public static function defaultChain(): array {
-        return ['qwen2.5-coder:7b', 'llama3.1:8b', 'mistral:latest', 'qwen2.5-coder:14b', 'codestral:latest', 'deepseek-coder-v2:16b'];
+        return ['qwen3.5:9b', 'qwen2.5-coder:7b', 'llama3.1:8b', 'mistral:latest', 'qwen2.5-coder:14b', 'codestral:latest', 'deepseek-coder-v2:16b'];
     }
 
     // The configured fallback chain (config model.fallback, array or CSV string),
