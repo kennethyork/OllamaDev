@@ -647,10 +647,14 @@ ART;
     // no-tools (e.g. llama3.2), or — for uncatalogued models — it's not on the
     // recommended list. Catalogued tool-capable models are never flagged.
     private function modelIsWeakForTools(): bool {
-        $sup = Models::toolsSupported($this->model);
-        if ($sup === true)  return false;
-        if ($sup === false) return true;
-        return !$this->isRecommended($this->model); // unknown: trust the recommended list
+        // Ask the ENGINE what this model can actually do (Ollama /api/show
+        // `capabilities`) — live and model-specific, never a hardcoded list. So a
+        // capable-but-unlisted model (gemma4, glm, mistral-nemo, …) is no longer
+        // false-flagged, and a genuinely tool-less model still gets the nudge.
+        $live = $this->agent->modelSupportsTools();
+        if ($live === true)  return false; // reports a `tools` capability → trust it
+        if ($live === false) return true;  // engine knows it and it has no tool template
+        return false;                      // engine can't say (offline/unknown) → don't cry wolf
     }
 
     private function listModels(string $args = ''): string {

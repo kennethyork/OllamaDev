@@ -175,6 +175,11 @@ class OllamaClient {
         return in_array('vision', self::modelCapabilities($model, $host), true);
     }
 
+    // Does this model report tool / function-calling support?
+    public static function modelSupportsTools(string $model, string $host = ''): bool {
+        return in_array('tools', self::modelCapabilities($model, $host), true);
+    }
+
     // $includeThinking=false drops a reasoning model's chain-of-thought (the `thinking`
     // field) and returns only the final answer (`content`) — used by `ollamadev chat`
     // so a plain chat shows the reply, not the model's internal reasoning.

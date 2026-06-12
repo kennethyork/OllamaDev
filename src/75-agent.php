@@ -150,6 +150,17 @@ User: run the tests
     public function checkConnection(): bool { return $this->client->checkConnection(); }
     public function host(): string { return method_exists($this->client, 'host') ? $this->client->host() : ''; }
 
+    // Live tool-capability for the current model, straight from the engine
+    // (Ollama's /api/show `capabilities`) — the model-specific truth, not a
+    // hardcoded list. Returns true/false when the engine reports it, or null when
+    // it can't say (Ollama unreachable, or a backend without capability tags).
+    public function modelSupportsTools(): ?bool {
+        if (!method_exists($this->client, 'modelCapabilities')) return null;
+        $caps = $this->client::modelCapabilities($this->model, $this->host());
+        if (empty($caps)) return null;                 // couldn't determine
+        return in_array('tools', $caps, true);
+    }
+
     // Summarize a transcript with the model itself (one-shot, no tools). Used by
     // session compaction. Returns '' on any failure so the caller can fall back.
     public function summarize(string $transcript): string {

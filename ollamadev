@@ -1142,6 +1142,11 @@ class OllamaClient {
         return in_array('vision', self::modelCapabilities($model, $host), true);
     }
 
+    // Does this model report tool / function-calling support?
+    public static function modelSupportsTools(string $model, string $host = ''): bool {
+        return in_array('tools', self::modelCapabilities($model, $host), true);
+    }
+
     // $includeThinking=false drops a reasoning model's chain-of-thought (the `thinking`
     // field) and returns only the final answer (`content`) — used by `ollamadev chat`
     // so a plain chat shows the reply, not the model's internal reasoning.
@@ -5019,6 +5024,17 @@ User: run the tests
     public function listModelsDetailed(): array { return $this->client->listModelsDetailed(); }
     public function checkConnection(): bool { return $this->client->checkConnection(); }
     public function host(): string { return method_exists($this->client, 'host') ? $this->client->host() : ''; }
+
+    // Live tool-capability for the current model, straight from the engine
+    // (Ollama's /api/show `capabilities`) — the model-specific truth, not a
+    // hardcoded list. Returns true/false when the engine reports it, or null when
+    // it can't say (Ollama unreachable, or a backend without capability tags).
+    public function modelSupportsTools(): ?bool {
+        if (!method_exists($this->client, 'modelCapabilities')) return null;
+        $caps = $this->client::modelCapabilities($this->model, $this->host());
+        if (empty($caps)) return null;                 // couldn't determine
+        return in_array('tools', $caps, true);
+    }
 
     // Summarize a transcript with the model itself (one-shot, no tools). Used by
     // session compaction. Returns '' on any failure so the caller can fall back.
@@ -9483,10 +9499,14 @@ ART;
     // no-tools (e.g. llama3.2), or — for uncatalogued models — it's not on the
     // recommended list. Catalogued tool-capable models are never flagged.
     private function modelIsWeakForTools(): bool {
-        $sup = Models::toolsSupported($this->model);
-        if ($sup === true)  return false;
-        if ($sup === false) return true;
-        return !$this->isRecommended($this->model); // unknown: trust the recommended list
+        // Ask the ENGINE what this model can actually do (Ollama /api/show
+        // `capabilities`) — live and model-specific, never a hardcoded list. So a
+        // capable-but-unlisted model (gemma4, glm, mistral-nemo, …) is no longer
+        // false-flagged, and a genuinely tool-less model still gets the nudge.
+        $live = $this->agent->modelSupportsTools();
+        if ($live === true)  return false; // reports a `tools` capability → trust it
+        if ($live === false) return true;  // engine knows it and it has no tool template
+        return false;                      // engine can't say (offline/unknown) → don't cry wolf
     }
 
     private function listModels(string $args = ''): string {
