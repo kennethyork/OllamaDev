@@ -662,7 +662,7 @@ function Terminal(id, model, cwd) {
     this.id = id; this.model = model; this.cwd = cwd || ''; this.offset = 0; this.polling = false;
     this.screen = null; this.line = null; this.fg = null; this.bg = null; this.bold = false;
     this.dim = false; this.italic = false; this.underline = false; this.reverse = false;
-    this.status = 'idle'; this.lastData = 0; this.badgeEl = null; this.cr = false;
+    this.status = 'idle'; this.lastData = 0; this.badgeEl = null; this.cr = false; this._tail = '';
     this.alt = false; this.grid = null; this.gridEl = null; this._cols = 0; this._rows = 0;
 }
 Terminal.prototype.mount = function (host) {
@@ -854,6 +854,22 @@ Terminal.prototype.setStatus = function (s) {
 // programmatic send paths set 'running', so directly-typed prompts stayed 'idle'
 // the whole time the agent worked.
 Terminal.prototype.markBusy = function () { this.setStatus('running'); this.lastData = Date.now(); };
+// Derive the badge state from the actual output instead of a quiet-timer. The
+// ollamadev CLI prints its prompt glyph (❯) only when it's waiting for input, so
+// "the tail of output ends with ❯" is the authoritative idle signal: until the
+// CLI prints a fresh prompt it's still working — even if it's been silent for a
+// while (a long bash run, a slow model loading, tool execution). The old
+// "quiet for 2.5s ⇒ done" timer flipped the badge to done while the turn was
+// still running, and could leave it stuck there; this never does.
+Terminal.prototype._trackStatus = function (text) {
+    var clean = text.replace(/\[[0-9;?=]*[A-Za-z]/g, '').replace(/\r/g, '');
+    this._tail = (this._tail + clean).slice(-400);
+    // Back at a fresh prompt → idle. The CLI prints its prompt on its own line
+    // (newline + ❯ + space), so require that exact shape: it's specific enough that
+    // streamed answer text won't trip it, and user keystrokes echo AFTER the ❯ (so a
+    // prompt with typed text doesn't match — typing at idle stays idle).
+    if (/\n❯[ \t]*$/.test(this._tail)) { if (this.status !== 'idle') this.setStatus('idle'); }
+};
 Terminal.prototype.newLine = function () { this.line = document.createElement('div'); this.line.className = 'term-line'; this.screen.appendChild(this.line); };
 // Remove the last character of the current line (handles the pty's \b \b erase).
 Terminal.prototype.backspace = function () {
@@ -1004,11 +1020,9 @@ Terminal.prototype.poll = function () {
     if (window.__odvOpenStream && !this._triedStream) {
         this._triedStream = true;
         this._es = window.__odvOpenStream(this.id, this.offset, function (data, offset) {
-            // Output resumed after we'd marked it 'done' (e.g. a slow model finished
-            // loading and started streaming) → it's working again.
-            if (self.status === 'done') self.setStatus('running');
-            self.write(b64ToStr(data)); self.offset = offset; self.lastData = Date.now();
-            if (self.status === 'running' && self.lastData && Date.now() - self.lastData > 2500) self.setStatus('done');
+            var dec = b64ToStr(data);
+            self.write(dec); self.offset = offset; self.lastData = Date.now();
+            self._trackStatus(dec);   // back to idle only when the CLI reprints its prompt
         }, function () { self._es = null; if (self.polling) self._pollLoop(); });
         if (this._es) return;
     }
@@ -1022,11 +1036,10 @@ Terminal.prototype._pollLoop = function () {
         if (!self.polling) return;
         Promise.resolve(window.termRead(self.id, self.offset)).then(function (r) {
             if (r && r.data) {
-                if (self.status === 'done') self.setStatus('running'); // output resumed
-                self.write(b64ToStr(r.data)); self.offset = r.offset; self.lastData = Date.now();
+                var dec = b64ToStr(r.data);
+                self.write(dec); self.offset = r.offset; self.lastData = Date.now();
+                self._trackStatus(dec);   // back to idle only when the CLI reprints its prompt
             }
-            // Agent "running" → "done" once output has been quiet for ~2.5s.
-            if (self.status === 'running' && self.lastData && Date.now() - self.lastData > 2500) self.setStatus('done');
         }).catch(function () {}).then(function () { if (self.polling) setTimeout(tick, 80); });
     }
     tick();

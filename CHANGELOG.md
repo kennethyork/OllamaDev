@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.8.91 (2026-06-12) — status badge driven by the prompt, not a timer
+
+### Fixed
+- **The desktop status badge no longer flips to "done" while the CLI is still working, and no longer gets stuck.** v0.8.90 still used a "output quiet for 2.5s ⇒ done" timer — but the agent is legitimately quiet for longer than that during a long `bash` run, a slow model loading, or tool execution, so the badge went "done" mid-turn (and could stay there). The badge is now derived from the actual output: it shows **running** from the moment you submit until the CLI reprints its prompt (`❯` on its own line), which is the only reliable "waiting for input" signal — then it returns to **idle**. No timer, so a long silent step keeps it correctly on running, and it always returns to idle when the turn ends. (Dropped the `done` state for the terminal badge; it's `idle` ↔ `running`.)
+
 ## v0.8.90 (2026-06-12) — desktop status badge tracks work correctly
 
 ### Fixed
