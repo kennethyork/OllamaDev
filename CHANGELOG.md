@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.9.7 (2026-06-13) — crew git-state resilience (no false merges)
+
+### Fixed
+- **A dirty working tree made the crew report "merged" when nothing merged.** At landing, `git merge` refuses to run if the working tree has uncommitted changes — but the conflict check (`git ls-files -u`) wouldn't fire (no conflict markers), so the branch fell through to the "merged" path. Landing now checks for a clean tree first: with **uncommitted changes** (or a **detached HEAD** — where the merge commit would land on no branch and be lost), it holds all branches in review mode and tells you to commit/stash/checkout, then merge them yourself. Your changes are never silently mis-merged.
+
+### Why
+Continuing the robustness pass into the crew's git flow — the most complex path, and the most likely to hit a messy real repo. (Merge-conflict handling, base-commit / worktree-support / git-repo checks were already in place.) Re-verified live: a dirty tree now holds (0 merged · 1 held) instead of false-merging. Vanilla PHP + git. 638 smoke tests pass.
+
 ## v0.9.6 (2026-06-13) — robustness: bash timeout + output cap, grep/glob bounds
 
 ### Fixed

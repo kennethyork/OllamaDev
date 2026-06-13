@@ -323,6 +323,20 @@ class Crew {
         if ($explicit !== '') { $land = $explicit; }
         elseif (self::isSelfRepo()) { $land = 'review'; echo "  {$y}⚠ self-modification detected (this is the OllamaDev source) — review mode forced; nothing auto-merges. Use --auto-merge to override.{$r}\n"; }
         else { $land = Config::get('crew.land', 'auto'); }
+        // Landing needs a clean tree on a real branch. A DIRTY tree makes `git merge`
+        // refuse to run — yet the conflict check below wouldn't fire, so it'd report
+        // "merged" when nothing merged. A DETACHED HEAD would put the merge commit on
+        // no branch (lost on the next checkout). In either case, hold everything and
+        // tell the user to resolve it, rather than silently mis-merge.
+        if ($land !== 'review') {
+            if (self::sh('git rev-parse --abbrev-ref HEAD 2>/dev/null') === 'HEAD') {
+                echo "  {$y}⚠ detached HEAD — holding all branches (check out a branch first, then merge them yourself).{$r}\n";
+                $land = 'review';
+            } elseif (self::sh('git status --porcelain --untracked-files=no') !== '') {
+                echo "  {$y}⚠ uncommitted changes in the working tree — holding all branches (commit or stash, then merge them yourself).{$r}\n";
+                $land = 'review';
+            }
+        }
         echo "\n{$b}▸ Landing{$r}" . ($land === 'review' ? " {$d}(review mode — nothing auto-merges){$r}" : '') . "\n";
         $merged = []; $held = [];
         foreach ($results as $res) {

@@ -819,6 +819,10 @@ if (preg_match('/function runShell\(.*?\n\}/s', $src, $rsm)) {
 ok('bash + grep route through runShell (timeout + output cap)', substr_count($src, 'runShell(') >= 4);
 ok('grep skips binary files (-rIn) and bounds output', strpos($src, 'grep -rIn') !== false);
 ok('glob caps its result list', strpos($src, 'array_slice($files, 0, 500)') !== false);
+ok('crew holds branches on a dirty tree / detached HEAD (no false merge)',
+    strpos($src, 'uncommitted changes in the working tree') !== false
+    && strpos($src, 'detached HEAD') !== false
+    && strpos($src, 'status --porcelain --untracked-files=no') !== false);
 
 echo "\n== Air-gap attestation removed; web-access toggle kept ==\n";
 ok('no Attest class / attest command / air-gap naming remains',
