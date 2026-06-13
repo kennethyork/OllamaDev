@@ -709,3 +709,44 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 .vh-row { transition: border-color .14s ease, background .14s ease, transform .12s ease; }
 .vh-row:hover { border-color: var(--border); transform: translateX(2px); }
 
+/* ===== polish layer: micro-interactions, depth & a11y (additive) ===== */
+/* Windows fade + settle in when opened, so the canvas feels alive, not abrupt. */
+@keyframes paneIn { from { opacity: 0; transform: translateY(7px) scale(.985); } to { opacity: 1; transform: none; } }
+#terminals.free .term-pane, .cpane, .canvas-menu, .modal-card { animation: paneIn .18s cubic-bezier(.2,.7,.3,1) both; }
+
+/* The focused window clearly stands out — a soft accent ring (+ a stronger lift
+   on the free canvas) instead of just a border colour change. */
+.term-pane:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft); }
+#terminals.free .term-pane { transition: box-shadow .18s ease, border-color .15s; }
+#terminals.free .term-pane:focus-within { box-shadow: 0 12px 34px rgba(0,0,0,.5), 0 0 0 1px var(--accent-soft); }
+
+/* Give window title bars a hair of depth so panes read as raised surfaces. */
+.term-head, .cpane-head { background-image: linear-gradient(180deg, rgba(255,255,255,.025), transparent); }
+
+/* Keyboard focus rings — invisible to mouse users, clarity for keyboard nav. */
+button:focus-visible, .rail-btn:focus-visible, .tree-item:focus-visible, .ws-tab:focus-visible,
+.ws-tab-item:focus-visible, .etab:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm);
+}
+
+/* A soft glow behind the pulsing "running" dot makes activity feel live. */
+.badge.running .b-dot, .cpane-badge.st-doing::before { box-shadow: 0 0 7px var(--accent); }
+
+/* Topbar buttons lift on hover (they already press down on :active). */
+#topbar button:not(.primary):hover { transform: translateY(-1px); }
+
+/* Very low-key vignette gives the infinite canvas a sense of depth. */
+#terminals { background-image: radial-gradient(130% 100% at 50% -15%, rgba(255,255,255,.022), transparent 62%); }
+
+/* Smoother scrollbar thumb. */
+::-webkit-scrollbar-thumb { transition: background .15s; }
+
+/* Frosted-glass backdrop behind modals — the canvas blurs softly so the dialog
+   reads as the foreground. (Falls back to the existing dim if blur unsupported.) */
+.modal-overlay:not([hidden]) { backdrop-filter: blur(4px) saturate(1.1); -webkit-backdrop-filter: blur(4px) saturate(1.1); }
+
+/* Honour users who prefer reduced motion — kill animations/transitions. */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+}
+

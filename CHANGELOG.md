@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.9.13 (2026-06-13) — UI polish (desktop/web)
+
+### Changed
+- **A tasteful polish layer for the ADE** (desktop + browser), additive and theme-aware: windows fade-and-settle in when opened; the focused window gets a soft accent ring (and a stronger lift on the free canvas) instead of just a border tint; title bars carry a hair of gradient depth; modals sit behind a frosted-glass backdrop blur; the "running" badge dot has a soft glow; keyboard navigation gets proper `:focus-visible` rings; the infinite canvas has a low-key vignette for depth; and everything honours `prefers-reduced-motion`. No layout or behaviour changes — purely visual refinement on the existing 7 themes.
+
 ## v0.9.12 (2026-06-13) — `doctor` health check
 
 ### Added
