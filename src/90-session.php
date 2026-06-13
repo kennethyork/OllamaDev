@@ -1311,6 +1311,13 @@ $GLOBALS['currentSessionModel'] = null;
         $nudgedAct = false;   // one-shot "you described it but didn't call a tool" nudge
         $seenCalls = [];      // signatures of calls already made → detect stuck loops
         $loopNudged = false;  // one-shot nudge when the model repeats an identical call
+        // Self-review (opt-in: --careful / agents.selfReview): after the model thinks
+        // it's done AND has actually made changes, have it re-check its own work
+        // against the task once and fix anything wrong. A proven way to lift weaker
+        // local models on hard tasks without a stronger model — it catches its own
+        // mistakes. Off by default (it costs an extra round-trip); pull it for hard work.
+        $careful = (bool)Config::get('agents.selfReview', false);
+        $selfReviewed = false;
         // Live token streamer: the model's reply appears as it's generated instead
         // of the screen sitting blank until the whole turn finishes. Content tokens
         // are shown normally (and tagged 'content' so the caller can buffer them for
@@ -1389,6 +1396,14 @@ $GLOBALS['currentSessionModel'] = null;
                         ? "You described the change but did NOT call a tool, so nothing was actually written. Make the change NOW by calling the write or edit tool with the file's full contents. Output ONLY the tool call — no prose, no ``` fences."
                         : "You described an action but did NOT call any tool, so nothing actually happened. If a tool call is needed to finish the task, make it NOW — output ONLY the tool call, no prose. If you are genuinely finished, reply with your final answer instead.";
                     $this->addMessage('user', $msg);
+                    continue;
+                }
+                // Self-review: the model says it's done and it DID make changes — have
+                // it audit its own work against the task once before we accept it.
+                if ($careful && !$selfReviewed && $toolsUsed && $i < $maxIter - 1 && !$this->agent->isChatMode()) {
+                    $selfReviewed = true;
+                    if ($emit) $emit("\033[2m  🔎 self-review — re-checking the work against the task…\033[0m\n", 'tool');
+                    $this->addMessage('user', "Before you finish, carefully re-read the changes you just made and check them against the ORIGINAL task. Look for bugs, missed requirements, unhandled edge cases, off-by-one errors, or incomplete work — read the files back if you need to. If anything is wrong or missing, FIX it now with tool calls. Only if it is fully correct and complete, give your final answer.");
                     continue;
                 }
                 if ($emit && !$streamed) $emit($clean !== '' ? $clean : trim($response));

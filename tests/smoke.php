@@ -881,6 +881,9 @@ ok('model pull auto-resumes a transient network drop (Ollama resumes from cache)
 ok('doctor health-check command (Ollama/model/GPU/disk/git, with fixes + --json)',
     strpos($mainSrc0, "\$argv[1] === 'doctor'") !== false && strpos($mainSrc0, '🩺 OllamaDev doctor') !== false
     && strpos($mainSrc0, 'Ollama reachable') !== false && strpos($mainSrc0, 'disk headroom') !== false);
+ok('--careful self-review pass (re-check + fix own work — lifts weak models on hard tasks)',
+    strpos($mainSrc0, "'--careful'") !== false && strpos($src, "Config::get('agents.selfReview'") !== false
+    && strpos($src, 'check them against the ORIGINAL task') !== false && strpos($src, '🔎 self-review') !== false);
 
 echo "\n== Air-gap attestation removed; web-access toggle kept ==\n";
 ok('no Attest class / attest command / air-gap naming remains',

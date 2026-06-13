@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.9.16 (2026-06-13) — `--careful`: agent self-review (lift a local model on hard tasks)
+
+### Added
+- **`--careful` (config `agents.selfReview`) — a self-review pass.** After the agent thinks it's done AND has actually made changes, it re-reads its own work against the original task once, looking for bugs, missed requirements, edge cases, and incomplete work — and fixes them with tool calls before finishing. This is a proven way (Reflexion-style self-correction) to squeeze more correctness out of a *local* model on hard tasks **without** a stronger model. Opt-in (it costs an extra round-trip), so pull it for the hard ones: `ollamadev --careful -p "<task>"` or `crew`/agent runs.
+
+### Note
+- This is a *harness* lever, not a model-IQ change: it helps the model catch its own mistakes, so the gain is task-dependent — biggest on hard, multi-step work where a first pass is likely imperfect. Pairs with the crew's `--amplify` (multi-sample + adversarial audit) and `ollamadev verify` (test-fix loop). Vanilla PHP. 652 smoke tests pass; verified firing + fixing live.
+
 ## v0.9.15 (2026-06-13) — UI polish: file tree + tabs
 
 ### Changed

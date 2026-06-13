@@ -629,6 +629,7 @@ for ($i = 1; $i < $argc; $i++) {
     elseif ($a === '--readonly') { $flags['permission'] = 'readonly'; }
     elseif ($a === '--plan') { $flags['permission'] = 'plan'; }
     elseif ($a === '--auto' || $a === '--yolo') { $flags['permission'] = 'auto'; }
+    elseif ($a === '--careful') { $flags['careful'] = true; }   // self-review pass: re-check + fix own work (better on hard tasks)
     elseif ($a === '--ask') { $flags['permission'] = 'ask'; }
     elseif ($a === '--port') { $flags['port'] = (int)($argv[++$i] ?? 0); }
     elseif ($a === '--hostname') { $flags['hostname'] = $argv[++$i] ?? '127.0.0.1'; }
@@ -661,6 +662,11 @@ if (!empty($flags['host'])) ModelClient::$override = $flags['host'];
 // agent's network tools (search / fetch / remote git) for this run — local work
 // is untouched. The desktop's 🌐 Web toggle flips the same web.enabled config.
 if (!empty($flags['noweb']) || Config::get('web.enabled', true) === false) Permission::setWebAccess(false);
+
+// --careful: enable the agent's self-review pass for this run (re-check + fix its
+// own work before finishing). Squeezes more correctness out of a local model on
+// hard tasks, at the cost of an extra round-trip.
+if (!empty($flags['careful'])) Config::set('agents.selfReview', true);
 
 // --cwd <dir>: run the agent and its tools in this directory. The ADE uses a
 // shell `cd` when spawning, so make the bare flag behave the same for the CLI —
