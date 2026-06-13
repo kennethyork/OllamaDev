@@ -64,7 +64,7 @@ class Memory {
         $fm = "---\ntitle: " . trim($title) . "\n";
         if ($tags) $fm .= "tags: " . implode(', ', array_map('trim', $tags)) . "\n";
         $fm .= "---\n\n";
-        @file_put_contents($dir . '/' . $slug . '.md', $fm . rtrim($body) . "\n");
+        atomicWrite($dir . '/' . $slug . '.md', $fm . rtrim($body) . "\n");
         return $slug;
     }
 

@@ -115,7 +115,7 @@ class Crew {
             'amplify' => $amplify, 'focus' => $focus, 'subtasks' => []];
         foreach ($subtasks as $i => $st) $board['subtasks'][] = ['n' => $i + 1, 'title' => $st['title'] ?? ('task ' . ($i + 1)), 'role' => $st['role'] ?? 'coder', 'state' => 'todo',
             'branch' => self::branchFor($runId, $i + 1, $st['title'] ?? ('task' . ($i + 1))), 'model' => $coderModelFor($i + 1)];
-        $writeBoard = function () use (&$board, $boardFile) { $board['ts'] = time(); @file_put_contents($boardFile, json_encode($board)); };
+        $writeBoard = function () use (&$board, $boardFile) { $board['ts'] = time(); atomicWrite($boardFile, json_encode($board)); };
         $setState = function (int $n, string $s) use (&$board, $writeBoard) { foreach ($board['subtasks'] as &$bs) { if ($bs['n'] === $n) $bs['state'] = $s; } unset($bs); $writeBoard(); };
         // Additive: merge extra display fields (files owned, audit verdict) into a
         // subtask for the desktop topology view. Never changes orchestration.
@@ -415,7 +415,7 @@ class Crew {
             'amplify' => $amplify, 'focus' => $focus, 'subtasks' => []];
         foreach ($subtasks as $st) $board['subtasks'][] = ['n' => $st['n'], 'title' => $st['title'] ?? ('task ' . $st['n']), 'role' => $st['role'] ?? 'coder', 'state' => 'todo',
             'branch' => (string)($st['branch'] ?? self::branchFor($runId, (int)$st['n'], (string)($st['title'] ?? ''))), 'model' => $mCoder];
-        $writeBoard = function () use (&$board, $boardFile) { $board['ts'] = time(); @file_put_contents($boardFile, json_encode($board)); };
+        $writeBoard = function () use (&$board, $boardFile) { $board['ts'] = time(); atomicWrite($boardFile, json_encode($board)); };
         $setState = function (int $n, string $s) use (&$board, $writeBoard) { foreach ($board['subtasks'] as &$bs) { if ($bs['n'] === $n) $bs['state'] = $s; } unset($bs); $writeBoard(); };
         $setMeta = function (int $n, array $kv) use (&$board, $writeBoard) { foreach ($board['subtasks'] as &$bs) { if ($bs['n'] === $n) foreach ($kv as $k => $v) $bs[$k] = $v; } unset($bs); $writeBoard(); };
         $writeBoard();
@@ -924,7 +924,7 @@ class Crew {
     }
     private static function saveRun(string $runId, array $data): void {
         $f = self::runFile($runId); @mkdir(dirname($f), 0755, true);
-        @file_put_contents($f, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        atomicWrite($f, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
     }
     private static function loadRun(string $runId): ?array {
         $d = is_file(self::runFile($runId)) ? json_decode((string)@file_get_contents(self::runFile($runId)), true) : null;

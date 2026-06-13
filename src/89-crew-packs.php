@@ -52,7 +52,7 @@ class CrewPacks {
         $pack = [];
         foreach (self::KEYS as $k) if (array_key_exists($k, $opts)) $pack[$k] = $opts[$k];
         $path = self::path($name);
-        @file_put_contents($path, json_encode($pack, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        atomicWrite($path, json_encode($pack, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
         return $path;
     }
 

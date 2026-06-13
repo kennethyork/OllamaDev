@@ -89,7 +89,7 @@ class Config {
         $ref[$keys[0]] = $value;
         unset($ref);
         @mkdir(dirname($file), 0755, true);
-        @file_put_contents($file, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        atomicWrite($file, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
     }
 
     public static function dataDir(): string {

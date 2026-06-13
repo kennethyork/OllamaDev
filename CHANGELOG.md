@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.9.10 (2026-06-13) — crash-safe state writes (atomic, no corruption)
+
+### Fixed
+- **A crash or a concurrent run mid-write could corrupt your state files.** Sessions, config, the crew board (written on every state change and read live by the desktop topology), checkpoints, memory, and crew packs were written with a plain `file_put_contents` — a process killed (or a second writer racing) partway through left a half-written, unparseable file. They now go through a new `atomicWrite()` helper: write to a temp file in the same directory, then `rename()` over the target (atomic on POSIX), so a reader never sees a partial file and an interrupted write never destroys the previous good copy.
+
+### Why
+Continuing the robustness pass — data-integrity for the files you'd most hate to lose (your session, your config). Vanilla PHP. 647 smoke tests pass.
+
 ## v0.9.9 (2026-06-13) — ecosystem + onboarding: setup, crew packs, eval --compare
 
 ### Added

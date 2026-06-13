@@ -22,7 +22,7 @@ class Checkpoints {
             'created_at' => date('c'),
         ];
         $name = 'ckpt_' . sprintf('%012d', (int)(microtime(true) * 1000)) . '_' . substr(md5($path . mt_rand()), 0, 6) . '.json';
-        @file_put_contents(self::dir() . '/' . $name, json_encode($record, JSON_PRETTY_PRINT));
+        atomicWrite(self::dir() . '/' . $name, json_encode($record, JSON_PRETTY_PRINT));
     }
 
     // Newest-first list of checkpoint files with decoded metadata.

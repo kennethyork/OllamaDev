@@ -82,6 +82,9 @@ echo "\n== Internal units (extracted classes) ==\n";
 // Load just the Agent's tool-call parsers by extracting the methods into a
 // throwaway class - keeps the test independent of the full CLI bootstrap.
 $src = file_get_contents($BIN);
+// Several extracted classes (Checkpoints, Config, …) call the global atomicWrite()
+// helper — define it in this test process before any of them are eval'd.
+if (!function_exists('atomicWrite') && preg_match('/function atomicWrite\(.*?\n\}/s', $src, $awm)) eval($awm[0]);
 
 // extractJsonToolCalls + parseToolCalls live in the Agent class; pull the two
 // static/instance methods we want to exercise.
@@ -855,6 +858,17 @@ ok('eval --compare runs the suite across models', strpos($mainSrc0, "'--compare'
 ok('setup: hardware-aware onboarding (detect → recommend → pull → set default)',
     strpos($mainSrc0, "\$argv[1] === 'setup'") !== false && strpos($mainSrc0, 'nvidia-smi') !== false
     && strpos($mainSrc0, 'Recommended:') !== false && strpos($mainSrc0, "Config::persist('ollama.defaultModel'") !== false);
+
+// Crash-safe state writes: temp + atomic rename, no half-written session/config/board.
+ok('atomicWrite is crash-safe (temp + rename, no leftover .tmp)', (function () {
+    if (!function_exists('atomicWrite')) return false;
+    $d = sys_get_temp_dir() . '/awt_' . getmypid(); @mkdir($d, 0755, true);
+    atomicWrite("$d/s.json", '{"x":1}');
+    $ok = is_file("$d/s.json") && file_get_contents("$d/s.json") === '{"x":1}' && count(glob("$d/*.tmp*")) === 0;
+    foreach (glob("$d/*") ?: [] as $f) @unlink($f); @rmdir($d);
+    return $ok;
+})());
+ok('session/config/board/checkpoints/memory write atomically', substr_count($src, 'atomicWrite(') >= 6);
 
 echo "\n== Air-gap attestation removed; web-access toggle kept ==\n";
 ok('no Attest class / attest command / air-gap naming remains',

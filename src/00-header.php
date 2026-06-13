@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '0.9.9');
+define('OLLAMADEV_VERSION', '0.9.10');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -12,6 +12,23 @@ $GLOBALS['editedFiles'] = [];
 if (!getenv('OLLAMADEV_DEBUG')) error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED);
 
 function isWindows(): bool { return stripos(PHP_OS, 'WIN') === 0; }
+
+// Crash-safe / concurrent-safe file write: write to a temp file in the same
+// directory, then rename() over the target — atomic on POSIX, so a crash or a
+// second writer mid-write can never leave a half-written (corrupt) session,
+// config, or crew-board file. Falls back to a direct write if the temp path
+// isn't usable. Returns true on success.
+function atomicWrite(string $path, string $content): bool {
+    $dir = dirname($path);
+    if ($dir !== '' && !is_dir($dir)) @mkdir($dir, 0755, true);
+    $tmp = $path . '.tmp.' . getmypid() . '.' . substr(bin2hex(random_bytes(3)), 0, 6);
+    if (@file_put_contents($tmp, $content, LOCK_EX) === false) {
+        return @file_put_contents($path, $content) !== false;   // temp not writable — best effort
+    }
+    if (@rename($tmp, $path)) return true;
+    @unlink($tmp);
+    return @file_put_contents($path, $content) !== false;
+}
 
 // Local models habitually wrap a whole file's content in a markdown code fence
 // (```php … ```). Written verbatim, the file then starts with ``` instead of

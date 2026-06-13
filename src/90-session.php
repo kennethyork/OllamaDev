@@ -58,7 +58,7 @@ class Session {
 
     public function save(): void {
         $path = Config::sessionsDir() . '/' . $this->id . '.json';
-        file_put_contents($path, json_encode(['id' => $this->id, 'title' => $this->title, 'model' => $this->model, 'cwd' => $this->cwd, 'messages' => $this->messages, 'created_at' => date('c'), 'updated_at' => date('c')], JSON_PRETTY_PRINT));
+        atomicWrite($path, json_encode(['id' => $this->id, 'title' => $this->title, 'model' => $this->model, 'cwd' => $this->cwd, 'messages' => $this->messages, 'created_at' => date('c'), 'updated_at' => date('c')], JSON_PRETTY_PRINT));
     }
 
     // $extra carries structured fields that must survive into the wire format
