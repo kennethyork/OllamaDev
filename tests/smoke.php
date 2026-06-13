@@ -745,6 +745,19 @@ if (preg_match('/class Models \{.*?\n\}/s', $src, $cm)) {
 ok('CLI surfaces cloud models (models cloud command + signin guidance + badge)',
     strpos($src, "\$sub === 'cloud'") !== false && strpos($src, 'ollama signin') !== false
     && strpos($src, 'Models::isCloud(') !== false && strpos($src, '☁') !== false);
+// Cloud models get their FULL context window — the local VRAM cap is bypassed —
+// while local models stay clamped to maxContextWindow. Unreachable host ⇒
+// modelContextLength returns 0 ⇒ deterministic fallbacks.
+if (!class_exists('Config')) { require_once __DIR__ . '/../src/10-config.php'; }
+if (!class_exists('Models') && preg_match('/class Models \{.*?\n\}/s', $src, $mm)) eval($mm[0]);
+if (!class_exists('OllamaClient') && preg_match('/class OllamaClient \{.*?\n\}/s', $src, $ocm)) eval($ocm[0]);
+if (class_exists('OllamaClient') && class_exists('Models')) {
+    $NULLHOST = 'http://127.0.0.1:1';
+    $cloudCtx = OllamaClient::chatOptions('glm-4.6:cloud', $NULLHOST)['num_ctx'];
+    $localCtx = OllamaClient::chatOptions('qwen2.5-coder:7b', $NULLHOST)['num_ctx'];
+    ok('cloud model bypasses the VRAM cap (full-context fallback when length unknown)', $cloudCtx === 131072, "got=$cloudCtx");
+    ok('local model stays clamped to maxContextWindow', $localCtx === 16384, "got=$localCtx");
+} else { ok('OllamaClient + Models available for chatOptions test', false); }
 
 echo "\n== Air-gap attestation removed; web-access toggle kept ==\n";
 ok('no Attest class / attest command / air-gap naming remains',

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Why OllamaDev — local-first vs cloud AI coding agents</title>
-<meta name="description" content="An honest comparison of OllamaDev against cloud/hosted AI coding agents: where running 100% locally wins (privacy, cost, air-gap, auditability) and where hosted tools still lead (raw model quality, polish).">
+<meta name="description" content="An honest comparison of OllamaDev against cloud/hosted AI coding agents: where running locally wins (privacy, cost, auditability) and where hosted tools still lead (raw model quality, polish). Local by default, optional Ollama cloud models.">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -31,8 +31,9 @@
     <p class="lede">
       OllamaDev isn't trying to beat hosted coding agents at raw model quality — frontier
       cloud models will usually write a smarter answer. It competes on the axis those tools
-      <em>structurally cannot</em>: your code never leaves the machine, it costs nothing to run,
-      it works fully air-gapped, and the whole engine is one vanilla file you can read.
+      <em>structurally cannot</em>: by default your code stays on the machine and costs nothing to
+      run, you can opt into Ollama's cloud models when a task wants more horsepower (still one
+      Ollama backend), and the whole engine is one vanilla file you can read.
     </p>
     <div class="cta">
       <a class="btn btn-primary" href="downloads.html">Download →</a>
@@ -51,7 +52,7 @@
       <div class="show-text">
         <span class="eyebrow">Same workflow, your machine</span>
         <h2>A multi-agent crew — without the cloud.</h2>
-        <p>The cloud agent-canvases (cnvs, BridgeSpace, Plyrium Forge) put a team of agents on a board. OllamaDev does the same — a Director, isolated-worktree coders, an Auditor gate, a live topology — except every agent runs on <b>your</b> hardware: free, offline, nothing uploaded.</p>
+        <p>The cloud agent-canvases put a team of agents on a board. OllamaDev does the same — a Director, isolated-worktree coders, an Auditor gate, a live topology — except every agent runs through <b>your</b> Ollama: local by default, free, nothing uploaded — with optional cloud models when you want them.</p>
         <ul>
           <li>Worktree-per-coder isolation + an adversarial <b>Auditor</b> gate</li>
           <li>A live <b>topology</b>: branches, files, audit verdicts, activity</li>
@@ -81,9 +82,9 @@
         <p>No subscription, no per-token meter, no surprise bill at the end of a long session. Run the biggest model your GPU (or CPU) can handle, as much as you want.</p>
       </div>
       <div class="card">
-        <span class="ico">🛜</span>
-        <h3>Air-gap, enforced</h3>
-        <p>Flip <code>--offline</code> and every network tool is <strong>unwaivably</strong> hard-blocked; <code>ollamadev attest</code> prints a fingerprint proving the run never touched the wire. Built for regulated and disconnected work.</p>
+        <span class="ico">☁️</span>
+        <h3>Local by default, cloud when you want it</h3>
+        <p>Your own Ollama models by default — or opt into Ollama's hosted <strong>cloud models</strong> through the same daemon (still one backend, same <code>-m &lt;tag&gt;</code>, even in the crew). A <strong>🌐 Web</strong> toggle (or <code>--no-web</code>) blocks the agent's network tools when you'd rather stay offline.</p>
       </div>
       <div class="card">
         <span class="ico">📦</span>
@@ -110,7 +111,7 @@
           <tr><td class="feat">AI provider</td><td class="own">Local (your Ollama models)</td><td>Hosted, cloud-only</td></tr>
           <tr><td class="feat">Privacy</td><td class="own">100% on-device</td><td>Code sent to servers</td></tr>
           <tr><td class="feat">Cost</td><td class="own">Free</td><td>Subscription / per-token</td></tr>
-          <tr><td class="feat">Air-gapped operation</td><td class="own">Yes — enforced &amp; attestable</td><td>No (needs the network)</td></tr>
+          <tr><td class="feat">Cloud models</td><td class="own">Optional (Ollama cloud, opt-in)</td><td>Required</td></tr>
           <tr><td class="feat">Source auditability</td><td class="own">Full — one vanilla file, GPL-3.0</td><td>Closed</td></tr>
           <tr><td class="feat">Multi-agent crew</td><td class="own">Yes — parallel, per-role models, worktrees</td><td>Varies</td></tr>
           <tr><td class="feat">Measurable quality (evals)</td><td class="own"><code>ollamadev eval</code> — pass rate on a fixed suite</td><td>Rarely exposed to you</td></tr>
@@ -134,16 +135,16 @@
     <div class="section-head">
       <span class="eyebrow">Agent-canvases</span>
       <h2>vs the cloud agent-canvases</h2>
-      <p>The products OllamaDev's ADE is modeled against — cnvs.dev, BridgeSpace, and Plyrium Forge.</p>
+      <p>The cloud multi-agent environments OllamaDev's ADE is modeled against.</p>
     </div>
     <div class="cmp">
       <table class="compare">
         <thead>
-          <tr><th></th><th class="col-own">OllamaDev</th><th>cnvs.dev</th><th>BridgeSpace</th><th>Plyrium Forge</th></tr>
+          <tr><th></th><th class="col-own">OllamaDev</th><th>Cloud canvas A</th><th>Cloud canvas B</th><th>Cloud canvas C</th></tr>
         </thead>
         <tbody>
-          <tr><td class="feat">Models</td><td class="own">Local Ollama</td><td>cloud</td><td>cloud</td><td>cloud + local</td></tr>
-          <tr><td class="feat">Runs offline / air-gapped</td><td class="own">Yes, by default</td><td>No</td><td>No</td><td>optional</td></tr>
+          <tr><td class="feat">Models</td><td class="own">Local Ollama (+ optional cloud)</td><td>cloud</td><td>cloud</td><td>cloud + local</td></tr>
+          <tr><td class="feat">Runs locally by default</td><td class="own">Yes (cloud opt-in)</td><td>No</td><td>No</td><td>optional</td></tr>
           <tr><td class="feat">Cost</td><td class="own">Free</td><td>paid</td><td>paid</td><td>$19–59/mo</td></tr>
           <tr><td class="feat">Surfaces</td><td class="own">CLI · desktop · web</td><td>macOS app</td><td>desktop</td><td>Electron</td></tr>
           <tr><td class="feat">Infinite agent canvas</td><td class="own">Yes</td><td>Yes</td><td>—</td><td>—</td></tr>

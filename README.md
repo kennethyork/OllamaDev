@@ -4,7 +4,7 @@
 
 OllamaDev is a terminal coding agent that runs against your local [Ollama](https://ollama.com) instance. By default nothing leaves your machine — no API keys, no subscription — and you can opt into Ollama's **cloud models** when you want frontier-scale horsepower (still one Ollama backend, same `-m <tag>`). It's a single self-contained **vanilla PHP** binary (no Composer, no extensions beyond PHP core + curl), with diff-previewed edits, undo, an interruptible agent loop, real context management, and 60+ tools.
 
-It also ships a **crew** — a deterministic team of agents (a **Director** that plans, **Coders** that each work in an isolated git worktree, and an **Auditor** that reviews every diff and sends flagged work back for one fix before it lands) — surfaced in an **ADE** (Agentic Development Environment) that runs as a desktop app *and* in the browser off one shared engine. Its workspace is a single **infinite, pannable/zoomable canvas** where everything — terminals, the editor, file tree, code search, the task board, the memory graph, a localhost browser preview, a voice-control window, and a **live crew topology** — is a draggable window. Unlike cloud multi-agent canvases (cnvs, BridgeSpace, Plyrium Forge), the whole team runs on **your** hardware: no per-seat pricing, no agents phoning home, **local by default** — or reach for Ollama's cloud models (one Ollama backend) when a task wants frontier horsepower.
+It also ships a **crew** — a deterministic team of agents (a **Director** that plans, **Coders** that each work in an isolated git worktree, and an **Auditor** that reviews every diff and sends flagged work back for one fix before it lands) — surfaced in an **ADE** (Agentic Development Environment) that runs as a desktop app *and* in the browser off one shared engine. Its workspace is a single **infinite, pannable/zoomable canvas** where everything — terminals, the editor, file tree, code search, the task board, the memory graph, a localhost browser preview, a voice-control window, and a **live crew topology** — is a draggable window. Unlike the cloud multi-agent canvases, the whole team runs on **your** hardware: no per-seat pricing, no agents phoning home, **local by default** — or reach for Ollama's cloud models (one Ollama backend) when a task wants frontier horsepower.
 
 ```
 > create a Fastify server in server.js with a /health route
@@ -355,9 +355,9 @@ The loop is **edit → review → build → test → verify → commit**:
 
 And the **ADE** (the agent canvas) versus the cloud multi-agent environments it's modeled against:
 
-| | OllamaDev ADE | cnvs.dev | BridgeSpace | Plyrium Forge |
+| | OllamaDev ADE | Cloud canvas A | Cloud canvas B | Cloud canvas C |
 |---|---|---|---|---|
-| Models | **Local Ollama** (+ optional Ollama cloud) | cloud (Claude/GPT/…) | cloud | cloud + local |
+| Models | **Local Ollama** (+ optional Ollama cloud) | cloud (hosted models) | cloud | cloud + local |
 | Runs locally by default | **Yes** (cloud is opt-in) | No | No | optional |
 | Cost | **Free** | paid | paid | $19–59/mo |
 | Surfaces | **CLI + desktop + web** (one engine) | macOS app only | desktop | Electron desktop |

@@ -97,7 +97,7 @@
           <li>Launch &amp; steer it by <b>voice</b>: <code>"start a crew to add tests"</code></li>
           <li>Run coders <b>in parallel</b> on one box; pick a model per role</li>
         </ul>
-        <p style="margin-top:18px;font-size:0.9rem;color:var(--fg-faint);">The private, free answer to cloud agent-canvases like cnvs, BridgeSpace, and Plyrium Forge — but it runs entirely on your hardware.</p>
+        <p style="margin-top:18px;font-size:0.9rem;color:var(--fg-faint);">The private, free answer to the cloud agent-canvases — but it runs entirely on your hardware.</p>
       </div>
       <div class="frame">
         <div class="frame-bar"><span class="d r"></span><span class="d y"></span><span class="d g"></span><span class="url">🛰 live crew topology · 📋 board</span></div>
@@ -202,9 +202,9 @@
         <p>MCP servers (stdio + HTTP/SSE), real LSP navigation &amp; diagnostics, and <strong>local semantic code search</strong> embedded with your own model. No cloud.</p>
       </div>
       <div class="card">
-        <span class="ico">🛜</span>
-        <h3>Air-gapped &amp; attestable</h3>
-        <p>Flip on <code>--offline</code> and every network tool is hard-blocked — unwaivable. <code>ollamadev attest</code> prints a fingerprint proving the run never touched the wire.</p>
+        <span class="ico">☁️</span>
+        <h3>Local by default, cloud when you want it</h3>
+        <p>Runs on your own Ollama models — or opt into Ollama's hosted <strong>cloud models</strong> (<code>qwen3-coder:480b-cloud</code>, <code>gpt-oss:120b-cloud</code>…) through the same daemon. Still one backend, same <code>-m &lt;tag&gt;</code>, even in the crew. A <strong>🌐 Web</strong> toggle (or <code>--no-web</code>) blocks the agent's network tools when you want it offline.</p>
       </div>
       <div class="card">
         <span class="ico">🌐</span>
@@ -239,8 +239,8 @@
           <tr><th>Feature</th><th class="col-own">OllamaDev</th><th>Cloud agent-canvases</th></tr>
         </thead>
         <tbody>
-          <tr><td class="feat">AI provider</td><td class="own">Local (your Ollama models)</td><td>Hosted, cloud-only</td></tr>
-          <tr><td class="feat">Runs offline / air-gapped</td><td class="own">Yes, by default</td><td>No</td></tr>
+          <tr><td class="feat">AI provider</td><td class="own">Your Ollama models (+ optional Ollama cloud)</td><td>Hosted, cloud-only</td></tr>
+          <tr><td class="feat">Runs locally by default</td><td class="own">Yes (cloud is opt-in)</td><td>No</td></tr>
           <tr><td class="feat">Cost</td><td class="own">Free</td><td>Subscription / per-seat</td></tr>
           <tr><td class="feat">Surfaces</td><td class="own">CLI + desktop + web (one engine)</td><td>One app</td></tr>
           <tr><td class="feat">Infinite agent canvas</td><td class="own">Yes</td><td>Some</td></tr>

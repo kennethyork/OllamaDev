@@ -96,15 +96,25 @@ class OllamaClient {
     // When autoContext is on, we grow num_ctx to the MODEL's own max context
     // length (from /api/show), capped by ollama.maxContextWindow to stay safe
     // on RAM/VRAM — i.e. "as big as the model allows, within reason".
+    //
+    // CLOUD models are the exception: they run on Ollama's servers, so the local
+    // VRAM cap doesn't apply — they always get their FULL trained context window
+    // (the maxContextWindow clamp is bypassed). Falls back to ollama.cloudContextWindow
+    // only if /api/show can't report the model's length.
     public static function chatOptions(string $model = '', string $host = ''): array {
         $base = (int)Config::get('ollama.contextWindow', 16384);
         $cap  = (int)Config::get('ollama.maxContextWindow', 32768);
+        $isCloud = $model !== '' && class_exists('Models') && Models::isCloud($model);
         // autoContext on: grow toward the model's max, clamped to the cap — and the
         // cap can pull it BELOW the baseline, so lowering maxContextWindow is how you
         // fit a smaller window on limited hardware.
-        // autoContext off: use exactly contextWindow (full manual control).
+        // autoContext off: use exactly contextWindow (full manual control) — but a
+        // cloud model still gets its full window, since the cap is a local-VRAM concern.
         $ctx = $base;
-        if (Config::get('ollama.autoContext', true)) {
+        if ($isCloud) {
+            $max = $model !== '' ? self::modelContextLength($model, $host) : 0;
+            $ctx = $max > 0 ? $max : (int)Config::get('ollama.cloudContextWindow', 131072);
+        } elseif (Config::get('ollama.autoContext', true)) {
             $max = $model !== '' ? self::modelContextLength($model, $host) : 0;
             $want = $max > 0 ? max($base, $max) : $base;
             $ctx = min($want, max(512, $cap));

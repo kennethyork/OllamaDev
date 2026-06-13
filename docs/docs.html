@@ -59,7 +59,7 @@
     <p class="sub">A local, private, dependency-free AI coding agent for your terminal.</p>
 
     <h2 id="getting-started" class="anchor">Getting started</h2>
-    <p>OllamaDev is a terminal coding agent that runs entirely against your local <a href="https://ollama.com">Ollama</a> instance (or LM Studio). It's a single self-contained <strong>vanilla PHP</strong> binary — no Composer, no extensions beyond PHP core + curl — with diff-previewed edits, undo, an interruptible agent loop, real context management, and 60+ tools.</p>
+    <p>OllamaDev is a terminal coding agent that runs against your local <a href="https://ollama.com">Ollama</a> instance — with optional Ollama cloud models when you want frontier horsepower. It's a single self-contained <strong>vanilla PHP</strong> binary — no Composer, no extensions beyond PHP core + curl — with diff-previewed edits, undo, an interruptible agent loop, real context management, and 60+ tools.</p>
     <p><strong>Requirements:</strong></p>
     <ul>
       <li><strong>PHP 8.0+</strong> (CLI) with curl — that's it.</li>
@@ -79,7 +79,7 @@
     </div>
 
     <p><strong>Shared prerequisite (all three):</strong> a local model server running with at least one model:</p>
-<pre class="code">ollama serve              <span class="cm"># or LM Studio's local server</span>
+<pre class="code">ollama serve              <span class="cm"># start your local Ollama</span>
 ollama pull qwen2.5-coder<button class="copy-btn">Copy</button></pre>
 
     <table>
@@ -219,14 +219,14 @@ echo "summarize this" | ollamadev chat<button class="copy-btn">Copy</button></pr
         <tr><td><code>ollamadev chat</code></td><td>Plain conversational chat — no agent, no tools (<code>-m &lt;model&gt;</code>; backs the ADE's <strong>💬 Chat</strong> window)</td></tr>
         <tr><td><code>ollamadev transcribe &lt;file&gt;</code></td><td>Local speech-to-text on an audio file (Whisper); <code>--enabled</code> probes for an engine</td></tr>
         <tr><td><code>ollamadev voice model &lt;size&gt;</code></td><td>Get/set the STT model; also <code>voice install [size]</code> (download the engine), <code>voice history [--json N]</code>, <code>voice status</code>, <code>voice clear-history</code></td></tr>
-        <tr><td><code>ollamadev search &lt;query&gt;</code></td><td>Web search — <code>--provider duckduckgo|searxng|brave</code>, <code>--limit N</code>. Blocked when air-gapped.</td></tr>
+        <tr><td><code>ollamadev search &lt;query&gt;</code></td><td>Web search — <code>--provider duckduckgo|searxng|brave</code>, <code>--limit N</code>.</td></tr>
         <tr><td><code>ollamadev index build</code></td><td>Build a local semantic code index (embeddings); also <code>status</code> / <code>clear</code></td></tr>
         <tr><td><code>ollamadev code-search &lt;query&gt;</code></td><td>Find code by <em>meaning</em> over the local index (<code>--limit N</code>)</td></tr>
         <tr><td><code>ollamadev test</code></td><td>Run the project's tests (auto-detected)</td></tr>
         <tr><td><code>ollamadev verify</code></td><td>Run tests, then let the agent fix failures until green (<code>--max N</code>)</td></tr>
         <tr><td><code>ollamadev diff</code></td><td>Working-tree diff for review (<code>--json</code>); powers the desktop/web <strong>⇄ Review</strong> panel</td></tr>
         <tr><td><code>ollamadev commit</code></td><td>Commit with an AI-generated message (<code>-a</code> stage all, <code>-m</code> override)</td></tr>
-        <tr><td><code>ollamadev pr create|review &lt;n&gt;</code></td><td>Open a PR, or review one with the local model (needs <code>gh</code>; blocked air-gapped)</td></tr>
+        <tr><td><code>ollamadev pr create|review &lt;n&gt;</code></td><td>Open a PR, or review one with the local model (needs <code>gh</code>)</td></tr>
         <tr><td><code>ollamadev config get|set &lt;key&gt; [value]</code></td><td>Inspect or persist settings in <code>~/.ollamadev/config.json</code></td></tr>
         <tr><td><code>ollamadev skills</code></td><td>List / scaffold / install / export skills</td></tr>
         <tr><td><code>ollamadev memory</code></td><td>Inspect the graph memory knowledge base</td></tr>
@@ -273,7 +273,7 @@ echo "summarize this" | ollamadev chat<button class="copy-btn">Copy</button></pr
     <ul>
       <li><strong><code>@file</code> mentions</strong> — <code>explain @src/foo.php</code> inlines the file into your message.</li>
       <li><strong>Image / vision input</strong> — attach images with <code>@image.png</code>, <code>@~/shot.png</code>, or <code>/image &lt;path&gt;</code> for multimodal models. OllamaDev base64-encodes them into Ollama's <code>images</code> field, and warns (pointing at an installed vision model) if the active model can't see — pull one with <code>ollamadev models pull llava</code>.</li>
-      <li><strong>Voice input (local STT) — nothing to install</strong> — <code>/voice</code> records your mic and transcribes it locally, then submits the text as your prompt. The <strong>Whisper engine is baked in</strong>: the desktop builds (AppImage / Windows installer) <strong>bundle</strong> a self-contained <a href="https://github.com/ggerganov/whisper.cpp">whisper.cpp</a> + model so it works instantly &amp; offline; the standalone CLI <strong>auto-downloads</strong> it once on first <code>/voice</code> (into <code>~/.ollamadev/stt</code>), then runs fully offline forever. <strong>CPU-only</strong> — nothing leaves the machine; air-gap mode blocks the one-time download (drop a whisper.cpp binary + ggml model into <code>~/.ollamadev/stt</code> instead, or <code>pip install -U openai-whisper</code>). Press <strong>Enter</strong> to stop. Accuracy: <code>/voice model &lt;tiny|base|small|medium|large-v3|turbo&gt;</code> (<code>small</code> is the CPU sweet spot); history: <code>/voice history</code>; non-interactive install: <code>ollamadev voice install</code>. In the desktop/web app it's the 🎤 mic button plus a voice-model dropdown and a 🎙 History panel in the header.</li>
+      <li><strong>Voice input (local STT) — nothing to install</strong> — <code>/voice</code> records your mic and transcribes it locally, then submits the text as your prompt. The <strong>Whisper engine is baked in</strong>: the desktop builds (AppImage / Windows installer) <strong>bundle</strong> a self-contained <a href="https://github.com/ggerganov/whisper.cpp">whisper.cpp</a> + model so it works instantly &amp; offline; the standalone CLI <strong>auto-downloads</strong> it once on first <code>/voice</code> (into <code>~/.ollamadev/stt</code>), then runs fully offline forever. <strong>CPU-only</strong> — nothing leaves the machine. (Prefer to bring your own? Drop a whisper.cpp binary + ggml model into <code>~/.ollamadev/stt</code>, or <code>pip install -U openai-whisper</code>.) Press <strong>Enter</strong> to stop. Accuracy: <code>/voice model &lt;tiny|base|small|medium|large-v3|turbo&gt;</code> (<code>small</code> is the CPU sweet spot); history: <code>/voice history</code>; non-interactive install: <code>ollamadev voice install</code>. In the desktop/web app it's the 🎤 mic button plus a voice-model dropdown and a 🎙 History panel in the header.</li>
       <li><strong>Real token/context meter</strong> — <code>/status</code> and <code>/context</code> show actual token counts and context fill.</li>
       <li><strong>Auto-compaction</strong> — older messages are summarized by the model to stay within the window. Fires automatically on <strong>real context fill</strong> (≥75% of <code>num_ctx</code>, from Ollama's actual prompt-token count) <em>or</em> a message-count threshold, keeping the most recent turns verbatim and preserving tool output the recent steps still reference. Tune with <code>agents.compactContextPct</code> / <code>agents.compactThreshold</code> / <code>agents.compactKeep</code>; force it with <code>/compact</code>.</li>
       <li><strong>Checkpoint &amp; undo</strong> — every file change is snapshotted; <code>/undo</code> reverts the last one, <code>/checkpoints</code> lists them.</li>
@@ -358,14 +358,14 @@ ollamadev search "rust async" --provider searxng    <span class="cm"># self-host
       <li><strong>Backends</strong> — <code>duckduckgo</code> (default, no key), <code>searxng</code> (self-hosted, most local-first — set <code>search.host</code>), or <code>brave</code> (Brave Search API — set <code>search.key</code> / <code>BRAVE_API_KEY</code>). Choose with <code>search.provider</code> in config or <code>--provider</code> per run.</li>
       <li><strong>Still local-first</strong> — only your <em>query</em> leaves the machine; the AI stays on your hardware. No code or prompt is sent to a cloud model.</li>
       <li><strong>Search-only switch</strong> — <code>search.enabled:false</code> (or <code>config set search.enabled false</code>, or the <strong>🔍 Search</strong> top-bar button) turns off web search while leaving <code>fetch</code> and remote git working.</li>
-      <li><strong>Air-gap wins</strong> — <code>--offline</code> / <code>OLLAMADEV_OFFLINE</code> / config <code>offline:true</code> hard-blocks search &amp; fetch &amp; remote git, unwaivably. In the desktop &amp; browser, the <strong>🌐 Web</strong> button toggles this (✈️ Offline when off); both settings are shared with the CLI.</li>
+      <li><strong>Web-access toggle</strong> — <code>--no-web</code> / config <code>web.enabled:false</code> blocks the agent's network tools (search &amp; fetch &amp; remote git) for a run; local work is untouched. In the desktop &amp; browser, the <strong>🌐 Web</strong> button flips the same setting, shared with the CLI.</li>
     </ul>
 
     <h2 id="codeintel" class="anchor">Code intelligence</h2>
     <p>Three commands make the agent work like it knows your codebase — all local:</p>
 <pre class="code"><span class="cm"># find code by meaning, not keywords (local embeddings)</span>
 ollamadev index build          <span class="cm"># embed the repo (model: embed.model, default nomic-embed-text)</span>
-ollamadev code-search "where do we gate network tools when offline"
+ollamadev code-search "where do we gate the agent's network tools"
 
 <span class="cm"># test-aware: run the suite, or fix failures until green</span>
 ollamadev test                 <span class="cm"># auto-detects npm/phpunit/composer/go/cargo/pytest/make</span>
@@ -378,7 +378,7 @@ ollamadev pr review 42 --comment   <span class="cm"># review a PR with the local
     <ul>
       <li><strong>Semantic search</strong> needs an embedding model pulled once: <code>ollama pull nomic-embed-text</code>. The index lives in <code>.ollamadev/index/</code> and is rebuilt with <code>index build</code>. The agent can call it as the <code>code_search</code> tool, and the desktop/browser have a <strong>🔎 search panel</strong> in the sidebar (type a query → click a result to open it).</li>
       <li><strong>verify</strong> and the <code>run_tests</code> tool let the agent confirm its own changes; set <code>test.command</code> to override detection.</li>
-      <li><strong>PR commands</strong> use the GitHub CLI (<code>gh</code>) and are blocked in air-gap mode; <code>commit</code> is local and always available.</li>
+      <li><strong>PR commands</strong> use the GitHub CLI (<code>gh</code>); <code>commit</code> is local and always available.</li>
     </ul>
 
     <h2 id="config" class="anchor">Configuration</h2>
@@ -387,12 +387,11 @@ ollamadev pr review 42 --comment   <span class="cm"># review a PR with the local
   "provider": "ollama",
   "ollama": {
     "host": "http://localhost:11434",
-    "defaultModel": "qwen2.5-coder:latest",
+    "defaultModel": "qwen3.5:9b",
     "contextWindow": 16384,
     "temperature": 0.3,
     "stream": true
   },
-  "lmstudio": { "host": "http://localhost:1234/v1" },
   "model": { "nagWeakModel": true },
   "stt": { "model": "base", "language": "", "maxSeconds": 60, "host": "", "command": "" },
   "agents": {
@@ -401,7 +400,7 @@ ollamadev pr review 42 --comment   <span class="cm"># review a PR with the local
     "subagentPermission": "readonly"
   },
   "permissions": { "mode": "ask" },
-  "offline": false,
+  "web": { "enabled": true },
   "search": { "enabled": true, "provider": "duckduckgo", "host": "", "key": "" },
   "embed": { "model": "nomic-embed-text" },
   "test": { "command": "" },
@@ -417,12 +416,14 @@ ollamadev pr review 42 --comment   <span class="cm"># review a PR with the local
 
     <p class="dim"><strong>Voice (<code>stt</code>)</strong>: <code>model</code> is the Whisper size (<code>tiny</code>…<code>large-v3</code>/<code>turbo</code>); <code>language</code> empty = auto-detect; <code>maxSeconds</code> caps a recording. Leave <code>host</code>/<code>command</code> empty to auto-detect a local Whisper engine — or set <code>command</code> to drive your own (e.g. <code>"whisper-cli -m model.bin -f {file} -nt"</code>) / <code>host</code> for a local transcription server. All local. <strong><code>model.nagWeakModel</code></strong>: set <code>false</code> to silence the startup hint that suggests a stronger installed model for tool use.</p>
 
-    <h3>LM Studio (opt-in local backend)</h3>
-    <p>Ollama is the default. To use LM Studio's local OpenAI-compatible server instead, start its server (Developer → Start Server, port 1234), then:</p>
-<pre class="code">ollamadev --lmstudio              <span class="cm"># this session</span>
-ollamadev --host http://localhost:1234/v1
-<span class="cm"># or set "provider": "lmstudio" in config</span><button class="copy-btn">Copy</button></pre>
-    <div class="callout">Still 100% local: LM Studio uses the OpenAI <em>wire format</em>, but the server runs on your machine. The cloud ban holds — the format is fine, hitting a hosted provider is not.</div>
+    <h3>Cloud models (optional)</h3>
+    <p>OllamaDev is Ollama-only. Beyond local models, you can opt into Ollama's hosted <strong>cloud models</strong> — frontier-scale models that run on Ollama's servers but are reached through your <em>local</em> Ollama daemon, so it's still one backend and the same <code>-m &lt;tag&gt;</code> everywhere (CLI, desktop, web, and the crew — mix local + cloud per role).</p>
+<pre class="code">ollama signin                          <span class="cm"># once — creates a free ollama.com key</span>
+ollamadev models cloud                 <span class="cm"># the curated catalog + how to enable</span>
+ollamadev models pull qwen3-coder-cloud <span class="cm"># or any :cloud / -cloud tag</span>
+ollamadev -m qwen3-coder:480b-cloud    <span class="cm"># use it (also /model in chat)</span><button class="copy-btn">Copy</button></pre>
+    <div class="callout">Cloud models <strong>leave the machine</strong> — prompts run on Ollama's servers (the catalog says so plainly). Local stays the default; cloud is strictly opt-in. To keep a run local, the <strong>🌐 Web</strong> toggle / <code>--no-web</code> blocks the agent's network tools.</div>
+    <p class="dim">Cloud models always run at their <strong>full context window</strong> — the local <code>maxContextWindow</code> cap (which exists to fit your GPU/RAM) is bypassed for them, since they run on Ollama's hardware. E.g. a 512K-context cloud model uses all 512K.</p>
 
     <h2 id="env" class="anchor">Environment variables</h2>
     <table>
@@ -431,12 +432,9 @@ ollamadev --host http://localhost:1234/v1
         <tr><td><code>OLLAMA_HOST</code></td><td><code>http://localhost:11434</code></td><td>Ollama API endpoint</td></tr>
         <tr><td><code>OLLAMA_MODEL</code></td><td>first installed model</td><td>Default model</td></tr>
         <tr><td><code>OLLAMA_NUM_CTX</code></td><td><code>16384</code></td><td>Context window size</td></tr>
-        <tr><td><code>OLLAMADEV_PROVIDER</code></td><td><code>ollama</code></td><td>Backend: <code>ollama</code> or <code>lmstudio</code></td></tr>
-        <tr><td><code>LMSTUDIO_HOST</code></td><td><code>http://localhost:1234/v1</code></td><td>LM Studio endpoint</td></tr>
         <tr><td><code>OLLAMADEV_SERVE_PORT</code></td><td><code>41434</code></td><td>Web-mode port (chosen to avoid clashes — mirrors Ollama's <code>11434</code>, clear of 8080 and other common dev ports)</td></tr>
         <tr><td><code>OLLAMADEV_SERVE_HOST</code></td><td><code>localhost</code></td><td>Web-mode bind address. Leave as <code>localhost</code> (use a tunnel/VPN for remote); only set to <code>0.0.0.0</code> with a token + firewall</td></tr>
         <tr><td><code>OLLAMADEV_SERVE_TOKEN</code></td><td><em>(none)</em></td><td>Required auth token for every web API call. Unset = open to anyone who can reach the port, so always set it for remote use</td></tr>
-        <tr><td><code>OLLAMADEV_OFFLINE</code></td><td><em>(unset)</em></td><td>Air-gapped mode — hard-blocks every network tool (search, fetch, remote git), unwaivable. Same as <code>--offline</code> or config <code>offline:true</code></td></tr>
         <tr><td><code>BRAVE_API_KEY</code></td><td><em>(none)</em></td><td>API key for the Brave Search backend (only if <code>search.provider</code> is <code>brave</code>)</td></tr>
       </tbody>
     </table>

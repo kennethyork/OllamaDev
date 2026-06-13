@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.9.1 (2026-06-13) — cloud models run at full context; docs refreshed
+
+### Changed
+- **Cloud models always use their full context window.** The `maxContextWindow` cap (16K/32K — there to fit your local GPU/RAM) is now bypassed for `:cloud` / `-cloud` models, since they run on Ollama's hardware. The real length is read from `/api/show` (e.g. a 512K-context cloud model uses all 512K), falling back to `ollama.cloudContextWindow` (128K) only if it can't be read. Local models stay clamped as before. Compaction and the `/context` meter scale to the larger window automatically.
+- **Docs refreshed** — `README`, `docs/index.html`, `docs/compare.html`, `docs/docs.html`: removed the dropped air-gap/attestation and LM Studio references, added the cloud-models + web-access story, and **genericised named competitors** in the comparisons (kept the comparison itself).
+
 ## v0.9.0 (2026-06-13) — Ollama cloud models, verified end-to-end (local + cloud)
 
 Milestone release rolling up v0.8.97–v0.8.99: the collapsing **thinking box**, **Ollama-only** (LM Studio removed), and **Ollama cloud models** (opt-in; air-gap attestation dropped, web-access toggle kept). Smoke-tested end-to-end across a local model (`qwen3.5:9b`) and cloud models (`minimax-m3:cloud`, `kimi-k2.7-code:cloud`) — chat **and** full agentic tool-calling pass on all three.
