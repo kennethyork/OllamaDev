@@ -18,6 +18,42 @@ class OllamaClient {
         return $s === false ? '{}' : $s;
     }
 
+    // Is a curl errno / HTTP status a TRANSIENT network failure worth retrying?
+    // Covers dropped connections, a server that's briefly down, and 5xx/429 — NOT
+    // a clean 4xx (a bad request won't fix itself by retrying).
+    public static function isTransient(int $errno, int $code): bool {
+        // 6 resolve · 7 connect · 18 partial · 52 got-nothing · 55 send · 56 recv (dropped)
+        if ($errno !== 0 && in_array($errno, [6, 7, 18, 52, 55, 56], true)) return true;
+        return in_array($code, [500, 502, 503, 504, 429], true);
+    }
+    // Exponential backoff between retries (250ms · 500ms · 1s, capped 2s), unless
+    // the user hit Ctrl-C.
+    private static function retryWait(int $attempt): void {
+        if (class_exists('Interrupt') && Interrupt::aborted()) return;
+        usleep(min(2000, 250 * (1 << max(0, $attempt - 1))) * 1000);
+    }
+    private static int $maxAttempts = 3;
+
+    // Non-streaming JSON POST with transient-failure retries. Returns the response
+    // body, or '' after the final attempt fails. Centralises the retry loop for the
+    // crew's plan/verdict calls (chatJson / chatStructured).
+    private function postJsonRetry(string $path, string $payload, int $timeout = 300): string {
+        for ($attempt = 1; ; $attempt++) {
+            $ch = curl_init($this->host . $path);
+            curl_setopt_array($ch, [
+                CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload,
+                CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => $timeout,
+            ]);
+            $resp = (string)curl_exec($ch);
+            $errno = curl_errno($ch); $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            if ($resp === '' && $attempt < self::$maxAttempts && self::isTransient($errno, $code)
+                && !(class_exists('Interrupt') && Interrupt::aborted())) { self::retryWait($attempt); continue; }
+            return $resp;
+        }
+    }
+
     public function checkConnection(): bool {
         $ch = curl_init($this->host . '/api/tags');
         curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 5]);
@@ -282,7 +318,6 @@ class OllamaClient {
         $stream = ($handler !== null || $onThinking !== null) && (bool)Config::get('ollama.stream', true);
         $params = ['model' => $model, 'messages' => $messages, 'stream' => $stream, 'options' => self::chatOptions($model, $this->host)]
             + self::thinkParams($model, $this->host);   // thinking models: emit reasoning in the `thinking` field, content stays the clean answer
-        $ch = curl_init($this->host . '/api/chat');
         $opts = [
             CURLOPT_POST => true, CURLOPT_POSTFIELDS => self::jenc($params),
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
@@ -314,16 +349,36 @@ class OllamaClient {
                 }
                 return strlen($data);
             };
-            curl_setopt_array($ch, $opts);
-            curl_exec($ch);
-            curl_close($ch);
+            // Retry a transient drop ONLY while nothing has streamed yet — re-running
+            // after partial output would duplicate tokens on screen.
+            for ($attempt = 1; ; $attempt++) {
+                $ch = curl_init($this->host . '/api/chat');
+                curl_setopt_array($ch, $opts);
+                curl_exec($ch);
+                $errno = curl_errno($ch); $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
+                $aborted = class_exists('Interrupt') && Interrupt::aborted();
+                if ($content === '' && !$aborted && $attempt < self::$maxAttempts && self::isTransient($errno, $code)) {
+                    $buf = ''; self::retryWait($attempt); continue;
+                }
+                break;
+            }
             return $content;
         }
 
-        curl_setopt_array($ch, $opts);
-        $resp = curl_exec($ch);
-        curl_close($ch);
-        if ($resp) {
+        // Non-streaming: a dropped connection or 5xx is fully retryable (no partial output).
+        $resp = '';
+        for ($attempt = 1; ; $attempt++) {
+            $ch = curl_init($this->host . '/api/chat');
+            curl_setopt_array($ch, $opts);
+            $resp = (string)curl_exec($ch);
+            $errno = curl_errno($ch); $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            if ($resp === '' && $attempt < self::$maxAttempts && self::isTransient($errno, $code)
+                && !(class_exists('Interrupt') && Interrupt::aborted())) { self::retryWait($attempt); continue; }
+            break;
+        }
+        if ($resp !== '') {
             $j = json_decode($resp, true);
             Usage::record($j);
             if ($j && isset($j['message'])) {
@@ -344,14 +399,7 @@ class OllamaClient {
     // local models reliably emit parseable plans/verdicts.
     public function chatJson(string $model, array $messages): ?array {
         $params = ['model' => $model, 'messages' => $messages, 'stream' => false, 'format' => 'json', 'options' => self::chatOptions($model, $this->host)];
-        $ch = curl_init($this->host . '/api/chat');
-        curl_setopt_array($ch, [
-            CURLOPT_POST => true, CURLOPT_POSTFIELDS => self::jenc($params),
-            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-            CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 300,
-        ]);
-        $resp = curl_exec($ch);
-        curl_close($ch);
+        $resp = $this->postJsonRetry('/api/chat', self::jenc($params));
         $j = json_decode((string)$resp, true);
         $content = is_array($j) ? ($j['message']['content'] ?? '') : '';
         if ($content === '') return null;
@@ -365,14 +413,7 @@ class OllamaClient {
     // the decoded object, or null on failure.
     public function chatStructured(string $model, array $messages, array $schema): ?array {
         $params = ['model' => $model, 'messages' => $messages, 'stream' => false, 'format' => $schema, 'options' => self::chatOptions($model, $this->host)];
-        $ch = curl_init($this->host . '/api/chat');
-        curl_setopt_array($ch, [
-            CURLOPT_POST => true, CURLOPT_POSTFIELDS => self::jenc($params),
-            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-            CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 300,
-        ]);
-        $resp = curl_exec($ch);
-        curl_close($ch);
+        $resp = $this->postJsonRetry('/api/chat', self::jenc($params));
         $j = json_decode((string)$resp, true);
         Usage::record($j);
         $content = is_array($j) ? ($j['message']['content'] ?? '') : '';

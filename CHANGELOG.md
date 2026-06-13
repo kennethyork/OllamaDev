@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.9.8 (2026-06-13) — network-flake resilience (transient retries)
+
+### Fixed
+- **A dropped connection or brief server hiccup no longer ends a turn as a silent empty reply.** The chat/agent path (`chatWithModel`) and the crew's plan/verdict calls (`chatJson` / `chatStructured`) now retry transient failures — dropped connections (curl recv/send/got-nothing/connect/partial) and 5xx/429 — up to 3 attempts with exponential backoff (250ms · 500ms · 1s). A clean 4xx is **not** retried (it won't fix itself), and Ctrl-C stops the retries immediately.
+- **Streaming retries only fire before the first token.** Re-running a stream after partial output would duplicate tokens on screen, so a transient drop is retried only while nothing has streamed yet.
+
+### Why
+Continuing the long-tail robustness pass — the "it just stopped" failure when the network or the model server blips mid-request. Verified: a dead host now makes 3 backed-off attempts (~0.8s) then falls back gracefully; a live host is unaffected. Vanilla PHP. 641 smoke tests pass.
+
 ## v0.9.7 (2026-06-13) — crew git-state resilience (no false merges)
 
 ### Fixed

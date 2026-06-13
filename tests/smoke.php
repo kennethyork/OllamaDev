@@ -824,6 +824,20 @@ ok('crew holds branches on a dirty tree / detached HEAD (no false merge)',
     && strpos($src, 'detached HEAD') !== false
     && strpos($src, 'status --porcelain --untracked-files=no') !== false);
 
+// Network-flake resilience: transient failures (dropped conn / 5xx) retry with
+// backoff; a clean 4xx doesn't (it won't fix itself).
+if (preg_match('/public static function isTransient\(.*?\n    \}/s', $src, $itm)) {
+    eval('class _ISTRAN { ' . $itm[0] . ' }');
+    ok('isTransient retries dropped-conn + 5xx, never a clean 4xx/200',
+        _ISTRAN::isTransient(56, 0) && _ISTRAN::isTransient(7, 0) && _ISTRAN::isTransient(0, 503)
+        && !_ISTRAN::isTransient(0, 404) && !_ISTRAN::isTransient(0, 401) && !_ISTRAN::isTransient(0, 200));
+} else { ok('isTransient extractable', false); }
+ok('non-streaming chat (chatJson/chatStructured) retries transient failures',
+    strpos($src, 'function postJsonRetry(') !== false && strpos($src, 'self::isTransient($errno, $code)') !== false
+    && substr_count($src, 'self::retryWait(') >= 3);
+ok('streaming retry only fires before any token streamed (no duplication)',
+    strpos($src, "\$content === '' && !\$aborted && \$attempt < self::\$maxAttempts") !== false);
+
 echo "\n== Air-gap attestation removed; web-access toggle kept ==\n";
 ok('no Attest class / attest command / air-gap naming remains',
     strpos($src, 'class Attest') === false && strpos($src, "=== 'attest'") === false
