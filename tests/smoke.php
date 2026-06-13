@@ -807,6 +807,19 @@ if (class_exists('DiffView')) {
     ok('DiffView guards huge content (no O(n*m) hang)', strpos($d, 'large change') !== false && $ms < 1000, 'ms=' . round($ms));
 } else { ok('DiffView available for huge-content guard test', false); }
 
+// bash/grep: hard timeout + output cap so a hanging or runaway command can't wedge
+// the agent or flood memory.
+if (preg_match('/function runShell\(.*?\n\}/s', $src, $rsm)) {
+    eval($rsm[0]);
+    $t0 = microtime(true); $r = runShell('sleep 5', 1); $el = microtime(true) - $t0;
+    ok('runShell kills a hanging command at the timeout', $el < 3.5 && strpos($r, 'killed') !== false, 'el=' . round($el, 1) . 's');
+    $r2 = runShell('yes ABCDEFGHIJ 2>/dev/null | head -c 500000', 10, 10000);
+    ok('runShell caps runaway output', strlen($r2) < 30000 && strpos($r2, 'truncated') !== false, 'len=' . strlen($r2));
+} else { ok('runShell extractable', false); }
+ok('bash + grep route through runShell (timeout + output cap)', substr_count($src, 'runShell(') >= 4);
+ok('grep skips binary files (-rIn) and bounds output', strpos($src, 'grep -rIn') !== false);
+ok('glob caps its result list', strpos($src, 'array_slice($files, 0, 500)') !== false);
+
 echo "\n== Air-gap attestation removed; web-access toggle kept ==\n";
 ok('no Attest class / attest command / air-gap naming remains',
     strpos($src, 'class Attest') === false && strpos($src, "=== 'attest'") === false

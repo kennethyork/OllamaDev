@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.9.6 (2026-06-13) — robustness: bash timeout + output cap, grep/glob bounds
+
+### Fixed
+- **`bash` could hang the agent forever or flood memory.** It ran via bare `shell_exec` — no timeout, no output cap — so a server / `sleep` / infinite loop wedged the whole run, and a runaway command's output was read whole into memory. Commands now go through a new `runShell()` (vanilla `proc_open`): a **hard timeout** (`agents.bashTimeout`, default 300s) kills a too-long command, and the output is **capped** (`agents.bashMaxBytes`, default 100 KB) while still draining the pipe so the child never deadlocks.
+- **`grep` dumped binary matches and was unbounded** — now uses `-rIn` (skips binary files, no garbage/non-UTF-8 noise) and runs through `runShell` (60s timeout + output cap).
+- **`glob` result list is now capped** at 500 with a "narrow the pattern" note.
+
+### Why
+Continuing the long-tail robustness pass — the hanging/runaway/huge-output cases real shells hit. Crew (Director → Coder → Auditor → gated merge) re-verified end-to-end. Vanilla PHP. 637 smoke tests pass.
+
 ## v0.9.5 (2026-06-13) — robustness: bad-UTF8 payloads, binary/huge files, huge diffs
 
 ### Fixed

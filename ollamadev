@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '0.9.5');
+define('OLLAMADEV_VERSION', '0.9.6');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -3141,6 +3141,37 @@ class PtyBridge {
         return $e === false ? "(command still running or timed out)" : trim($clean);
     }
 }
+// Run a shell command with a HARD TIMEOUT and an OUTPUT CAP via proc_open, so a
+// hanging command (a server, `sleep`, an infinite loop) can't wedge the agent and
+// a runaway command (`cat hugefile`, `yes`) can't flood memory/context. Reads
+// non-blocking and keeps draining after the cap so the child never deadlocks on a
+// full pipe. Vanilla PHP; falls back to shell_exec if proc_open is unavailable.
+function runShell(string $cmd, ?int $timeoutSec = null, ?int $maxBytes = null): string {
+    $timeoutSec = $timeoutSec ?? max(5, (int)Config::get('agents.bashTimeout', 300));
+    $maxBytes   = $maxBytes   ?? max(4096, (int)Config::get('agents.bashMaxBytes', 100000));
+    if (!function_exists('proc_open')) return (string)@shell_exec($cmd . ' 2>&1') ?: '(no output)';
+    $proc = @proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+    if (!is_resource($proc)) return (string)@shell_exec($cmd . ' 2>&1') ?: '(no output)';
+    @stream_set_blocking($pipes[1], false); @stream_set_blocking($pipes[2], false);
+    $out = ''; $start = microtime(true); $timedOut = false; $truncated = false;
+    while (true) {
+        $running = (proc_get_status($proc))['running'] ?? false;
+        $chunk = (string)@fread($pipes[1], 16384) . (string)@fread($pipes[2], 16384);
+        if ($chunk !== '') {
+            $remain = $maxBytes - strlen($out);
+            if ($remain > 0) $out .= substr($chunk, 0, $remain);
+            if (strlen($out) >= $maxBytes) $truncated = true;   // keep reading & discarding to avoid a pipe deadlock
+        }
+        if (!$running && $chunk === '') break;
+        if (microtime(true) - $start > $timeoutSec) { $timedOut = true; @proc_terminate($proc, 9); break; }
+        if ($chunk === '') usleep(15000);   // 15ms idle poll
+    }
+    @fclose($pipes[1]); @fclose($pipes[2]); @proc_close($proc);
+    if ($timedOut)        $out .= "\n…[command killed after {$timeoutSec}s — it ran too long]";
+    elseif ($truncated)   $out .= "\n…[output truncated at {$maxBytes} bytes]";
+    return $out === '' ? '(no output)' : $out;
+}
+
 Tools::register('view', function($p) {
     $path = (string)($p['file_path'] ?? $p['file'] ?? $p['path'] ?? '');
     if ($path === '') return CmdError::missingParam('file_path', 'view');
@@ -3435,7 +3466,9 @@ Tools::register('glob', function($p) {
     $basePath = $p['path'] ?? $p['file_path'] ?? '.';
     if (strpos($pattern, '*') === false) $pattern = '**/*' . $pattern;
     $files = glob(rtrim($basePath, '/') . '/' . $pattern, GLOB_BRACE);
-    return empty($files) ? "No files found" : implode("\n", $files);
+    if (empty($files)) return "No files found";
+    $n = count($files); $files = array_slice($files, 0, 500);
+    return implode("\n", $files) . ($n > 500 ? "\n…[{$n} matches; showing 500 — narrow the pattern]" : '');
 });
 
 Tools::register('grep', function($p) {
@@ -3443,9 +3476,11 @@ Tools::register('grep', function($p) {
     if (empty($pattern)) return "missing pattern";
     $path = $p['path'] ?? '.';
     $include = $p['include'] ?? '';
-    $cmd = "grep -rn --color=never " . escapeshellarg($pattern) . " " . escapeshellarg($path);
+    // -I skips binary files (no garbage / non-UTF-8 "Binary file matches" noise).
+    $cmd = "grep -rIn --color=never " . escapeshellarg($pattern) . " " . escapeshellarg($path);
     if (!empty($include)) $cmd .= " --include=" . escapeshellarg($include);
-    return shell_exec($cmd . ' 2>&1') ?: "No matches found";
+    $out = runShell($cmd . ' 2>&1', 60);   // timeout + output cap so a huge tree / match flood can't wedge it
+    return (trim($out) === '' || $out === '(no output)') ? "No matches found" : $out;
 });
 
 Tools::register('ls', function($p) {
@@ -3656,7 +3691,7 @@ Tools::register('bash', function($p) {
     $dangerous = ['rm -rf /', 'rm -rf ~', 'rm -rf $HOME', 'mkfs', ':(){', 'sudo rm', '> /dev/sd', 'dd if='];
     if (class_exists('Permission') && Permission::getMode() === 'auto') {
         foreach ($dangerous as $b) { if (str_contains($cmd, $b)) return "Dangerous command blocked: $b"; }
-        return shell_exec($cmd . ' 2>&1') ?: "(no output)";
+        return runShell($cmd . ' 2>&1');
     }
     $readonly = ['ls', 'pwd', 'cat', 'head', 'tail', 'grep', 'find', 'git', 'echo', 'wc', 'sort', 'uniq', 'awk', 'sed', 'cut', 'tr', 'file', 'stat', 'diff', 'tree'];
     $first = strtok($cmd, ' ');
@@ -3667,7 +3702,7 @@ Tools::register('bash', function($p) {
             if ($m && isset($m[0][0])) { $result = eval('return ' . str_replace(' ', '', $m[0][0]) . ';'); return (string)$result; }
         }
     }
-    return shell_exec($cmd . ' 2>&1') ?: "(no output)";
+    return runShell($cmd . ' 2>&1');
 });
 
 Tools::register('calc', function($p) {
