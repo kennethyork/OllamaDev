@@ -28,6 +28,24 @@ matching fixed it:
 | `kimi-k2.7-code:cloud` | 70% | **100%** |
 | `minimax-m3:cloud` | 80% | **100%** |
 
+## Crew end-to-end — 2026-06-13 (v0.9.19)
+
+After the `decodeLoose` fix (cloud models fence their plan JSON in ```json … ```
+even with `format:json`, which made the Director fall back to a single subtask),
+the same two-file task was run through the full crew on both engines. Task: *build
+a string helper (`strings.php`: slugify + truncate) and a math helper (`math.php`:
+clamp + percent) in separate files.*
+
+| Model | Type | Split | Audit | Merge |
+|---|---|---|---|---|
+| `qwen3.5:9b` | local | 2 coders | #1/#2 clean | **2 merged · 0 held** |
+| `minimax-m3:cloud` | Ollama cloud | 2 coders | #1/#2 clean | **2 merged · 0 held** |
+
+Both runs: Director split into one coder per file → each worked in an isolated git
+worktree in parallel → auditor passed both → both branches merged into `main` with
+no conflicts. `php -l` clean on both files; all four functions present. Confirms the
+Director now reliably parallelizes on local and cloud alike.
+
 ## How to read this
 
 100% here means the **harness reliably completes well-specified tasks** — local and
