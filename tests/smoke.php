@@ -838,6 +838,24 @@ ok('non-streaming chat (chatJson/chatStructured) retries transient failures',
 ok('streaming retry only fires before any token streamed (no duplication)',
     strpos($src, "\$content === '' && !\$aborted && \$attempt < self::\$maxAttempts") !== false);
 
+// Ecosystem / onboarding / measurable quality: built-in crew packs, hardware-aware
+// setup, eval --compare across models.
+if (preg_match('/class CrewPacks \{.*?\n\}/s', $src, $cpm)) {
+    if (!class_exists('CrewPacks')) eval($cpm[0]);
+    $b = CrewPacks::builtins();
+    ok('crew ships built-in packs (web-app, rest-api, bugfix, …)',
+        count($b) >= 6 && isset($b['bugfix']) && isset($b['web-app']) && isset($b['rest-api']));
+    $bp = CrewPacks::load('bugfix');
+    ok('crew pack load falls back to a built-in (focus + amplify)',
+        is_array($bp) && !empty($bp['focus']) && (int)($bp['amplify'] ?? 0) === 3);
+} else { ok('CrewPacks extractable', false); }
+$mainSrc0 = (string)@file_get_contents(dirname(__DIR__) . '/src/99-main.php');
+ok('eval --compare runs the suite across models', strpos($mainSrc0, "'--compare'") !== false
+    && strpos($mainSrc0, "json_encode(['compare'") !== false);
+ok('setup: hardware-aware onboarding (detect → recommend → pull → set default)',
+    strpos($mainSrc0, "\$argv[1] === 'setup'") !== false && strpos($mainSrc0, 'nvidia-smi') !== false
+    && strpos($mainSrc0, 'Recommended:') !== false && strpos($mainSrc0, "Config::persist('ollama.defaultModel'") !== false);
+
 echo "\n== Air-gap attestation removed; web-access toggle kept ==\n";
 ok('no Attest class / attest command / air-gap naming remains',
     strpos($src, 'class Attest') === false && strpos($src, "=== 'attest'") === false

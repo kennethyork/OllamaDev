@@ -394,6 +394,59 @@ if ($argc >= 2 && $argv[1] === 'serve') {
     exit(0);
 }
 
+// Setup — 60-second onboarding: check Ollama, detect hardware, recommend + pull a
+// model that fits, and set it as the default. Lowers the activation energy that's
+// the #1 barrier for a local tool.
+if ($argc >= 2 && $argv[1] === 'setup') {
+    $config = Config::load();
+    $c = function (string $s, string $code) { return (getenv('NO_COLOR') !== false) ? $s : "\033[" . $code . "m" . $s . "\033[0m"; };
+    echo $c("\n⚙  OllamaDev setup\n", '1;36');
+    // 1) Ollama reachable?
+    $client = ModelClient::default();
+    if (!$client->checkConnection()) {
+        echo $c("✗ Can't reach Ollama at " . Config::get('ollama.host', 'http://localhost:11434') . "\n", '31');
+        $hasOllama = trim((string)@shell_exec('command -v ollama 2>/dev/null')) !== '';
+        if (!$hasOllama) echo "  1. Install Ollama:  " . $c('https://ollama.com/download', '36') . "\n  2. Start it:        " . $c('ollama serve', '36') . "\n";
+        else echo "  Start the server:  " . $c('ollama serve', '36') . "\n";
+        echo "  Then re-run:        " . $c('ollamadev setup', '36') . "\n\n";
+        exit(1);
+    }
+    // 2) Hardware: NVIDIA VRAM (GB) if present, else system RAM (GB).
+    $vram = 0.0; $nv = trim((string)@shell_exec('nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null'));
+    if ($nv !== '') { $first = trim(explode("\n", $nv)[0]); if (is_numeric($first)) $vram = round((float)$first / 1024, 1); }
+    $ram = 0.0;
+    if (is_file('/proc/meminfo') && preg_match('/MemTotal:\s+(\d+) kB/', (string)@file_get_contents('/proc/meminfo'), $mm)) $ram = round((int)$mm[1] / 1048576, 1);
+    elseif (is_numeric($sysm = trim((string)@shell_exec('sysctl -n hw.memsize 2>/dev/null')))) $ram = round((float)$sysm / 1073741824, 1);
+    $hw = $vram > 0 ? ($vram . ' GB GPU VRAM') : ($ram > 0 ? ($ram . ' GB RAM (no NVIDIA GPU detected — CPU inference)') : 'unknown');
+    echo "  Hardware:  " . $c($hw, '36') . "\n";
+    // 3) Recommend a model that fits.
+    $budget = $vram > 0 ? $vram : $ram;          // GB available for the model
+    if ($budget >= 8)      { $rec = 'qwen3.5:9b';        $why = 'reliable native tool-calling, fits comfortably'; }
+    elseif ($budget >= 6)  { $rec = 'qwen2.5-coder:7b';  $why = 'best all-round local coder for tool use'; }
+    else                   { $rec = 'llama3.2:3b';       $why = 'tiny — runs on modest hardware (tool use is limited; use /chat)'; }
+    $stronger = $budget >= 20 ? 'qwen2.5-coder:32b' : ($budget >= 12 ? 'qwen2.5-coder:14b' : '');
+    echo "  Recommended:  " . $c($rec, '1;32') . $c("  — $why", '2') . "\n";
+    if ($stronger !== '') echo "  " . $c("Stronger option for your hardware: $stronger (pull with: ollamadev models pull $stronger)", '2') . "\n";
+    echo "  " . $c("Want frontier-scale without local VRAM? ollamadev models cloud (Ollama cloud, opt-in)", '2') . "\n";
+    // 4) Pull if needed, then set as default.
+    $installed = $client->listModels();
+    $have = Models::match($rec, $installed);
+    $interactive = function_exists('posix_isatty') && @posix_isatty(STDIN);
+    if ($have !== '') {
+        echo $c("✓ $rec is already installed.\n", '32');
+        $rec = $have;
+    } else {
+        $pull = true;
+        if ($interactive) { echo "\n  Pull " . $c($rec, '36') . " now? [" . $c('Y', '1') . "/n] "; $pull = !in_array(strtolower(trim((string)fgets(STDIN))), ['n', 'no'], true); }
+        if ($pull) { echo "\n"; if (!Puller::pull($rec, $config['ollama']['host'] ?? 'http://localhost:11434')) { echo $c("  Pull failed — try: ollamadev models pull $rec\n", '33'); } }
+        else { echo "  " . $c("Skipped. Pull later: ollamadev models pull $rec", '2') . "\n"; }
+    }
+    Config::persist('ollama.defaultModel', $rec);
+    echo "\n" . $c("✓ Default model set to $rec.\n", '32');
+    echo "  Start coding:   " . $c('ollamadev', '1;36') . $c("   (or: ollamadev chat · ollamadev crew \"<task>\")", '2') . "\n\n";
+    exit(0);
+}
+
 // Plugin CLI Command
 if ($argc >= 2 && $argv[1] === 'plugin') {
     $config = Config::load();
@@ -1110,12 +1163,13 @@ if ($argc >= 2 && $argv[1] === 'eval') {
     $args = array_slice($argv, 2);
     $sub = (!empty($args) && !str_starts_with($args[0], '-')) ? $args[0] : 'run';
     $only = ''; $model = ''; $asJson = in_array('--json', $args, true); $keep = in_array('--keep', $args, true);
-    $escalate = in_array('--escalate', $args, true); $min = -1;
+    $escalate = in_array('--escalate', $args, true); $min = -1; $compare = '';
     for ($i = 0; $i < count($args); $i++) {
         $a = $args[$i];
         if ($a === '--only') $only = (string)($args[++$i] ?? '');
         elseif ($a === '--model' || $a === '-m') $model = (string)($args[++$i] ?? '');
         elseif ($a === '--min') $min = (int)($args[++$i] ?? 0);   // CI threshold: pass if rate >= min%
+        elseif ($a === '--compare') $compare = (string)($args[++$i] ?? '');   // run the suite across several models
     }
     $tasks = Evals::suite($only);
     if ($sub === 'list') {
@@ -1126,6 +1180,43 @@ if ($argc >= 2 && $argv[1] === 'eval') {
         exit(0);
     }
     if (empty($tasks)) { echo "No eval tasks" . ($only !== '' ? " matching \"$only\"" : '') . ".\n"; exit(1); }
+
+    // --compare m1,m2,m3 — run the whole suite on each model and print a scorecard.
+    if ($compare !== '') {
+        $client = ModelClient::default();
+        if (!$client->checkConnection()) { echo "✗ can't reach the model backend (" . ModelClient::activeLabel() . ").\n"; exit(1); }
+        $installed = $client->listModels();
+        $models = array_values(array_filter(array_map('trim', explode(',', $compare))));
+        $config['_eval_keep'] = false;
+        $grid = [];   // resolvedModel => [task => bool]
+        foreach ($models as $mi => $mname) {
+            $resolved = Models::match($mname, $installed); $useM = $resolved !== '' ? $resolved : $mname;
+            Config::set('ollama.defaultModel', $useM);
+            if (!$asJson) echo "\033[1m" . ($mi + 1) . "/" . count($models) . "  " . $useM . "\033[0m\n";
+            foreach ($tasks as $idx => $t) {
+                if (!$asJson) { echo sprintf("  %-16s ", $t['name']); if (function_exists('fflush')) @fflush(STDOUT); }
+                $r = Evals::runOne($t, $config, $mi . '_' . $idx);
+                $grid[$useM][$t['name']] = (bool)$r['pass'];
+                if (!$asJson) echo ($r['pass'] ? "\033[32m✓\033[0m" : "\033[31m✗\033[0m") . " \033[2m{$r['ms']}ms\033[0m\n";
+            }
+            if (!$asJson) echo "\n";
+        }
+        $mlist = array_keys($grid);
+        if ($asJson) { echo json_encode(['compare' => $grid, 'tasks' => array_map(fn($t) => $t['name'], $tasks)]) . "\n"; exit(0); }
+        $w = 18;
+        echo "\n\033[1m" . str_pad('task', 16); foreach ($mlist as $m) echo str_pad(substr($m, 0, $w - 1), $w); echo "\033[0m\n";
+        echo str_repeat('─', 16 + $w * count($mlist)) . "\n";
+        foreach ($tasks as $t) {
+            echo str_pad($t['name'], 16);
+            foreach ($mlist as $m) echo str_pad(($grid[$m][$t['name']] ?? false) ? '  ✓' : '  ✗', $w);
+            echo "\n";
+        }
+        echo str_repeat('─', 16 + $w * count($mlist)) . "\n";
+        echo "\033[1m" . str_pad('TOTAL', 16);
+        foreach ($mlist as $m) { $p = count(array_filter($grid[$m])); $n = max(1, count($grid[$m])); echo str_pad("$p/$n (" . round($p * 100 / $n) . "%)", $w); }
+        echo "\033[0m\n";
+        exit(0);
+    }
 
     $client = ModelClient::default();
     if (!$client->checkConnection()) { echo "✗ can't reach the model backend (" . ModelClient::activeLabel() . "). Start it, then retry.\n"; exit(1); }
@@ -1796,7 +1887,8 @@ Commands:
   ollamadev code-search <q>   Semantic search over the repo by meaning (local embeddings)
   ollamadev test        Run the project's tests (auto-detected)
   ollamadev verify      Run tests, then let the agent fix failures until green (--max N)
-  ollamadev eval        Measure the agent's pass rate on a fixed task suite (--only, --model, --json)
+  ollamadev setup       Detect hardware → recommend + pull a model → set the default (60-second start)
+  ollamadev eval        Pass rate on a fixed task suite (--only, --model, --json, --compare m1,m2,m3)
   ollamadev models      List models; also: presets (recommended), cloud (☁ Ollama cloud), pull <alias>, chain (fallback)
   ollamadev diff        Show the working-tree diff for review (--json); powers the desktop Review panel
   ollamadev commit      Commit with an AI-generated message (-a stages all, -m to override)

@@ -89,10 +89,10 @@ It also ships a **crew** — a deterministic team of agents (a **Director** that
 
 - **PHP 8.0+** (CLI) with curl — that's it.
 - **[Ollama](https://ollama.com)** running locally (`ollama serve`).
-- At least one model pulled, e.g. `ollama pull qwen2.5-coder`.
+- At least one model pulled — or just run **`ollamadev setup`** and it picks one that fits your hardware, pulls it, and sets it as the default.
 - *Optional, for `/voice`:* nothing to install — OllamaDev bundles (desktop) or auto-downloads (CLI, one-time) a self-contained whisper.cpp engine. A mic recorder (`arecord` / `ffmpeg` / `parecord`) is used for capture. CPU-only.
 
-> Recommended models for reliable tool use: **qwen2.5-coder**, **qwen3-coder**, **mistral**, **codestral**, **llama3.1**, **gpt-oss**.
+> **Fastest start:** `ollamadev setup` — detects your GPU/RAM, recommends + pulls a model, and you're coding. Or pick one yourself: **qwen3.5:9b** (default), **qwen2.5-coder**, **qwen3-coder**, **mistral**, **codestral**, **llama3.1**, **gpt-oss** — or **`ollamadev models cloud`** for frontier-scale via Ollama cloud.
 
 ## Installation
 
@@ -195,10 +195,15 @@ ollamadev resume         # interactive resume picker
 ollamadev load <id>      # load a session by id
 ollamadev pull <model>   # download a model from Ollama
 ollamadev init           # generate OLLAMADEV.md project memory
-ollamadev models         # list installed models (also: presets, pull <alias>, chain)
-ollamadev eval           # measure the agent's pass rate on a fixed task suite (--only, --json)
-ollamadev crew <task>    # multi-agent crew (--amplify N, --pack <name>)
+ollamadev setup          # detect hardware → recommend + pull a model → set default
+ollamadev models         # list models (also: presets, cloud, pull <alias>, chain)
+ollamadev models cloud   # ☁ Ollama cloud models (opt-in; catalog + how to enable)
+ollamadev eval           # pass rate on a fixed task suite (--only, --json, --compare m1,m2,m3)
+ollamadev crew <task>    # multi-agent crew: Director → Coders → Auditor → gated merge (--amplify N)
+ollamadev crew --pack <name> "<task>"  # use a team preset (web-app, rest-api, bugfix, tested, …)
+ollamadev crew pack list # crew team presets (built-in + your saved packs)
 ollamadev crew role list # roles the Director assigns per subtask (add your own)
+ollamadev crew --coder-models a,b,c    # different model per parallel coder (mix local + cloud)
 ollamadev watch <task>   # re-run a task on file changes (background agent)
 ollamadev transcribe <f> # speech-to-text on an audio file (local Whisper; --enabled to probe)
 ollamadev voice model <s># get/set the STT model (also: voice history, voice status)

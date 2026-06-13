@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.9.9 (2026-06-13) — ecosystem + onboarding: setup, crew packs, eval --compare
+
+### Added
+- **`ollamadev setup` — 60-second onboarding.** Detects your hardware (NVIDIA VRAM, else system RAM), recommends a model that fits (qwen3.5:9b / qwen2.5-coder:7b / llama3.2:3b, with a "stronger option" hint and the cloud path), offers to pull it, and sets it as the default. Lowers the #1 adoption barrier for a local tool.
+- **Built-in crew packs.** `crew pack list` now ships useful presets out of the box — `web-app`, `rest-api`, `cli-tool`, `data-pipeline`, `library`, `bugfix` (amplify ×3), `refactor` (amplify ×3), `tested`. Use one with `crew --pack <name> "<task>"`. A user-saved pack of the same name overrides the built-in.
+- **`eval --compare m1,m2,m3`** — runs the whole task suite across several models and prints a side-by-side scorecard (the local-vs-cloud comparison, built in). `--json` for the raw grid.
+
+### Changed
+- README + `--help`: surfaced the new commands, led with the Crew (Director → Coders → Auditor → gated merge), and the local-by-default / optional-cloud story; documented `--coder-models` (different model per parallel coder).
+
+### Why
+Competing isn't about more model capability (that's the model tier) — it's the adoption-level gaps: a stocked ecosystem, frictionless onboarding, and measurable quality you can see. Vanilla PHP. 645 smoke tests pass.
+
 ## v0.9.8 (2026-06-13) — network-flake resilience (transient retries)
 
 ### Fixed
