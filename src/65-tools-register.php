@@ -116,6 +116,21 @@ Tools::register('watch', function($p) {
     return "Changed:\n" . implode("\n", array_slice($changed, 0, 50));
 });
 
+// When an exact old_string match fails, weak models often have the indentation or
+// inter-token whitespace slightly wrong (the single most common edit-tool failure).
+// Try a whitespace-flexible match: the same non-space tokens in order, any run of
+// whitespace between them. Apply ONLY when it matches EXACTLY ONCE — never guess
+// between candidate sites. Returns [offset, matchedText] or null. Vanilla PHP (preg).
+function editFuzzyFind(string $content, string $needle): ?array {
+    $needle = trim($needle);
+    if ($needle === '') return null;
+    $parts = preg_split('/\s+/', $needle);
+    if (!$parts || count($parts) === 0) return null;
+    $rx = '/' . implode('\\s+', array_map(fn($x) => preg_quote($x, '/'), $parts)) . '/';
+    if (@preg_match_all($rx, $content, $m, PREG_OFFSET_CAPTURE) !== 1) return null;
+    return [$m[0][0][1], $m[0][0][0]];
+}
+
 Tools::register('write', function($p) {
     $path = $p['file_path'] ?? ''; $content = $p['content'] ?? '';
     if (empty($path)) return "missing file_path";
@@ -135,9 +150,13 @@ Tools::register('edit', function($p) {
     if (empty($oldStr)) return "missing old_string";
     $content = file_get_contents($path);
     if ($content === false) return "Error reading file: $path";
-    $pos = strpos($content, $oldStr);
-    if ($pos === false) return "old_string not found in file";
-    $newContent = substr_replace($content, $newStr, $pos, strlen($oldStr));
+    $pos = strpos($content, $oldStr); $matchLen = strlen($oldStr);
+    if ($pos === false) {
+        $fz = editFuzzyFind($content, $oldStr);   // tolerate slightly-off whitespace (unambiguous only)
+        if ($fz === null) return "old_string not found in file";
+        [$pos, $matched] = $fz; $matchLen = strlen($matched);
+    }
+    $newContent = substr_replace($content, $newStr, $pos, $matchLen);
     if (!DiffView::confirm($path, $content, $newContent)) return "Edit of $path cancelled by user";
     Checkpoints::save($path);
     return file_put_contents($path, $newContent) !== false ? "FILE_EDIT:$path" : "Error writing file: $path";
@@ -157,9 +176,18 @@ Tools::register('multi_edit', function($p) {
         if (!is_array($e)) return "edit #" . ($i + 1) . ": not an object (no edits applied)";
         $old = (string)($e['old_string'] ?? ''); $new = (string)($e['new_string'] ?? '');
         if ($old === '') return "edit #" . ($i + 1) . ": missing old_string (no edits applied)";
-        if (strpos($content, $old) === false) return "edit #" . ($i + 1) . ": old_string not found (no edits applied)";
-        if (!empty($e['replace_all'])) { $content = str_replace($old, $new, $content, $cnt); $applied += $cnt; }
-        else { $pos = strpos($content, $old); $content = substr_replace($content, $new, $pos, strlen($old)); $applied++; }
+        if (!empty($e['replace_all'])) {
+            if (strpos($content, $old) === false) return "edit #" . ($i + 1) . ": old_string not found (no edits applied)";
+            $content = str_replace($old, $new, $content, $cnt); $applied += $cnt;
+        } else {
+            $pos = strpos($content, $old); $len = strlen($old);
+            if ($pos === false) {
+                $fz = editFuzzyFind($content, $old);   // tolerate slightly-off whitespace (unambiguous only)
+                if ($fz === null) return "edit #" . ($i + 1) . ": old_string not found (no edits applied)";
+                [$pos, $matched] = $fz; $len = strlen($matched);
+            }
+            $content = substr_replace($content, $new, $pos, $len); $applied++;
+        }
     }
     if (!DiffView::confirm($path, $orig, $content)) return "Multi-edit of $path cancelled by user";
     Checkpoints::save($path);

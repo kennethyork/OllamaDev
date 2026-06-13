@@ -759,6 +759,20 @@ if (class_exists('OllamaClient') && class_exists('Models')) {
     ok('local model stays clamped to maxContextWindow', $localCtx === 16384, "got=$localCtx");
 } else { ok('OllamaClient + Models available for chatOptions test', false); }
 
+// Edit tool robustness: when an exact old_string match fails, a whitespace-tolerant
+// fallback rescues a slightly-off old_string (the #1 weak-model edit failure) — but
+// ONLY on an unambiguous single match; it never guesses between candidate sites.
+if (preg_match('/function editFuzzyFind\(.*?\n\}/s', $src, $efm)) {
+    eval($efm[0]);
+    $doc = "<?php\nfunction f() {\n        return 1\n}\n";   // 8-space indent in the file
+    $r1 = editFuzzyFind($doc, "return 1");                    // model omitted the indent
+    $r2 = editFuzzyFind($doc, "return  1");                   // model used 2 spaces
+    $amb = editFuzzyFind("a=1\nb=1\n", "= 1");                // two candidate sites
+    ok('edit fuzzy-match rescues off-whitespace old_string', is_array($r1) && $r1[1] === 'return 1' && is_array($r2));
+    ok('edit fuzzy-match refuses ambiguous (multi-site) matches', $amb === null);
+} else { ok('editFuzzyFind extractable', false); }
+ok('edit + multi_edit fall back to editFuzzyFind on exact-match miss', substr_count($src, 'editFuzzyFind(') >= 3);
+
 echo "\n== Air-gap attestation removed; web-access toggle kept ==\n";
 ok('no Attest class / attest command / air-gap naming remains',
     strpos($src, 'class Attest') === false && strpos($src, "=== 'attest'") === false

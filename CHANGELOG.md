@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.9.2 (2026-06-13) — edit tool tolerates slightly-off whitespace
+
+### Changed
+- **The `edit` / `multi_edit` tools now recover from a near-miss `old_string`.** When the exact text isn't found (the #1 weak-model edit failure — the model gets indentation or inter-token spacing slightly wrong), they fall back to a whitespace-flexible match: the same non-space tokens in order, any whitespace between them. Applied **only** on an unambiguous single match — it never guesses between candidate sites, and the exact match is always tried first, so a correct edit is unaffected. Turns silent "edit didn't apply" failures into successes.
+- Surfaced by an eval investigation: the agentic suite's run-to-run variance was traced to edits silently not applying, not a broken edit path. Post-fix, the full 20-task suite scores **100%** on local **and** cloud — `qwen3.5:9b` 50%→100%, `kimi-k2.7-code:cloud` 70%→100%, `minimax-m3:cloud` 80%→100% (every prior failure was an edit-existing-file task).
+
 ## v0.9.1 (2026-06-13) — cloud models run at full context; docs refreshed
 
 ### Changed
