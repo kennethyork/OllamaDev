@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '0.9.10');
+define('OLLAMADEV_VERSION', '0.9.11');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -70,7 +70,14 @@ function crossPlatformFind(string $dir, string $pattern): string {
     // make every wildcard search fail).
     $regex = '/^' . str_replace(['\*', '\?'], ['.*', '.'], preg_quote($pattern, '/')) . '$/i';
     try {
-        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir));
+        // SKIP_DOTS + CATCH_GET_CHILD: a permission-denied subdirectory is SKIPPED
+        // instead of aborting the whole search. RecursiveDirectoryIterator does not
+        // follow symlinked directories by default, so there's no symlink-loop risk.
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::LEAVES_ONLY,
+            RecursiveIteratorIterator::CATCH_GET_CHILD
+        );
         foreach ($iterator as $file) {
             if ($file->isDir()) continue;
             if (preg_match($regex, $file->getFilename())) {
@@ -89,7 +96,8 @@ function crossPlatformTree(string $dir, int $depth = 2): string {
     try {
         $iterator = new RecursiveIteratorIterator(
             new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS),
-            RecursiveIteratorIterator::SELF_FIRST
+            RecursiveIteratorIterator::SELF_FIRST,
+            RecursiveIteratorIterator::CATCH_GET_CHILD   // skip unreadable dirs instead of aborting
         );
         $maxDepth = $depth;
         foreach ($iterator as $file) {
@@ -4910,51 +4918,64 @@ class Puller {
         if ($model === '') { echo "\033[33m  pull: no model given\033[0m\n"; return false; }
         $host = $host ?: Config::get('ollama.host', 'http://localhost:11434');
         $isTty = function_exists('posix_isatty') ? @posix_isatty(STDOUT) : false;
-        $ch = curl_init($host . '/api/pull');
-        $buf = ''; $ok = false; $errMsg = ''; $lastPct = -1; $lastDrawn = '';
-        $render = function(string $line) use ($isTty, &$lastDrawn) {
-            if ($isTty) { echo "\r\033[K\033[2m  " . $line . "\033[0m"; }
-            else { if ($line === $lastDrawn) return; echo "  " . $line . "\n"; }
-            $lastDrawn = $line;
-        };
-        curl_setopt_array($ch, [
-            CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => json_encode(['model' => $model, 'stream' => true]),
-            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-            CURLOPT_TIMEOUT => 0,
-            CURLOPT_WRITEFUNCTION => function($ch, $data) use (&$buf, &$ok, &$errMsg, &$lastPct, $render, $model) {
-                $buf .= $data;
-                while (($nl = strpos($buf, "\n")) !== false) {
-                    $line = trim(substr($buf, 0, $nl));
-                    $buf = substr($buf, $nl + 1);
-                    if ($line === '') continue;
-                    $j = json_decode($line, true);
-                    if (!is_array($j)) continue;
-                    if (!empty($j['error'])) { $errMsg = (string)$j['error']; continue; }
-                    $status = (string)($j['status'] ?? '');
-                    if (stripos($status, 'success') !== false) { $ok = true; continue; }
-                    $total = (int)($j['total'] ?? 0);
-                    $completed = (int)($j['completed'] ?? 0);
-                    if ($total > 0) {
-                        $pct = (int)floor($completed * 100 / $total);
-                        if ($pct !== $lastPct) { $lastPct = $pct; $render(sprintf('pulling %s  %3d%%  (%s / %s)', $model, $pct, Puller::bytes($completed), Puller::bytes($total))); }
-                    } else {
-                        $render('pulling ' . $model . '  ' . ($status !== '' ? $status : '...'));
+        $maxAttempts = 4;
+        // A pull is a long download; a network blip shouldn't lose all progress. On a
+        // TRANSIENT drop we re-invoke /api/pull — Ollama resumes from the layers it
+        // already fetched (content-addressed), so it continues rather than restarts.
+        // A server-side error (model not found / auth) is NOT retried.
+        for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            $ch = curl_init($host . '/api/pull');
+            $buf = ''; $ok = false; $errMsg = ''; $lastPct = -1; $lastDrawn = '';
+            $render = function(string $line) use ($isTty, &$lastDrawn) {
+                if ($isTty) { echo "\r\033[K\033[2m  " . $line . "\033[0m"; }
+                else { if ($line === $lastDrawn) return; echo "  " . $line . "\n"; }
+                $lastDrawn = $line;
+            };
+            curl_setopt_array($ch, [
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => json_encode(['model' => $model, 'stream' => true]),
+                CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                CURLOPT_TIMEOUT => 0,
+                CURLOPT_WRITEFUNCTION => function($ch, $data) use (&$buf, &$ok, &$errMsg, &$lastPct, $render, $model) {
+                    if (class_exists('Interrupt') && Interrupt::aborted()) return 0;
+                    $buf .= $data;
+                    while (($nl = strpos($buf, "\n")) !== false) {
+                        $line = trim(substr($buf, 0, $nl));
+                        $buf = substr($buf, $nl + 1);
+                        if ($line === '') continue;
+                        $j = json_decode($line, true);
+                        if (!is_array($j)) continue;
+                        if (!empty($j['error'])) { $errMsg = (string)$j['error']; continue; }
+                        $status = (string)($j['status'] ?? '');
+                        if (stripos($status, 'success') !== false) { $ok = true; continue; }
+                        $total = (int)($j['total'] ?? 0);
+                        $completed = (int)($j['completed'] ?? 0);
+                        if ($total > 0) {
+                            $pct = (int)floor($completed * 100 / $total);
+                            if ($pct !== $lastPct) { $lastPct = $pct; $render(sprintf('pulling %s  %3d%%  (%s / %s)', $model, $pct, Puller::bytes($completed), Puller::bytes($total))); }
+                        } else {
+                            $render('pulling ' . $model . '  ' . ($status !== '' ? $status : '...'));
+                        }
                     }
-                }
-                return strlen($data);
-            },
-        ]);
-        curl_exec($ch);
-        $curlErr = curl_error($ch);
-        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-        if ($isTty) echo "\r\033[K";
-        if ($ok) { echo "\033[32m  + pulled " . $model . "\033[0m\n"; return true; }
-        if ($errMsg === '' && $curlErr !== '') $errMsg = $curlErr;
-        if ($errMsg === '' && $code !== 200 && $code !== 0) $errMsg = 'HTTP ' . $code;
-        if ($errMsg === '') $errMsg = 'pull failed';
-        echo "\033[33m  pull failed: " . $errMsg . "\033[0m\n";
+                    return strlen($data);
+                },
+            ]);
+            curl_exec($ch);
+            $errno = curl_errno($ch); $curlErr = curl_error($ch); $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            if ($isTty) echo "\r\033[K";
+            if ($ok) { echo "\033[32m  + pulled " . $model . "\033[0m\n"; return true; }
+            if ($errMsg !== '') { echo "\033[33m  pull failed: " . $errMsg . "\033[0m\n"; return false; }  // server said no — don't retry
+            $aborted = class_exists('Interrupt') && Interrupt::aborted();
+            if (!$aborted && $attempt < $maxAttempts && class_exists('OllamaClient') && OllamaClient::isTransient($errno, $code)) {
+                echo "\033[2m  network blip — resuming pull (attempt " . ($attempt + 1) . "/$maxAttempts)…\033[0m\n";
+                usleep(800000);
+                continue;
+            }
+            $msg = $curlErr !== '' ? $curlErr : ($code !== 200 && $code !== 0 ? 'HTTP ' . $code : 'pull failed');
+            echo "\033[33m  pull failed: " . $msg . "\033[0m\n";
+            return false;
+        }
         return false;
     }
     public static function bytes(int $b): string {
@@ -10376,7 +10397,23 @@ $GLOBALS['currentSessionModel'] = null;
         $ready = $this->preflight();
 
         if (!empty($this->messages)) {
-            echo "\033[2m  resumed session · " . count($this->messages) . " messages\033[0m\n";
+            $d = "\033[2m"; $r = "\033[0m"; $c = "\033[36m";
+            echo "{$d}  ↻ resumed session · " . count($this->messages) . " messages — continuing where you left off{$r}\n";
+            // Show the last exchange so you SEE the context you're resuming (a blank
+            // prompt after "resumed" makes it feel like nothing came back). This is
+            // what makes reopening the app/CLI actually feel like a resume.
+            $lastUser = ''; $lastAsst = '';
+            for ($i = count($this->messages) - 1; $i >= 0; $i--) {
+                $role = $this->messages[$i]['role'] ?? ''; $content = trim((string)($this->messages[$i]['content'] ?? ''));
+                if ($content === '') continue;
+                if ($lastAsst === '' && $role === 'assistant') $lastAsst = $content;
+                elseif ($lastUser === '' && $role === 'user') $lastUser = $content;
+                if ($lastUser !== '' && $lastAsst !== '') break;
+            }
+            $prev = function (string $s): string { $s = preg_replace('/\s+/', ' ', $s); return strlen($s) > 160 ? substr($s, 0, 157) . '…' : $s; };
+            if ($lastUser !== '') echo "{$d}    you ▸ " . $prev($lastUser) . "{$r}\n";
+            if ($lastAsst !== '') echo "{$d}    {$c}" . $this->model . "{$r}{$d} ▸ " . $prev($lastAsst) . "{$r}\n";
+            echo "{$d}    /new for a fresh session · /clear to wipe history{$r}\n";
         }
 
         // Nudge toward a capable model when the active one is weak at tool use —

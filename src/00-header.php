@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '0.9.10');
+define('OLLAMADEV_VERSION', '0.9.11');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -70,7 +70,14 @@ function crossPlatformFind(string $dir, string $pattern): string {
     // make every wildcard search fail).
     $regex = '/^' . str_replace(['\*', '\?'], ['.*', '.'], preg_quote($pattern, '/')) . '$/i';
     try {
-        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir));
+        // SKIP_DOTS + CATCH_GET_CHILD: a permission-denied subdirectory is SKIPPED
+        // instead of aborting the whole search. RecursiveDirectoryIterator does not
+        // follow symlinked directories by default, so there's no symlink-loop risk.
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::LEAVES_ONLY,
+            RecursiveIteratorIterator::CATCH_GET_CHILD
+        );
         foreach ($iterator as $file) {
             if ($file->isDir()) continue;
             if (preg_match($regex, $file->getFilename())) {
@@ -89,7 +96,8 @@ function crossPlatformTree(string $dir, int $depth = 2): string {
     try {
         $iterator = new RecursiveIteratorIterator(
             new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS),
-            RecursiveIteratorIterator::SELF_FIRST
+            RecursiveIteratorIterator::SELF_FIRST,
+            RecursiveIteratorIterator::CATCH_GET_CHILD   // skip unreadable dirs instead of aborting
         );
         $maxDepth = $depth;
         foreach ($iterator as $file) {

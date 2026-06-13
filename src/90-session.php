@@ -1022,7 +1022,23 @@ $GLOBALS['currentSessionModel'] = null;
         $ready = $this->preflight();
 
         if (!empty($this->messages)) {
-            echo "\033[2m  resumed session · " . count($this->messages) . " messages\033[0m\n";
+            $d = "\033[2m"; $r = "\033[0m"; $c = "\033[36m";
+            echo "{$d}  ↻ resumed session · " . count($this->messages) . " messages — continuing where you left off{$r}\n";
+            // Show the last exchange so you SEE the context you're resuming (a blank
+            // prompt after "resumed" makes it feel like nothing came back). This is
+            // what makes reopening the app/CLI actually feel like a resume.
+            $lastUser = ''; $lastAsst = '';
+            for ($i = count($this->messages) - 1; $i >= 0; $i--) {
+                $role = $this->messages[$i]['role'] ?? ''; $content = trim((string)($this->messages[$i]['content'] ?? ''));
+                if ($content === '') continue;
+                if ($lastAsst === '' && $role === 'assistant') $lastAsst = $content;
+                elseif ($lastUser === '' && $role === 'user') $lastUser = $content;
+                if ($lastUser !== '' && $lastAsst !== '') break;
+            }
+            $prev = function (string $s): string { $s = preg_replace('/\s+/', ' ', $s); return strlen($s) > 160 ? substr($s, 0, 157) . '…' : $s; };
+            if ($lastUser !== '') echo "{$d}    you ▸ " . $prev($lastUser) . "{$r}\n";
+            if ($lastAsst !== '') echo "{$d}    {$c}" . $this->model . "{$r}{$d} ▸ " . $prev($lastAsst) . "{$r}\n";
+            echo "{$d}    /new for a fresh session · /clear to wipe history{$r}\n";
         }
 
         // Nudge toward a capable model when the active one is weak at tool use —

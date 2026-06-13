@@ -870,6 +870,15 @@ ok('atomicWrite is crash-safe (temp + rename, no leftover .tmp)', (function () {
 })());
 ok('session/config/board/checkpoints/memory write atomically', substr_count($src, 'atomicWrite(') >= 6);
 
+// Continue-where-left-off + symlink/permission + partial-pull resume.
+ok('reopening shows the last exchange (visible resume, not a blank prompt)',
+    strpos($src, 'continuing where you left off') !== false && strpos($src, '$lastUser') !== false
+    && strpos($src, '$lastAsst') !== false);
+ok('find/tree skip unreadable dirs instead of aborting (CATCH_GET_CHILD)',
+    substr_count($src, 'CATCH_GET_CHILD') >= 2);
+ok('model pull auto-resumes a transient network drop (Ollama resumes from cache)',
+    strpos($src, 'resuming pull') !== false && strpos($src, 'OllamaClient::isTransient($errno, $code)') !== false);
+
 echo "\n== Air-gap attestation removed; web-access toggle kept ==\n";
 ok('no Attest class / attest command / air-gap naming remains',
     strpos($src, 'class Attest') === false && strpos($src, "=== 'attest'") === false

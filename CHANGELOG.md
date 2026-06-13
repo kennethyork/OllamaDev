@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.9.11 (2026-06-13) — continue where you left off + symlink/permission + pull resume
+
+### Added
+- **Reopening now SHOWS the conversation you're resuming.** The CLI already auto-resumed the repo's last session (CLI and desktop), but it printed only "resumed session · N messages" then a blank prompt — so it felt like nothing came back. It now shows the last exchange (your last message + the model's last reply) under a "↻ resumed session — continuing where you left off" header. Combined with chat windows (`chat --session`), the crew's resume-an-interrupted-run prompt (defaults to yes), and the desktop canvas restore, every stateful feature picks up where you left off.
+- **Model pulls auto-resume a network blip.** A dropped connection mid-download no longer fails the whole pull — Puller retries (up to 4×) and Ollama continues from the layers it already fetched (content-addressed), so a big download survives a flaky network. A real server error (model not found / auth) is not retried.
+
+### Fixed
+- **`find` / `tree` no longer abort on one permission-denied subdirectory.** They used a recursive iterator that threw on the first unreadable directory, killing the whole search; now they use `CATCH_GET_CHILD` to skip it and continue. (Symlinked directories still aren't followed, so there's no loop risk.)
+
+### Why
+Finishing the robustness/resume pass — "continue where I left off" across features, plus the symlink/permission and partial-download edges real trees and real networks hit. Vanilla PHP. 650 smoke tests pass.
+
 ## v0.9.10 (2026-06-13) — crash-safe state writes (atomic, no corruption)
 
 ### Fixed
