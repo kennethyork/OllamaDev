@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.9.15 (2026-06-13) — UI polish: file tree + tabs
+
+### Changed
+- **File tree** rows slide a hair on hover and the open file is clearly anchored (subtle inner accent ring + weight, no shift on hover). **Editor + workspace tabs** ease their active underline in instead of snapping. Additive, theme-aware, no layout change.
+
 ## v0.9.14 (2026-06-13) — UI polish: crew topology panes
 
 ### Changed
