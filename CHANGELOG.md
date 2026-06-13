@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.9.14 (2026-06-13) — UI polish: crew topology panes
+
+### Changed
+- **The live crew panes now read their status at a glance.** Each coder pane carries a status-coloured accent stripe (working = accent, done = green, held/flagged = amber), the actively-working coder gets a soft glow so it stands out across the grid, and its "working" badge has a small pulsing dot. The pane status is tagged in JS so the CSS accents it without any `:has()`/webview dependency. Additive, theme-aware, no layout/behaviour change.
+
 ## v0.9.13 (2026-06-13) — UI polish (desktop/web)
 
 ### Changed

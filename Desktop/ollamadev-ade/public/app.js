@@ -1459,6 +1459,10 @@ var CrewPanes = {
             if (st === 'doing' && act && act.label !== 'done') label = act.icon + ' ' + act.label + (act.detail ? ' ' + act.detail : '');
             badge.textContent = label;
             badge.className = 'cpane-badge st-' + st;
+            // Tag the whole pane with its status so the CSS can accent it (a coder's
+            // state reads at a glance) without clobbering the zoom 'focused' class.
+            var pane = host.querySelector('.cpane[data-n="' + s.n + '"]');
+            if (pane) { pane.classList.remove('st-todo', 'st-doing', 'st-done', 'st-held', 'st-flagged'); pane.classList.add('st-' + st); }
         });
         // A focused coder that vanished on rebuild reverts to the grid.
         if (this.zoomed != null && !subs.some(function (s) { return s.n === this.zoomed; }, this)) this.zoomed = null;

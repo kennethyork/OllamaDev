@@ -745,6 +745,17 @@ button:focus-visible, .rail-btn:focus-visible, .tree-item:focus-visible, .ws-tab
    reads as the foreground. (Falls back to the existing dim if blur unsupported.) */
 .modal-overlay:not([hidden]) { backdrop-filter: blur(4px) saturate(1.1); -webkit-backdrop-filter: blur(4px) saturate(1.1); }
 
+/* Crew topology: each coder pane carries a status-coloured accent stripe so the
+   live state reads at a glance, and the actively-working coder gets a soft glow. */
+.cpane { position: relative; transition: box-shadow .25s ease; }
+.cpane::after { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--border-muted); transition: background .25s; pointer-events: none; }
+.cpane.st-doing::after { background: var(--accent); }
+.cpane.st-done::after { background: var(--ok); }
+.cpane.st-held::after, .cpane.st-flagged::after { background: var(--warn); }
+.cpane.st-doing { box-shadow: 0 0 0 1px var(--accent-soft), 0 6px 22px rgba(0,0,0,.35); }
+/* A small pulsing dot on the "working" badge underlines that it's live right now. */
+.cpane-badge.st-doing::after { content: ''; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: pulse 1s infinite; vertical-align: middle; }
+
 /* Honour users who prefer reduced motion — kill animations/transitions. */
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
