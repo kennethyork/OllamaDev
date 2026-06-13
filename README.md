@@ -175,7 +175,8 @@ ollamadev                      # start a chat session
 ollamadev --auto               # auto-approve all tools (no prompts)
 ollamadev --readonly           # plan mode: block all mutating tools
 ollamadev --careful            # self-review pass: re-check + fix own work (better on hard tasks)
-ollamadev --light              # be gentle on the machine: small context, unload model when idle, leave CPU free, no crew parallel (local models)
+ollamadev --full               # run local models flat-out (opt out of the default light profile for this run)
+ollamadev --light              # force the gentle profile: small context, unload model when idle, leave CPU free, no crew parallel (local models)
 ollamadev -m qwen2.5-coder     # pick a model for this session
 ollamadev resume               # pick a recent session to resume
 ollamadev -c                   # continue the most recent session
@@ -297,6 +298,25 @@ Config is read from the first of: `~/.ollamadev/config.json`, `~/.config/ollamad
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama API endpoint |
 | `OLLAMA_MODEL` | first installed model | Default model |
 | `OLLAMA_NUM_CTX` | `16384` | Context window size |
+| `OLLAMADEV_POWER` | `light` | Local power profile: `light` (gentle on the GPU) or `full` (flat-out). Persists your default with no config file. |
+
+#### Power profile (local GPU)
+
+Local models run on **your** GPU, so a flat-out run keeps the card near 100% with the
+model held resident — the fans ramp and stay up, especially under a parallel local crew.
+To keep things quiet, OllamaDev runs local models on a **light** profile by default: a
+smaller context window, the model unloads ~60s after you stop (so the GPU idles down),
+half the CPU cores are left for the OS, and crew coders run sequentially instead of in
+parallel. **Cloud models are never throttled** — they run on Ollama's servers, not your GPU.
+
+Set your default without a config file by exporting `OLLAMADEV_POWER` in your shell profile:
+
+```bash
+export OLLAMADEV_POWER=light   # gentle on the GPU (the default)
+export OLLAMADEV_POWER=full    # run local models flat-out
+```
+
+Precedence (highest first): per-run `--full` / `--light` → `OLLAMADEV_POWER` → built-in default (`light`).
 
 ### Project memory
 
