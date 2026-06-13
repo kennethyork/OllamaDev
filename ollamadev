@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '0.9.4');
+define('OLLAMADEV_VERSION', '0.9.5');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -1048,6 +1048,16 @@ class OllamaClient {
 
     public function host(): string { return $this->host; }
 
+    // Encode a request body so a stray invalid-UTF-8 byte in file content (common
+    // once a read/grep pulls in a binary blob or an oddly-encoded file) substitutes
+    // to U+FFFD instead of making json_encode() return false — which would set
+    // CURLOPT_POSTFIELDS to an empty body and silently break the whole turn.
+    public static function jenc($data): string {
+        $s = json_encode($data, JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_SLASHES);
+        if ($s === false) $s = json_encode($data, JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR | JSON_UNESCAPED_SLASHES);
+        return $s === false ? '{}' : $s;
+    }
+
     public function checkConnection(): bool {
         $ch = curl_init($this->host . '/api/tags');
         curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 5]);
@@ -1081,7 +1091,7 @@ class OllamaClient {
         $params = ['model' => $model, 'prompt' => $prompt, 'stream' => false, 'options' => ['num_predict' => $maxTokens]];
         $ch = curl_init($this->host . '/api/generate');
         curl_setopt_array($ch, [
-            CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
+            CURLOPT_POST => true, CURLOPT_POSTFIELDS => self::jenc($params),
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
             CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 120
         ]);
@@ -1102,7 +1112,7 @@ class OllamaClient {
         $params = ['model' => $model ?: Config::get('ollama.defaultModel', 'llama3.2:latest'), 'prompt' => $prompt, 'stream' => true, 'options' => ['num_predict' => 150]];
         $ch = curl_init($this->host . '/api/generate');
         curl_setopt_array($ch, [
-            CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
+            CURLOPT_POST => true, CURLOPT_POSTFIELDS => self::jenc($params),
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
             CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 30
         ]);
@@ -1314,7 +1324,7 @@ class OllamaClient {
             + self::thinkParams($model, $this->host);   // thinking models: emit reasoning in the `thinking` field, content stays the clean answer
         $ch = curl_init($this->host . '/api/chat');
         $opts = [
-            CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
+            CURLOPT_POST => true, CURLOPT_POSTFIELDS => self::jenc($params),
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 300,
@@ -1376,7 +1386,7 @@ class OllamaClient {
         $params = ['model' => $model, 'messages' => $messages, 'stream' => false, 'format' => 'json', 'options' => self::chatOptions($model, $this->host)];
         $ch = curl_init($this->host . '/api/chat');
         curl_setopt_array($ch, [
-            CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
+            CURLOPT_POST => true, CURLOPT_POSTFIELDS => self::jenc($params),
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
             CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 300,
         ]);
@@ -1397,7 +1407,7 @@ class OllamaClient {
         $params = ['model' => $model, 'messages' => $messages, 'stream' => false, 'format' => $schema, 'options' => self::chatOptions($model, $this->host)];
         $ch = curl_init($this->host . '/api/chat');
         curl_setopt_array($ch, [
-            CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
+            CURLOPT_POST => true, CURLOPT_POSTFIELDS => self::jenc($params),
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
             CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 300,
         ]);
@@ -1424,7 +1434,7 @@ class OllamaClient {
             + self::thinkParams($model, $this->host);   // route reasoning to the dimmed `thinking` channel (thinking models only)
         $ch = curl_init($this->host . '/api/chat');
         $base = [
-            CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
+            CURLOPT_POST => true, CURLOPT_POSTFIELDS => self::jenc($params),
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
             CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 300,
         ];
@@ -3132,26 +3142,43 @@ class PtyBridge {
     }
 }
 Tools::register('view', function($p) {
-    $path = $p['file_path'] ?? $p['file'] ?? $p['path'] ?? '';
-    if (empty($path)) return CmdError::missingParam('file_path', 'view');
+    $path = (string)($p['file_path'] ?? $p['file'] ?? $p['path'] ?? '');
+    if ($path === '') return CmdError::missingParam('file_path', 'view');
     if (!file_exists($path)) return CmdError::fileNotFound($path, 'view');
-    $lines = file($path);
-    if ($lines === false) return CmdError::invalidArg($path, 'Unable to read file. Check permissions.', 'view');
-    $offset = isset($p['offset']) ? (int)$p['offset'] : 0;
-    $limit = isset($p['limit']) ? (int)$p['limit'] : count($lines);
-    $out = '';
-    for ($i = $offset; $i < min($offset + $limit, count($lines)); $i++) $out .= sprintf("%4d  %s", $i + 1, $lines[$i]);
+    if (is_dir($path)) return "Path is a directory — use ls or tree to list it: $path";
+    // Binary guard: a NUL byte in the first chunk means it's not text. Dumping it
+    // would flood the model with garbage and can carry invalid UTF-8 bytes.
+    $head = @file_get_contents($path, false, null, 0, 8192);
+    if ($head === false) return CmdError::invalidArg($path, 'Unable to read file. Check permissions.', 'view');
+    if (strpos($head, "\0") !== false) {
+        $sz = @filesize($path);
+        return "Binary file" . ($sz !== false ? " ($sz bytes)" : '') . " — not shown as text. Use a different tool if you need its bytes: $path";
+    }
+    $offset = max(0, isset($p['offset']) ? (int)$p['offset'] : 0);
+    $limit  = isset($p['limit']) ? max(1, (int)$p['limit']) : 2000;   // default cap, not the whole file
+    // Stream only the requested slice so a huge file never loads fully into memory.
+    $fh = @fopen($path, 'rb');
+    if (!$fh) return CmdError::invalidArg($path, 'Unable to read file. Check permissions.', 'view');
+    $out = ''; $i = 0; $shown = 0; $more = false;
+    while (($line = fgets($fh)) !== false) {
+        if ($i >= $offset) {
+            if ($shown >= $limit) { $more = true; break; }
+            $out .= sprintf("%4d  %s", $i + 1, $line);
+            $shown++;
+        }
+        $i++;
+    }
+    fclose($fh);
+    if ($shown === 0) return $offset > 0 ? "(no lines at offset $offset — the file has fewer lines)" : "(empty file)";
+    if (substr($out, -1) !== "\n") $out .= "\n";
+    if ($more) $out .= sprintf("… [showing %d lines starting at %d — pass a larger offset/limit for more]\n", $shown, $offset + 1);
     return $out;
 });
 
+// Aliases for the read tool (accept file/path too). One registration; the engine
+// resolves alias → view.
 Tools::register('read', function($p) {
     $p['file_path'] = $p['file_path'] ?? $p['file'] ?? $p['path'] ?? '';
-    return Tools::run('view', $p);
-});
-
-// Aliases for common tools
-Tools::register('read', function($p) {
-    $p['file_path'] = $p['file_path'] ?? $p['path'] ?? '';
     return Tools::run('view', $p);
 });
 
@@ -4395,6 +4422,14 @@ class DiffView {
         $a = $old === '' ? [] : explode("\n", $old);
         $b = $new === '' ? [] : explode("\n", $new);
         $n = count($a); $m = count($b);
+        // Guard: the LCS table below is O(n·m) time AND memory. On a very large file
+        // that would hang or exhaust memory, so skip the line-by-line preview and
+        // show a compact summary instead — the edit still applies.
+        if ((int)$n * (int)$m > 2000000 || $n > 20000 || $m > 20000) {
+            $h = '--- a' . ($label !== '' ? '/' . $label : '') . "\n";
+            $h .= '+++ b' . ($label !== '' ? '/' . $label : '') . "\n";
+            return $h . "@@ large change @@\n  (preview skipped: {$n} → {$m} lines — too large to render line-by-line)\n";
+        }
         // LCS table.
         $lcs = array_fill(0, $n + 1, array_fill(0, $m + 1, 0));
         for ($i = $n - 1; $i >= 0; $i--) {

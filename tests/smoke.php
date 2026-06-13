@@ -791,6 +791,22 @@ ok('eval suite expanded with harder tasks (algorithms/class/multi-file/multi-bug
     strpos($src, "'binary-search'") !== false && strpos($src, "'bank-class'") !== false
     && strpos($src, "'refactor-extract'") !== false && strpos($src, "'fix-two-bugs'") !== false);
 
+// --- robustness hardening: bad-UTF8 payloads, binary/huge files, huge diffs ---
+if (preg_match('/public static function jenc\(.*?\n    \}/s', $src, $jm)) {
+    eval('class _JENC { ' . $jm[0] . ' }');
+    $enc = _JENC::jenc(['content' => "bad \x80\xFF bytes"]);   // invalid UTF-8
+    ok('jenc survives invalid UTF-8 (no false/empty request body)', is_string($enc) && $enc !== '{}' && strpos($enc, 'bad') !== false);
+} else { ok('jenc extractable', false); }
+ok('chat/generate payloads go through jenc (UTF-8-safe)', substr_count($src, 'self::jenc($params)') >= 5);
+ok('view tool guards binary files + caps lines (streamed slice, not whole file)',
+    strpos($src, 'Binary file') !== false && strpos($src, "strpos(\$head, \"\\0\")") !== false
+    && strpos($src, 'fgets($fh)') !== false && strpos($src, ': 2000;') !== false);
+if (class_exists('DiffView')) {
+    $big = str_repeat("x\n", 30000);
+    $t0 = microtime(true); $d = DiffView::unified($big, $big . 'y'); $ms = (microtime(true) - $t0) * 1000;
+    ok('DiffView guards huge content (no O(n*m) hang)', strpos($d, 'large change') !== false && $ms < 1000, 'ms=' . round($ms));
+} else { ok('DiffView available for huge-content guard test', false); }
+
 echo "\n== Air-gap attestation removed; web-access toggle kept ==\n";
 ok('no Attest class / attest command / air-gap naming remains',
     strpos($src, 'class Attest') === false && strpos($src, "=== 'attest'") === false

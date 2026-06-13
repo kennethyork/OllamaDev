@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.9.5 (2026-06-13) — robustness: bad-UTF8 payloads, binary/huge files, huge diffs
+
+### Fixed
+- **A single invalid-UTF-8 byte in file content no longer breaks the whole turn.** Once a read/grep pulled in a binary blob or oddly-encoded file, `json_encode()` of the request body returned `false` → an empty POST body → a silent dead turn. Request bodies now encode with `JSON_INVALID_UTF8_SUBSTITUTE` (a new `OllamaClient::jenc()`), substituting bad bytes with U+FFFD instead of failing.
+- **`view` now guards binary and huge files.** It detects binary files (NUL bytes) and reports them instead of dumping garbage, streams only the requested slice with `fgets` (so a multi-GB file never loads fully into memory), and defaults to 2000 lines with a "pass offset/limit for more" note instead of returning the entire file. Also removes a duplicate `read` registration.
+- **The diff preview no longer hangs on a huge edit.** `DiffView::unified()`'s LCS table is O(n·m); for very large content it now skips the line-by-line preview and shows a compact summary (the edit still applies).
+
+### Why
+Closing the long-tail robustness gap — the messy real-world inputs (binary files, odd encodings, giant files) that a clean eval doesn't probe but real codebases hit. Vanilla PHP. 632 smoke tests pass.
+
 ## v0.9.4 (2026-06-13) — audit pass: 6 CLI/desktop/web fixes
 
 ### Fixed

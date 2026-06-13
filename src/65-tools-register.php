@@ -1,24 +1,41 @@
 Tools::register('view', function($p) {
-    $path = $p['file_path'] ?? $p['file'] ?? $p['path'] ?? '';
-    if (empty($path)) return CmdError::missingParam('file_path', 'view');
+    $path = (string)($p['file_path'] ?? $p['file'] ?? $p['path'] ?? '');
+    if ($path === '') return CmdError::missingParam('file_path', 'view');
     if (!file_exists($path)) return CmdError::fileNotFound($path, 'view');
-    $lines = file($path);
-    if ($lines === false) return CmdError::invalidArg($path, 'Unable to read file. Check permissions.', 'view');
-    $offset = isset($p['offset']) ? (int)$p['offset'] : 0;
-    $limit = isset($p['limit']) ? (int)$p['limit'] : count($lines);
-    $out = '';
-    for ($i = $offset; $i < min($offset + $limit, count($lines)); $i++) $out .= sprintf("%4d  %s", $i + 1, $lines[$i]);
+    if (is_dir($path)) return "Path is a directory — use ls or tree to list it: $path";
+    // Binary guard: a NUL byte in the first chunk means it's not text. Dumping it
+    // would flood the model with garbage and can carry invalid UTF-8 bytes.
+    $head = @file_get_contents($path, false, null, 0, 8192);
+    if ($head === false) return CmdError::invalidArg($path, 'Unable to read file. Check permissions.', 'view');
+    if (strpos($head, "\0") !== false) {
+        $sz = @filesize($path);
+        return "Binary file" . ($sz !== false ? " ($sz bytes)" : '') . " — not shown as text. Use a different tool if you need its bytes: $path";
+    }
+    $offset = max(0, isset($p['offset']) ? (int)$p['offset'] : 0);
+    $limit  = isset($p['limit']) ? max(1, (int)$p['limit']) : 2000;   // default cap, not the whole file
+    // Stream only the requested slice so a huge file never loads fully into memory.
+    $fh = @fopen($path, 'rb');
+    if (!$fh) return CmdError::invalidArg($path, 'Unable to read file. Check permissions.', 'view');
+    $out = ''; $i = 0; $shown = 0; $more = false;
+    while (($line = fgets($fh)) !== false) {
+        if ($i >= $offset) {
+            if ($shown >= $limit) { $more = true; break; }
+            $out .= sprintf("%4d  %s", $i + 1, $line);
+            $shown++;
+        }
+        $i++;
+    }
+    fclose($fh);
+    if ($shown === 0) return $offset > 0 ? "(no lines at offset $offset — the file has fewer lines)" : "(empty file)";
+    if (substr($out, -1) !== "\n") $out .= "\n";
+    if ($more) $out .= sprintf("… [showing %d lines starting at %d — pass a larger offset/limit for more]\n", $shown, $offset + 1);
     return $out;
 });
 
+// Aliases for the read tool (accept file/path too). One registration; the engine
+// resolves alias → view.
 Tools::register('read', function($p) {
     $p['file_path'] = $p['file_path'] ?? $p['file'] ?? $p['path'] ?? '';
-    return Tools::run('view', $p);
-});
-
-// Aliases for common tools
-Tools::register('read', function($p) {
-    $p['file_path'] = $p['file_path'] ?? $p['path'] ?? '';
     return Tools::run('view', $p);
 });
 

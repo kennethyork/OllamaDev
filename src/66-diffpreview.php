@@ -7,6 +7,14 @@ class DiffView {
         $a = $old === '' ? [] : explode("\n", $old);
         $b = $new === '' ? [] : explode("\n", $new);
         $n = count($a); $m = count($b);
+        // Guard: the LCS table below is O(n·m) time AND memory. On a very large file
+        // that would hang or exhaust memory, so skip the line-by-line preview and
+        // show a compact summary instead — the edit still applies.
+        if ((int)$n * (int)$m > 2000000 || $n > 20000 || $m > 20000) {
+            $h = '--- a' . ($label !== '' ? '/' . $label : '') . "\n";
+            $h .= '+++ b' . ($label !== '' ? '/' . $label : '') . "\n";
+            return $h . "@@ large change @@\n  (preview skipped: {$n} → {$m} lines — too large to render line-by-line)\n";
+        }
         // LCS table.
         $lcs = array_fill(0, $n + 1, array_fill(0, $m + 1, 0));
         for ($i = $n - 1; $i >= 0; $i--) {

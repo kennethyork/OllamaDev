@@ -8,6 +8,16 @@ class OllamaClient {
 
     public function host(): string { return $this->host; }
 
+    // Encode a request body so a stray invalid-UTF-8 byte in file content (common
+    // once a read/grep pulls in a binary blob or an oddly-encoded file) substitutes
+    // to U+FFFD instead of making json_encode() return false — which would set
+    // CURLOPT_POSTFIELDS to an empty body and silently break the whole turn.
+    public static function jenc($data): string {
+        $s = json_encode($data, JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_SLASHES);
+        if ($s === false) $s = json_encode($data, JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR | JSON_UNESCAPED_SLASHES);
+        return $s === false ? '{}' : $s;
+    }
+
     public function checkConnection(): bool {
         $ch = curl_init($this->host . '/api/tags');
         curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 5]);
@@ -41,7 +51,7 @@ class OllamaClient {
         $params = ['model' => $model, 'prompt' => $prompt, 'stream' => false, 'options' => ['num_predict' => $maxTokens]];
         $ch = curl_init($this->host . '/api/generate');
         curl_setopt_array($ch, [
-            CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
+            CURLOPT_POST => true, CURLOPT_POSTFIELDS => self::jenc($params),
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
             CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 120
         ]);
@@ -62,7 +72,7 @@ class OllamaClient {
         $params = ['model' => $model ?: Config::get('ollama.defaultModel', 'llama3.2:latest'), 'prompt' => $prompt, 'stream' => true, 'options' => ['num_predict' => 150]];
         $ch = curl_init($this->host . '/api/generate');
         curl_setopt_array($ch, [
-            CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
+            CURLOPT_POST => true, CURLOPT_POSTFIELDS => self::jenc($params),
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
             CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 30
         ]);
@@ -274,7 +284,7 @@ class OllamaClient {
             + self::thinkParams($model, $this->host);   // thinking models: emit reasoning in the `thinking` field, content stays the clean answer
         $ch = curl_init($this->host . '/api/chat');
         $opts = [
-            CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
+            CURLOPT_POST => true, CURLOPT_POSTFIELDS => self::jenc($params),
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 300,
@@ -336,7 +346,7 @@ class OllamaClient {
         $params = ['model' => $model, 'messages' => $messages, 'stream' => false, 'format' => 'json', 'options' => self::chatOptions($model, $this->host)];
         $ch = curl_init($this->host . '/api/chat');
         curl_setopt_array($ch, [
-            CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
+            CURLOPT_POST => true, CURLOPT_POSTFIELDS => self::jenc($params),
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
             CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 300,
         ]);
@@ -357,7 +367,7 @@ class OllamaClient {
         $params = ['model' => $model, 'messages' => $messages, 'stream' => false, 'format' => $schema, 'options' => self::chatOptions($model, $this->host)];
         $ch = curl_init($this->host . '/api/chat');
         curl_setopt_array($ch, [
-            CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
+            CURLOPT_POST => true, CURLOPT_POSTFIELDS => self::jenc($params),
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
             CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 300,
         ]);
@@ -384,7 +394,7 @@ class OllamaClient {
             + self::thinkParams($model, $this->host);   // route reasoning to the dimmed `thinking` channel (thinking models only)
         $ch = curl_init($this->host . '/api/chat');
         $base = [
-            CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($params),
+            CURLOPT_POST => true, CURLOPT_POSTFIELDS => self::jenc($params),
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
             CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 300,
         ];
