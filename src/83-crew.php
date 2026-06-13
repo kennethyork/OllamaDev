@@ -565,16 +565,46 @@ class Crew {
         $ctx = $research !== '' ? "\n\nResearcher findings:\n" . substr($research, 0, 6000) : '';
         $fc = ($focus !== '' ? "\n\nDomain/stack focus: $focus" : '') . $skillsBrief;
         $user = ['role' => 'user', 'content' => "Task:\n$task" . $fc . $ctx];
-        $j = ModelClient::default()->chatJson($model !== "" ? $model : $agent->getModel(), [$sys, $user]);
-        $subs = is_array($j) && isset($j['subtasks']) && is_array($j['subtasks']) ? $j['subtasks'] : [];
+        $useModel = $model !== "" ? $model : $agent->getModel();
+        $clean = self::parsePlan(ModelClient::default()->chatJson($useModel, [$sys, $user]), $roleNames);
+        if (empty($clean)) {
+            // Some models (esp. via the cloud) return valid JSON in a different shape
+            // or ignore the schema on the first pass. One firm retry before we fall
+            // back to treating the whole task as a single subtask.
+            $sys2 = ['role' => 'system', 'content' => $sys['content'] .
+                "\n\nIMPORTANT: return AT LEAST ONE subtask. The top-level key MUST be exactly \"subtasks\" (an array), and every item MUST have a non-empty \"prompt\". No prose, JSON only."];
+            $clean = self::parsePlan(ModelClient::default()->chatJson($useModel, [$sys2, $user]), $roleNames);
+        }
+        return $clean;
+    }
+
+    // Robustly pull a subtask list out of whatever shape the model returned — the
+    // ideal {"subtasks":[…]} but also {"tasks"/"plan"/"steps":[…]}, a bare top-level
+    // array, a single subtask object, or string items. Keeps the crew splitting work
+    // instead of collapsing to one subtask just because the JSON shape varied.
+    private static function parsePlan($j, array $roleNames): array {
+        if (!is_array($j)) return [];
+        $subs = null;
+        foreach (['subtasks', 'tasks', 'plan', 'steps', 'items'] as $k) {
+            if (isset($j[$k]) && is_array($j[$k])) { $subs = $j[$k]; break; }
+        }
+        if ($subs === null) {
+            $isList = $j === [] || array_keys($j) === range(0, count($j) - 1);
+            if ($isList) $subs = $j;                                                   // a bare array of subtasks
+            elseif (isset($j['prompt']) || isset($j['task']) || isset($j['instruction'])) $subs = [$j];  // a single subtask object
+        }
+        if (!is_array($subs)) return [];
         $clean = [];
         foreach ($subs as $s) {
+            if (is_string($s)) $s = ['prompt' => $s];   // a bare string step
             if (!is_array($s)) continue;
-            $p = trim((string)($s['prompt'] ?? $s['task'] ?? ''));
+            $p = trim((string)($s['prompt'] ?? $s['task'] ?? $s['instruction'] ?? $s['description'] ?? ''));
             if ($p === '') continue;
-            $role = CrewRoles::normName((string)($s['role'] ?? 'coder'));
+            $role = CrewRoles::normName((string)($s['role'] ?? $s['agent'] ?? 'coder'));
             if (!in_array($role, $roleNames, true)) $role = 'coder';   // unknown → fall back
-            $clean[] = ['title' => trim((string)($s['title'] ?? 'subtask')) ?: 'subtask', 'role' => $role, 'prompt' => $p];
+            $title = trim((string)($s['title'] ?? $s['name'] ?? ''));
+            if ($title === '') $title = strlen($p) > 44 ? substr($p, 0, 41) . '…' : $p;
+            $clean[] = ['title' => $title, 'role' => $role, 'prompt' => $p];
         }
         return $clean;
     }

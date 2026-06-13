@@ -516,11 +516,32 @@ ok('crew outside a git repo errors', stripos($out, 'needs a git repository') !==
 shell_exec('rm -rf ' . escapeshellarg($ngdir));
 // Unit: JSON extraction + slug (extract the Crew class from the binary)
 if (preg_match('/class Crew \{.*?\n\}/s', $src, $fm)) {
-    eval(str_replace('private static function extractJson', 'public static function extractJson', $fm[0]));
+    eval(str_replace(
+        ['private static function extractJson', 'private static function parsePlan'],
+        ['public static function extractJson', 'public static function parsePlan'],
+        $fm[0]));
     $j = Crew::extractJson('noise {"subtasks":[{"title":"a","prompt":"b"}]} tail');
     ok('Crew::extractJson pulls balanced JSON', is_array($j) && ($j['subtasks'][0]['title'] ?? '') === 'a');
     ok('Crew::extractJson returns null on none', Crew::extractJson('no json here') === null);
     ok('Crew::slug normalizes titles', Crew::slug('Add /Health Route!') === 'add-health-route');
+    // Director plan parsing must tolerate the shape variations real models (esp. cloud)
+    // emit, instead of collapsing to one subtask whenever the JSON shape drifts.
+    if (!class_exists('CrewRoles')) { eval('class CrewRoles { public static function normName(string $n): string { return strtolower(trim($n)); } }'); }
+    $roles = ['coder', 'tester', 'docs'];
+    ok('parsePlan reads the canonical {"subtasks":[…]} shape',
+        count(Crew::parsePlan(['subtasks' => [['title' => 'a', 'role' => 'coder', 'prompt' => 'do a'], ['prompt' => 'do b']]], $roles)) === 2);
+    ok('parsePlan accepts the {"tasks":[…]} alias',
+        count(Crew::parsePlan(['tasks' => [['prompt' => 'x'], ['prompt' => 'y']]], $roles)) === 2);
+    ok('parsePlan accepts a bare top-level array',
+        count(Crew::parsePlan([['prompt' => 'x'], ['task' => 'y'], ['instruction' => 'z']], $roles)) === 3);
+    ok('parsePlan accepts a single subtask object',
+        count(Crew::parsePlan(['title' => 'solo', 'prompt' => 'just this'], $roles)) === 1);
+    ok('parsePlan accepts bare string steps',
+        count(Crew::parsePlan(['steps' => ['first thing', 'second thing']], $roles)) === 2);
+    $pp = Crew::parsePlan(['subtasks' => [['prompt' => '   '], ['prompt' => 'real'], 'bare']], $roles);
+    ok('parsePlan drops empty prompts but keeps real ones', count($pp) === 2);
+    ok('parsePlan synthesizes a title when none is given', ($pp[0]['title'] ?? '') !== '');
+    ok('parsePlan returns [] on truly unusable JSON', Crew::parsePlan(['unrelated' => 'value'], $roles) === [] && Crew::parsePlan('nope', $roles) === []);
 } else { ok('Crew class extractable', false); }
 // "Clear the board" — explicit-only, idle-only, across CLI + agent tool + desktop.
 $chome = sys_get_temp_dir() . '/crew_clear_' . getmypid(); @mkdir($chome . '/.ollamadev/crew', 0777, true);
@@ -745,6 +766,23 @@ if (preg_match('/class Models \{.*?\n\}/s', $src, $cm)) {
     ok('cloud models are kept OUT of the local fallback chain',
         array_reduce(Models::defaultChain(), fn($a, $t) => $a && !Models::isCloud($t), true));
 } else { ok('Models class extractable', false); }
+// chatJson/chatStructured must survive a model that fences its JSON in ```json … ```
+// (real cloud behavior even with format:json) — the root cause of the crew falling
+// back to a single subtask. decodeLoose strips fences / extracts the JSON block.
+if (preg_match('/class OllamaClient \{.*?\n\}/s', $src, $ocd)) {
+    $cls = str_replace(
+        ['class OllamaClient ', 'private static function decodeLoose', 'private static function extractBalanced'],
+        ['class OllamaClientDL ', 'public static function decodeLoose', 'public static function extractBalanced'],
+        $ocd[0]);
+    if (!class_exists('OllamaClientDL')) eval($cls);
+    ok('decodeLoose unwraps a ```json fenced object',
+        (OllamaClientDL::decodeLoose("```json\n{\"subtasks\":[{\"prompt\":\"a\"}]}\n```")['subtasks'][0]['prompt'] ?? '') === 'a');
+    ok('decodeLoose still reads bare JSON', (OllamaClientDL::decodeLoose('{"x":1}')['x'] ?? null) === 1);
+    ok('decodeLoose extracts JSON embedded in prose', (OllamaClientDL::decodeLoose('Sure: {"y":2} done.')['y'] ?? null) === 2);
+    ok('decodeLoose ignores braces inside string values',
+        (OllamaClientDL::decodeLoose('{"p":"has } a brace"}')['p'] ?? '') === 'has } a brace');
+    ok('decodeLoose returns null when there is no JSON', OllamaClientDL::decodeLoose('no json at all') === null);
+} else { ok('OllamaClient class extractable for decodeLoose', false); }
 ok('CLI surfaces cloud models (models cloud command + signin guidance + badge)',
     strpos($src, "\$sub === 'cloud'") !== false && strpos($src, 'ollama signin') !== false
     && strpos($src, 'Models::isCloud(') !== false && strpos($src, '☁') !== false);

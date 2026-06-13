@@ -422,8 +422,50 @@ class OllamaClient {
         $j = json_decode((string)$resp, true);
         $content = is_array($j) ? ($j['message']['content'] ?? '') : '';
         if ($content === '') return null;
+        return self::decodeLoose($content);
+    }
+
+    // Decode model JSON that may be wrapped in a ```json … ``` fence or padded with
+    // prose. Even with format:json some models (esp. via the cloud) still fence their
+    // reply, so a plain json_decode returns null and the caller sees an "empty" plan.
+    // Tries: direct decode → fence-stripped → first balanced {…} or […] block.
+    private static function decodeLoose(string $content): ?array {
         $d = json_decode($content, true);
-        return is_array($d) ? $d : null;
+        if (is_array($d)) return $d;
+        $s = trim($content);
+        if (strncmp($s, '```', 3) === 0) {
+            $s2 = preg_replace('/^```[a-zA-Z0-9_-]*\s*/', '', $s);
+            $s2 = preg_replace('/\s*```\s*$/', '', (string)$s2);
+            $d = json_decode(trim((string)$s2), true);
+            if (is_array($d)) return $d;
+            $s = trim((string)$s2);
+        }
+        foreach ([['{', '}'], ['[', ']']] as [$open, $close]) {
+            $blk = self::extractBalanced($s, $open, $close);
+            if ($blk !== null) { $d = json_decode($blk, true); if (is_array($d)) return $d; }
+        }
+        return null;
+    }
+
+    // Pull the first balanced $open…$close block out of $s, ignoring braces that sit
+    // inside JSON string literals (so prompts containing { } don't throw off the count).
+    private static function extractBalanced(string $s, string $open, string $close): ?string {
+        $start = strpos($s, $open);
+        if ($start === false) return null;
+        $depth = 0; $inStr = false; $esc = false; $n = strlen($s);
+        for ($i = $start; $i < $n; $i++) {
+            $ch = $s[$i];
+            if ($inStr) {
+                if ($esc) $esc = false;
+                elseif ($ch === '\\') $esc = true;
+                elseif ($ch === '"') $inStr = false;
+                continue;
+            }
+            if ($ch === '"') $inStr = true;
+            elseif ($ch === $open) $depth++;
+            elseif ($ch === $close) { $depth--; if ($depth === 0) return substr($s, $start, $i - $start + 1); }
+        }
+        return null;
     }
 
     // Schema-constrained decoding (Ollama structured outputs): the model's reply
@@ -437,8 +479,7 @@ class OllamaClient {
         Usage::record($j);
         $content = is_array($j) ? ($j['message']['content'] ?? '') : '';
         if ($content === '') return null;
-        $d = json_decode($content, true);
-        return is_array($d) ? $d : null;
+        return self::decodeLoose($content);
     }
 
     // Native Ollama function-calling. Returns:
