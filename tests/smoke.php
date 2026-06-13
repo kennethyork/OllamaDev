@@ -929,6 +929,11 @@ ok('--light / keepAlive resource controls (small KV cache, unload idle, leave CP
 ok('--light throttles only LOCAL crew coders — cloud coders still run in parallel',
     strpos($src, '$anyLocalCoder') !== false && strpos($src, '$lowResLocal') !== false
     && strpos($src, 'Models::isCloud((string)$cm)') !== false);
+// Light mode is now the DEFAULT (gentle on local); --full / --heavy opts out.
+ok('light mode defaults ON (lowResource default true) with a --full / --heavy opt-out',
+    strpos($mainSrc0, "Config::get('ollama.lowResource', true)") !== false
+    && strpos($mainSrc0, "'--full'") !== false && strpos($mainSrc0, "'--heavy'") !== false
+    && strpos($mainSrc0, '$lightOn = false') !== false);
 
 echo "\n== Air-gap attestation removed; web-access toggle kept ==\n";
 ok('no Attest class / attest command / air-gap naming remains',

@@ -630,7 +630,8 @@ for ($i = 1; $i < $argc; $i++) {
     elseif ($a === '--plan') { $flags['permission'] = 'plan'; }
     elseif ($a === '--auto' || $a === '--yolo') { $flags['permission'] = 'auto'; }
     elseif ($a === '--careful') { $flags['careful'] = true; }   // self-review pass: re-check + fix own work (better on hard tasks)
-    elseif ($a === '--light' || $a === '--low-resource') { $flags['light'] = true; }   // be gentle on the machine
+    elseif ($a === '--light' || $a === '--low-resource') { $flags['light'] = true; }   // be gentle on the machine (now the default)
+    elseif ($a === '--full' || $a === '--heavy' || $a === '--no-light') { $flags['full'] = true; }   // opt out of light mode: full context/threads/parallel
     elseif ($a === '--ask') { $flags['permission'] = 'ask'; }
     elseif ($a === '--port') { $flags['port'] = (int)($argv[++$i] ?? 0); }
     elseif ($a === '--hostname') { $flags['hostname'] = $argv[++$i] ?? '127.0.0.1'; }
@@ -669,14 +670,17 @@ if (!empty($flags['noweb']) || Config::get('web.enabled', true) === false) Permi
 // hard tasks, at the cost of an extra round-trip.
 if (!empty($flags['careful'])) Config::set('agents.selfReview', true);
 
-// --light / --low-resource: be gentle on the machine — small context (smaller KV
-// cache → less VRAM), unload the model 60s after you stop (frees VRAM/RAM), leave
-// half the CPU cores for the OS, and never run crew coders in parallel. For laptops
-// or when a big run was freezing the box.
-if (!empty($flags['light'])) {
-    Config::set('ollama.lowResource', true);
-    if (Config::get('ollama.keepAlive', null) === null) Config::set('ollama.keepAlive', '60s');
-}
+// Light mode is the DEFAULT — be gentle on the machine: small context (smaller KV
+// cache → less VRAM), unload the model 60s after you stop (frees VRAM/RAM, lets the
+// GPU idle down so fans settle), leave half the CPU cores for the OS, and never run
+// crew coders in parallel. It only touches LOCAL models — cloud is never throttled.
+// Opt out with --full / --heavy (or persist ollama.lowResource:false) when you want
+// the local model running flat-out; --light forces it on regardless.
+$lightOn = Config::get('ollama.lowResource', true);   // default ON for local
+if (!empty($flags['full'])) $lightOn = false;
+elseif (!empty($flags['light'])) $lightOn = true;
+Config::set('ollama.lowResource', $lightOn);
+if ($lightOn && Config::get('ollama.keepAlive', null) === null) Config::set('ollama.keepAlive', '60s');
 
 // --cwd <dir>: run the agent and its tools in this directory. The ADE uses a
 // shell `cd` when spawning, so make the bare flag behave the same for the CLI —
