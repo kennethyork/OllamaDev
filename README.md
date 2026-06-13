@@ -196,6 +196,7 @@ ollamadev load <id>      # load a session by id
 ollamadev pull <model>   # download a model from Ollama
 ollamadev init           # generate OLLAMADEV.md project memory
 ollamadev setup          # detect hardware → recommend + pull a model → set default
+ollamadev doctor         # health check (Ollama, model+caps, GPU, disk, git/gh) with fixes (--json)
 ollamadev models         # list models (also: presets, cloud, pull <alias>, chain)
 ollamadev models cloud   # ☁ Ollama cloud models (opt-in; catalog + how to enable)
 ollamadev eval           # pass rate on a fixed task suite (--only, --json, --compare m1,m2,m3)

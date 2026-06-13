@@ -878,6 +878,9 @@ ok('find/tree skip unreadable dirs instead of aborting (CATCH_GET_CHILD)',
     substr_count($src, 'CATCH_GET_CHILD') >= 2);
 ok('model pull auto-resumes a transient network drop (Ollama resumes from cache)',
     strpos($src, 'resuming pull') !== false && strpos($src, 'OllamaClient::isTransient($errno, $code)') !== false);
+ok('doctor health-check command (Ollama/model/GPU/disk/git, with fixes + --json)',
+    strpos($mainSrc0, "\$argv[1] === 'doctor'") !== false && strpos($mainSrc0, '🩺 OllamaDev doctor') !== false
+    && strpos($mainSrc0, 'Ollama reachable') !== false && strpos($mainSrc0, 'disk headroom') !== false);
 
 echo "\n== Air-gap attestation removed; web-access toggle kept ==\n";
 ok('no Attest class / attest command / air-gap naming remains',

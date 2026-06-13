@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.9.12 (2026-06-13) — `doctor` health check
+
+### Added
+- **`ollamadev doctor`** — turns "why isn't it working?" into a checklist with fixes: PHP/curl, Ollama reachable, models installed, the default model + its tool/cloud capability (and `ollama signin` status for cloud), GPU load, disk headroom for pulls, and the optional tooling (git for crew, gh for PRs). Each ✗/⚠ prints the exact command to fix it. `--json` for scripts/CI; exits non-zero if anything's broken.
+
+### Why
+The polish/onboarding piece mature tools have — diagnose a broken setup in one command instead of a cryptic failure mid-task. Pairs with `ollamadev setup`. Vanilla PHP. 651 smoke tests pass.
+
 ## v0.9.11 (2026-06-13) — continue where you left off + symlink/permission + pull resume
 
 ### Added

@@ -447,6 +447,69 @@ if ($argc >= 2 && $argv[1] === 'setup') {
     exit(0);
 }
 
+// Doctor — a health check that turns "why isn't it working?" into a checklist with
+// fixes: PHP/curl, Ollama, the default model + its capabilities, GPU load, disk
+// headroom, and the optional tools (git for crew, gh for PRs, a search backend).
+if ($argc >= 2 && $argv[1] === 'doctor') {
+    $config = Config::load();
+    $jsonOut = in_array('--json', $argv, true);
+    $C = fn(string $s, string $code) => (getenv('NO_COLOR') !== false) ? $s : "\033[" . $code . "m" . $s . "\033[0m";
+    $rows = []; $ok = 0; $warn = 0; $bad = 0;
+    $add = function (string $state, string $label, string $detail = '', string $fix = '') use (&$rows, &$ok, &$warn, &$bad, $C, $jsonOut) {
+        if ($state === 'ok') $ok++; elseif ($state === 'warn') $warn++; else $bad++;
+        $rows[] = ['state' => $state, 'label' => $label, 'detail' => $detail, 'fix' => $fix];
+        $mark = $state === 'ok' ? $C('✓', '32') : ($state === 'warn' ? $C('⚠', '33') : $C('✗', '31'));
+        if (!$jsonOut) {
+            echo "  $mark " . str_pad($label, 22) . ($detail !== '' ? $C($detail, '2') : '');
+            echo "\n" . ($fix !== '' && $state !== 'ok' ? "      " . $C('→ ' . $fix, '2') . "\n" : '');
+        }
+    };
+    if (!$jsonOut) echo $C("\n🩺 OllamaDev doctor", '1;36') . $C("  v" . OLLAMADEV_VERSION, '2') . "\n\n";
+    // Runtime
+    $add(version_compare(PHP_VERSION, '8.0.0', '>=') ? 'ok' : 'bad', 'PHP ' . PHP_VERSION, '', 'OllamaDev needs PHP 8.0+');
+    $add(function_exists('curl_init') ? 'ok' : 'bad', 'curl extension', '', 'install php-curl');
+    // Ollama
+    $client = ModelClient::default();
+    $reachable = $client->checkConnection();
+    $host = Config::get('ollama.host', 'http://localhost:11434');
+    $add($reachable ? 'ok' : 'bad', 'Ollama reachable', $host, 'start it: ollama serve  (or set OLLAMA_HOST / --host)');
+    $installed = $reachable ? $client->listModels() : [];
+    $add($reachable ? (count($installed) ? 'ok' : 'warn') : 'bad', 'models installed', $reachable ? (count($installed) . ' model(s)') : '', 'ollamadev setup  (picks + pulls one for your hardware)');
+    // Default model + capabilities
+    $defModel = (string)Config::get('ollama.defaultModel', '');
+    if ($reachable && $defModel !== '') {
+        $match = Models::match($defModel, $installed);
+        if ($match !== '') {
+            $caps = class_exists('OllamaClient') ? OllamaClient::modelCapabilities($match, $host) : [];
+            $tools = in_array('tools', $caps, true) || Models::toolsSupported($match) === true;
+            $cloud = Models::isCloud($match);
+            $add($tools ? 'ok' : 'warn', 'default model', $match . ($cloud ? ' ☁' : '') . ' · ' . ($tools ? 'tool-capable' : 'weak at tools'), 'pick a tool-capable model: ollamadev models presets');
+            if ($cloud) { $auth = OllamaClient::cloudAuthError($match, $host); $add($auth === null ? 'ok' : 'warn', 'cloud auth', $auth === null ? 'signed in' : 'not signed in', 'ollama signin'); }
+        } else {
+            $add('warn', 'default model', $defModel . ' (not installed)', 'ollamadev models pull ' . $defModel . '  ·  or: ollamadev setup');
+        }
+    }
+    // GPU load (local models)
+    if ($reachable) {
+        $ps = class_exists('OllamaClient') ? OllamaClient::psInfo($defModel, $host) : [];
+        if (!empty($ps) && ($ps['name'] ?? '') !== '') {
+            $gp = (int)($ps['gpuPct'] ?? 0);
+            $add($gp >= 90 ? 'ok' : ($gp > 0 ? 'warn' : 'warn'), 'model on hardware', $gp . '% GPU · ' . round(($ps['vram'] ?? 0) / 1e9, 1) . ' GB VRAM', $gp < 90 ? 'layers spilled to CPU (slower) — free VRAM or use a smaller model' : '');
+        }
+    }
+    // Disk headroom for pulls
+    $home = getenv('HOME') ?: sys_get_temp_dir();
+    $free = @disk_free_space($home);
+    if ($free !== false) $add($free > 5e9 ? 'ok' : 'warn', 'disk headroom', round($free / 1e9, 1) . ' GB free', 'models are several GB each — free some space');
+    // Optional tooling
+    $add(trim((string)@shell_exec('command -v git 2>/dev/null')) !== '' ? 'ok' : 'warn', 'git (for crew)', '', 'install git to use the crew/worktrees');
+    $add(trim((string)@shell_exec('command -v gh 2>/dev/null')) !== '' ? 'ok' : 'warn', 'gh (for PRs)', '', 'optional: install GitHub CLI for `ollamadev pr`');
+    if ($jsonOut) { echo json_encode(['ok' => $ok, 'warn' => $warn, 'bad' => $bad, 'checks' => $rows]) . "\n"; exit($bad ? 1 : 0); }
+    echo "\n  " . $C("$ok ok", '32') . " · " . $C("$warn warn", '33') . " · " . $C("$bad fail", '31');
+    echo $bad ? "  " . $C('— fix the ✗ items above, then re-run', '2') . "\n\n" : ($warn ? "  " . $C('— ready (warnings are optional)', '2') . "\n\n" : "  " . $C('— all good, you\'re set', '2') . "\n\n");
+    exit($bad ? 1 : 0);
+}
+
 // Plugin CLI Command
 if ($argc >= 2 && $argv[1] === 'plugin') {
     $config = Config::load();
@@ -1888,6 +1951,7 @@ Commands:
   ollamadev test        Run the project's tests (auto-detected)
   ollamadev verify      Run tests, then let the agent fix failures until green (--max N)
   ollamadev setup       Detect hardware → recommend + pull a model → set the default (60-second start)
+  ollamadev doctor      Health check: Ollama, model + caps, GPU, disk, git/gh (--json) — fixes for any ✗
   ollamadev eval        Pass rate on a fixed task suite (--only, --model, --json, --compare m1,m2,m3)
   ollamadev models      List models; also: presets (recommended), cloud (☁ Ollama cloud), pull <alias>, chain (fallback)
   ollamadev diff        Show the working-tree diff for review (--json); powers the desktop Review panel
