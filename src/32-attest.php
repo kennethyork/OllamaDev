@@ -24,7 +24,7 @@ class Attest {
 
     // Build the attestation as structured data.
     public static function gather(): array {
-        $provider = Config::get('provider', 'ollama');
+        $provider = 'ollama';   // OllamaDev talks to Ollama only
         $host = ModelClient::default()->host();
         $loopback = self::isLoopbackHost($host);
         $offline = Permission::isOffline();

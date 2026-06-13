@@ -629,7 +629,6 @@ ART;
     // returned capabilities without "vision"). Unknown/unreachable → stay quiet
     // to avoid false alarms. Points at an installed vision model, else a pull.
     private function warnIfNoVision(): void {
-        if (Config::get('provider', 'ollama') === 'lmstudio') return; // different capability shape
         if (!class_exists('OllamaClient')) return;
         $caps = OllamaClient::modelCapabilities($this->model);
         if (empty($caps) || in_array('vision', $caps, true)) return;  // unknown, or it CAN see — no warning
@@ -981,36 +980,27 @@ $GLOBALS['currentSessionModel'] = null;
         }
     }
 
-    // Provider-aware startup check. Returns true if the backend is reachable and
-    // has at least one model; otherwise prints actionable, copy-pasteable steps so
-    // a first run never dead-ends on a cryptic failure mid-prompt. The chat loop
-    // still opens either way — the user can fix the backend and retry without restarting.
+    // Startup check. Returns true if Ollama is reachable and has at least one
+    // model; otherwise prints actionable, copy-pasteable steps so a first run never
+    // dead-ends on a cryptic failure mid-prompt. The chat loop still opens either
+    // way — the user can fix the backend and retry without restarting.
     private function preflight(): bool {
         $cyan = "\033[36m"; $dim = "\033[2m"; $yel = "\033[33m"; $r = "\033[0m";
         $host = $this->agent->host();
-        $isLM = class_exists('ModelClient') && ModelClient::isOpenAiStyle($host);
-        $name = $isLM ? 'LM Studio' : 'Ollama';
 
         if (!$this->agent->checkConnection()) {
-            echo "\n{$yel}  ⚠ Can't reach {$name}{$r}{$dim} at " . ($host ?: 'the configured host') . "{$r}\n";
-            if ($isLM) {
-                echo "{$dim}    1. In LM Studio open the {$r}Developer{$dim} tab and {$r}Start Server{$dim} (default port 1234).{$r}\n";
-                echo "{$dim}    2. Load a model in the server panel.{$r}\n";
-                echo "{$dim}    Prefer Ollama? Drop {$r}{$cyan}--lmstudio{$r}{$dim} / unset {$r}{$cyan}OLLAMADEV_PROVIDER{$r}{$dim}.{$r}\n";
-            } else {
-                echo "{$dim}    1. Start the server:  {$r}{$cyan}ollama serve{$r}\n";
-                echo "{$dim}    2. Pull a model:      {$r}{$cyan}ollama pull qwen2.5-coder{$r}\n";
-                echo "{$dim}    Using a remote/other host? Set {$r}{$cyan}OLLAMA_HOST{$r}{$dim} or pass {$r}{$cyan}--host <url>{$r}{$dim}.{$r}\n";
-            }
+            echo "\n{$yel}  ⚠ Can't reach Ollama{$r}{$dim} at " . ($host ?: 'the configured host') . "{$r}\n";
+            echo "{$dim}    1. Start the server:  {$r}{$cyan}ollama serve{$r}\n";
+            echo "{$dim}    2. Pull a model:      {$r}{$cyan}ollama pull qwen2.5-coder{$r}\n";
+            echo "{$dim}    Using a remote/other host? Set {$r}{$cyan}OLLAMA_HOST{$r}{$dim} or pass {$r}{$cyan}--host <url>{$r}{$dim}.{$r}\n";
             echo "\n";
             return false;
         }
 
         // Reachable but empty — the next prompt would fail with no obvious reason.
         if (empty($this->agent->listModels())) {
-            echo "\n{$yel}  ⚠ {$name} is running but has no models installed.{$r}\n";
-            if ($isLM) echo "{$dim}    Download a model in LM Studio and load it in the server panel.{$r}\n";
-            else echo "{$dim}    Pull one:  {$r}{$cyan}ollama pull qwen2.5-coder{$r}{$dim}  — or {$r}{$cyan}/pull <model>{$r}{$dim} once you're in.{$r}\n";
+            echo "\n{$yel}  ⚠ Ollama is running but has no models installed.{$r}\n";
+            echo "{$dim}    Pull one:  {$r}{$cyan}ollama pull qwen2.5-coder{$r}{$dim}  — or {$r}{$cyan}/pull <model>{$r}{$dim} once you're in.{$r}\n";
             echo "\n";
             return false;
         }

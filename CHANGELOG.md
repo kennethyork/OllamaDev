@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.8.98 (2026-06-12) — Ollama-only (LM Studio support removed)
+
+### Removed
+- **Dropped LM Studio / OpenAI-compatible provider support.** OllamaDev now talks to **Ollama only** — one backend, one code path, less to go wrong. Gone: the `LMStudioClient`, the `--lmstudio` flag, the `provider` / `lmstudio.host` config keys, and the `OLLAMADEV_PROVIDER` / `LMSTUDIO_HOST` environment variables. The `ModelClient` factory remains as the single Ollama factory.
+
+### Unchanged
+- **`--host <url>` and `OLLAMA_HOST` still work** — point at a remote Ollama or one on another port. Still 100% local unless you aim it elsewhere.
+- If you were running via LM Studio, switch to Ollama: `ollama serve` + `ollama pull qwen3.5:9b`. Everything else (chat, agent, crew, vision, structured tool-calling) is identical.
+
 ## v0.8.97 (2026-06-12) — reasoning streams in a collapsing "thinking box"
 
 ### Changed
@@ -10,7 +19,7 @@
 - **The embedded ADE terminal learned cursor-up + erase-to-end-of-display** (line mode), so the collapse renders identically in the desktop/web chat as in a real terminal. The CLI hard-wraps the box to the terminal width so one emitted line is exactly one row in both.
 
 ### Note
-- Pure vanilla PHP/JS/CSS/HTML, Ollama + LM Studio only — no new dependencies. When piped to a file (no TTY), reasoning still streams but the cursor is never moved; the answer is simply separated onto a new line.
+- Pure vanilla PHP/JS/CSS/HTML, Ollama-only — no new dependencies. When piped to a file (no TTY), reasoning still streams but the cursor is never moved; the answer is simply separated onto a new line.
 
 ## v0.8.96 (2026-06-12) — /context shows GPU load; thinking models nudged to use their reasoning channel
 

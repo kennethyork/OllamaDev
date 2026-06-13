@@ -1,5 +1,5 @@
 class Agent {
-    private $client; // OllamaClient or LMStudioClient (see ModelClient factory)
+    private $client; // OllamaClient (see ModelClient factory)
     private string $model;
     private array $systemPrompt;
     private bool $builtPlanMode = false;   // plan-mode state captured when the prompt was built

@@ -495,7 +495,6 @@ for ($i = 1; $i < $argc; $i++) {
     elseif ($a === '--new') { $flags['new'] = true; }
     elseif ($a === '--pack') { $flags['pack'] = $argv[++$i] ?? null; }
     elseif ($a === '--num-ctx') { $flags['numCtx'] = (int)($argv[++$i] ?? 0); }
-    elseif ($a === '--lmstudio') { $flags['lmstudio'] = true; }
     elseif ($a === '--host') { $flags['host'] = $argv[++$i] ?? null; }
     elseif ($a === '--panes') { $flags['panes'] = true; }
     elseif ($a === '--run-id') { $flags['runId'] = $argv[++$i] ?? null; }
@@ -531,10 +530,9 @@ if ($cmdIdx !== null && $cmdIdx > 1) {
 if (empty($flags['model']) && getenv('OLLAMA_MODEL')) $flags['model'] = getenv('OLLAMA_MODEL');
 if (empty($flags['model']) && getenv('MODEL')) $flags['model'] = getenv('MODEL');
 
-// Provider override for this run: --host <url> (auto-detects backend) or --lmstudio
-// (LM Studio's local OpenAI-compatible server). Both stay 100% local.
+// Host override for this run: --host <url> points at a different Ollama (a remote
+// box, or one on another port). Stays 100% local unless you point it elsewhere.
 if (!empty($flags['host'])) ModelClient::$override = $flags['host'];
-elseif (!empty($flags['lmstudio'])) ModelClient::$override = Config::get('lmstudio.host', 'http://localhost:1234/v1');
 
 // Air-gapped mode (--offline / --air-gapped, OLLAMADEV_OFFLINE=1, or config
 // offline:true): hard-block every network tool for the rest of this process.
@@ -564,7 +562,7 @@ if ($argc >= 2 && $argv[1] === 'context') {
 // like ChatGPT, 100% local via Ollama). NOT the coding agent: no tools, no file
 // edits, no permissions — just talk. Backs the ADE's "💬 Chat" window and is handy
 // straight from the terminal. Shares the one engine, so your model (-m or
-// ollama.defaultModel), host (--host/--lmstudio), temperature and context settings
+// ollama.defaultModel), host (--host / OLLAMA_HOST), temperature and context settings
 // all apply — `ollama run` with OllamaDev's config + a system persona.
 //   ollamadev chat                     interactive REPL with your default model
 //   ollamadev chat -m qwen2.5:7b       REPL with a specific model
@@ -626,7 +624,7 @@ if ($argc >= 2 && $argv[1] === 'chat') {
         exit(0);
     }
 
-    $client = ModelClient::default();   // honors --host / --lmstudio / configured provider
+    $client = ModelClient::default();   // honors --host / OLLAMA_HOST
     $model = (string)($flags['model'] ?? '');
     if ($model === '') $model = (string)Config::get('ollama.defaultModel', 'llama3.2:latest');
     // A short, friendly general-assistant persona (distinct from the coding agent's
@@ -1350,7 +1348,7 @@ if ($argc >= 2 && $argv[1] === 'pull') {
 // show the tool-calling fallback chain.
 if ($argc >= 2 && $argv[1] === 'models') {
     $config = Config::load();
-    $client = ModelClient::default(); // honors --lmstudio / --host / configured provider
+    $client = ModelClient::default(); // honors --host / OLLAMA_HOST
     $sub = $argv[2] ?? '';
 
     // Curated catalog of models known to work well for agentic coding.

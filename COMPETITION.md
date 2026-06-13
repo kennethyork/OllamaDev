@@ -6,7 +6,7 @@
 
 **No tool ships OllamaDev's exact combination.** The intersection is currently unoccupied:
 
-> local-only (Ollama/LM Studio, no cloud AI) **+** multi-agent Crew with git-worktree isolation **and a gated, AI-reviewed merge** **+** CLI / native desktop / web on **one zero-dependency vanilla-PHP engine** **+** air-gap mode + attestation.
+> local-only (Ollama, no cloud AI) **+** multi-agent Crew with git-worktree isolation **and a gated, AI-reviewed merge** **+** CLI / native desktop / web on **one zero-dependency vanilla-PHP engine** **+** air-gap mode + attestation.
 
 OllamaDev is differentiated by the **intersection**, not by any single feature — every individual piece exists somewhere else.
 

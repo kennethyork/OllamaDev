@@ -8,7 +8,7 @@ class CodeIndex {
     const OVERLAP = 12;
     const MAX_FILE_BYTES = 200000;
 
-    // Embeddings are an Ollama endpoint; use ollama.host even under LM Studio.
+    // Embeddings use Ollama's /api/embeddings endpoint at ollama.host.
     public static function model(): string { return trim((string)Config::get('embed.model', self::MODEL_DEFAULT)) ?: self::MODEL_DEFAULT; }
     private static function host(): string { return rtrim((string)Config::get('ollama.host', 'http://localhost:11434'), '/'); }
 

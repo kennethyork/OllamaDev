@@ -7,8 +7,6 @@ class Config {
         if (getenv('OLLAMA_HOST')) $envOverrides['ollama']['host'] = getenv('OLLAMA_HOST');
         if (getenv('OLLAMA_MODEL')) $envOverrides['ollama']['defaultModel'] = getenv('OLLAMA_MODEL');
         $defaults = [
-            'provider' => getenv('OLLAMADEV_PROVIDER') ?: 'ollama', // 'ollama' | 'lmstudio'
-            'lmstudio' => ['host' => getenv('LMSTUDIO_HOST') ?: 'http://localhost:1234/v1'],
             'ollama' => ['host' => getenv('OLLAMA_HOST') ?: 'http://localhost:11434', 'hosts' => [], 'defaultModel' => getenv('OLLAMA_MODEL') ?: 'qwen3.5:9b', 'contextWindow' => (int)(getenv('OLLAMA_NUM_CTX') ?: 16384), 'maxContextWindow' => (int)(getenv('OLLAMA_MAX_NUM_CTX') ?: 32768), 'autoContext' => true, 'temperature' => 0.3, 'stream' => true],
             'agents' => ['coder' => ['temperature' => 0.7, 'maxTokens' => 4096], 'maxIterations' => 12, 'maxToolOutput' => 12000, 'subagentPermission' => 'readonly'],
             'session' => ['autoResume' => true], // bare `ollamadev` resumes this repo's last session (use `new`/--new for a fresh one)

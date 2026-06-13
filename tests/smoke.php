@@ -295,10 +295,9 @@ ok('Config applies env overrides over the config file',
    preg_match('/array_replace_recursive\(\s*\$defaults\s*,\s*\$json\s*,\s*\$envOverrides\s*\)/', $src) === 1,
    'env overrides not merged last in Config::load');
 
-// Provider-aware onboarding (preflight) needs a host() getter on every client and
-// on the Agent facade so it can name the backend and print the right fix-up steps.
+// Onboarding (preflight) needs a host() getter on the client and on the Agent
+// facade so it can print the right fix-up steps when Ollama isn't reachable.
 ok('OllamaClient exposes host()', strpos($src, 'function host()') !== false && strpos($src, 'class OllamaClient') !== false);
-ok('LMStudioClient exposes host()', preg_match('/class LMStudioClient \{.*?function host\(\).*?\n\}/s', $src) === 1);
 ok('Agent forwards host() to its client', strpos($src, "method_exists(\$this->client, 'host')") !== false);
 ok('start() runs a preflight backend check', strpos($src, '$ready = $this->preflight();') !== false);
 ok('preflight surfaces the no-models case', strpos($src, 'no models installed') !== false);
@@ -1392,19 +1391,15 @@ if (preg_match('/PUBLIC\s*=\s*\[(.*?)\];/s', $bind, $pm)) {
 } else { ok('Bindings PUBLIC list parseable', false); }
 ok('interactive crew loops Crew::run per prompt', strpos($src, "in_array(strtolower(\$line), ['exit', 'quit', 'q', ':q']") !== false);
 
-echo "\n== LM Studio provider ==\n";
-if (preg_match('/class ModelClient \{.*?\n\}/s', $src, $mc)) {
-    eval($mc[0]);
-    ok('ModelClient detects LM Studio /v1 + :1234 hosts', ModelClient::isOpenAiStyle('http://localhost:1234/v1') === true && ModelClient::isOpenAiStyle('http://x:1234') === true);
-    ok('ModelClient treats a plain host as Ollama', ModelClient::isOpenAiStyle('http://localhost:11434') === false);
-} else { ok('ModelClient extractable', false); }
-ok('LMStudioClient speaks OpenAI /v1', strpos($src, 'class LMStudioClient') !== false && strpos($src, '/chat/completions') !== false && strpos($src, "response_format") !== false);
-ok('LMStudioClient mirrors the client surface', preg_match('/class LMStudioClient \{.*?\n\}/s', $src, $lm) === 1
-    && strpos($lm[0], 'function chatWithTools(') !== false && strpos($lm[0], 'function chatJson(') !== false
-    && strpos($lm[0], 'function chatWithModel(') !== false && strpos($lm[0], 'function listModels(') !== false);
+echo "\n== Model client (Ollama-only) ==\n";
+ok('ModelClient is the sole factory — no LM Studio / provider switching left',
+    strpos($src, 'class LMStudioClient') === false && strpos($src, 'isOpenAiStyle') === false
+    && strpos($src, "Config::get('provider'") === false && strpos($src, "'lmstudio'") === false
+    && strpos($src, "--lmstudio") === false && strpos($src, 'OLLAMADEV_PROVIDER') === false);
 ok('Agent + Crew use the ModelClient factory', strpos($src, 'ModelClient::default()') !== false && strpos($src, 'ModelClient::for(') !== false);
-ok('--lmstudio / --host flags set the override', strpos($src, "\$a === '--lmstudio'") !== false && strpos($src, "\$a === '--host'") !== false && strpos($src, 'ModelClient::$override') !== false);
-ok('config has provider + lmstudio.host defaults', strpos($src, "'provider' =>") !== false && strpos($src, "'lmstudio' => ['host'") !== false);
+ok('ModelClient::default returns an OllamaClient', preg_match('/class ModelClient \{.*?\n\}/s', $src, $mc) === 1
+    && strpos($mc[0], 'new OllamaClient(') !== false && strpos($mc[0], 'LMStudio') === false);
+ok('--host flag sets the session override', strpos($src, "\$a === '--host'") !== false && strpos($src, 'ModelClient::$override') !== false);
 ok('skill tool is read-only', strpos($src, "'summarize', 'skill'") !== false);
 
 echo "\n== Crew team skills ==\n";
@@ -1839,14 +1834,12 @@ ok('text mode injects a tool catalog + explicit JSON format', strpos($agentSrc, 
     strpos($agentSrc, 'TOOL PROTOCOL') !== false);
 // Structured mode: schema-constrained decoding for reliable tool calls.
 $ollClient = (string)@file_get_contents($repoRoot . '/src/50-ollama-client.php');
-$lmClient = (string)@file_get_contents($repoRoot . '/src/52-lmstudio-client.php');
 ok('structured mode uses schema-constrained decoding in chatTurn', strpos($agentSrc, "\$toolMode === 'structured'") !== false &&
     strpos($agentSrc, 'chatStructured(') !== false && strpos($agentSrc, 'toolCallSchema()') !== false);
 ok('toolCallSchema constrains tool names to real tools (enum)', strpos($agentSrc, 'function toolCallSchema(') !== false &&
     strpos($agentSrc, "'enum'") !== false && strpos($agentSrc, "'tool_calls'") !== false);
-ok('both backends support chatStructured (Ollama format + LM Studio json_schema)',
-    strpos($ollClient, 'function chatStructured(') !== false && strpos($ollClient, "'format' => \$schema") !== false &&
-    strpos($lmClient, 'function chatStructured(') !== false && strpos($lmClient, 'json_schema') !== false);
+ok('Ollama client supports chatStructured (schema-constrained format)',
+    strpos($ollClient, 'function chatStructured(') !== false && strpos($ollClient, "'format' => \$schema") !== false);
 ok('auto resolves to structured when the backend supports it (native is opt-in)',
     strpos($agentSrc, 'function effectiveToolMode(') !== false &&
     strpos($agentSrc, "method_exists(\$this->client, 'chatStructured') ? 'structured' : 'text'") !== false);
