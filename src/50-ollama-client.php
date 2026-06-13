@@ -165,6 +165,11 @@ class OllamaClient {
             $want = $max > 0 ? max($base, $max) : $base;
             $ctx = min($want, max(512, $cap));
         }
+        // Low-resource mode (--light / ollama.lowResource): keep the KV cache small
+        // so a long session doesn't creep up on VRAM and freeze the box. Local only —
+        // a cloud model has no local footprint.
+        $lowRes = (bool)Config::get('ollama.lowResource', false);
+        if (!$isCloud && $lowRes) $ctx = min($ctx, max(2048, (int)Config::get('ollama.lowResourceCtx', 8192)));
         self::$lastCtx = $ctx;
         $opts = ['num_ctx' => $ctx, 'temperature' => (float)Config::get('ollama.temperature', 0.3)];
         // GPU/RAM split: num_gpu = how many model layers stay on the GPU; the rest
@@ -172,10 +177,23 @@ class OllamaClient {
         // fits in VRAM). 0 = all CPU/RAM. A lower number frees VRAM but runs SLOWER.
         $gl = Config::get('ollama.gpuLayers', null);
         if ($gl !== null && $gl !== '') $opts['num_gpu'] = max(0, (int)$gl);
-        // Optionally cap CPU threads used for the RAM-offloaded layers.
+        // CPU threads. Explicit numThreads wins; otherwise low-resource mode leaves
+        // half the cores for the OS so the machine stays responsive while it thinks.
         $nt = Config::get('ollama.numThreads', null);
         if ($nt !== null && $nt !== '') $opts['num_thread'] = max(1, (int)$nt);
+        elseif ($lowRes && !$isCloud) { $cores = (int)@shell_exec('nproc 2>/dev/null'); if ($cores > 2) $opts['num_thread'] = max(2, intdiv($cores, 2)); }
         return $opts;
+    }
+
+    // keep_alive controls how long Ollama keeps the model resident in VRAM/RAM after
+    // a request. Default (unset) = Ollama's 5 minutes. Set ollama.keepAlive to "0"
+    // (unload immediately — frees your VRAM the moment you stop), "30s"/"10m", or
+    // "-1" (keep loaded). Sent as a top-level field. LOCAL models only — a cloud
+    // model runs on Ollama's servers, so there's no local footprint to manage.
+    private static function keepAlive(string $model = ''): array {
+        if ($model !== '' && class_exists('Models') && Models::isCloud($model)) return [];
+        $ka = Config::get('ollama.keepAlive', null);
+        return ($ka !== null && $ka !== '') ? ['keep_alive' => $ka] : [];
     }
 
     // The num_ctx most recently sent (so the /status meter shows the real window).
@@ -317,7 +335,8 @@ class OllamaClient {
         // fall back to a single blocking response when no handler wants chunks.
         $stream = ($handler !== null || $onThinking !== null) && (bool)Config::get('ollama.stream', true);
         $params = ['model' => $model, 'messages' => $messages, 'stream' => $stream, 'options' => self::chatOptions($model, $this->host)]
-            + self::thinkParams($model, $this->host);   // thinking models: emit reasoning in the `thinking` field, content stays the clean answer
+            + self::thinkParams($model, $this->host)   // thinking models: emit reasoning in the `thinking` field, content stays the clean answer
+            + self::keepAlive($model);                        // free VRAM when idle if ollama.keepAlive is set
         $opts = [
             CURLOPT_POST => true, CURLOPT_POSTFIELDS => self::jenc($params),
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
@@ -398,7 +417,7 @@ class OllamaClient {
     // decoded object, or null on failure. Used by Crew's Director/Auditor so
     // local models reliably emit parseable plans/verdicts.
     public function chatJson(string $model, array $messages): ?array {
-        $params = ['model' => $model, 'messages' => $messages, 'stream' => false, 'format' => 'json', 'options' => self::chatOptions($model, $this->host)];
+        $params = ['model' => $model, 'messages' => $messages, 'stream' => false, 'format' => 'json', 'options' => self::chatOptions($model, $this->host)] + self::keepAlive($model);
         $resp = $this->postJsonRetry('/api/chat', self::jenc($params));
         $j = json_decode((string)$resp, true);
         $content = is_array($j) ? ($j['message']['content'] ?? '') : '';
@@ -412,7 +431,7 @@ class OllamaClient {
     // tools.mode=structured to make tool calls reliable on local models. Returns
     // the decoded object, or null on failure.
     public function chatStructured(string $model, array $messages, array $schema): ?array {
-        $params = ['model' => $model, 'messages' => $messages, 'stream' => false, 'format' => $schema, 'options' => self::chatOptions($model, $this->host)];
+        $params = ['model' => $model, 'messages' => $messages, 'stream' => false, 'format' => $schema, 'options' => self::chatOptions($model, $this->host)] + self::keepAlive($model);
         $resp = $this->postJsonRetry('/api/chat', self::jenc($params));
         $j = json_decode((string)$resp, true);
         Usage::record($j);
@@ -432,7 +451,8 @@ class OllamaClient {
     public function chatWithTools(string $model, array $messages, array $tools, ?callable $onDelta = null): array {
         $stream = $onDelta !== null && (bool)Config::get('ollama.stream', true);
         $params = ['model' => $model, 'messages' => $messages, 'tools' => $tools, 'stream' => $stream, 'options' => self::chatOptions($model, $this->host)]
-            + self::thinkParams($model, $this->host);   // route reasoning to the dimmed `thinking` channel (thinking models only)
+            + self::thinkParams($model, $this->host)   // route reasoning to the dimmed `thinking` channel (thinking models only)
+            + self::keepAlive($model);                       // free VRAM when idle if ollama.keepAlive is set
         $ch = curl_init($this->host . '/api/chat');
         $base = [
             CURLOPT_POST => true, CURLOPT_POSTFIELDS => self::jenc($params),

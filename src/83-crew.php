@@ -170,7 +170,11 @@ class Crew {
         // automatic as before. One local Ollama serves concurrent requests up to
         // OLLAMA_NUM_PARALLEL (queuing the rest), and tool/git/IO overlap regardless.
         $pOpt = $opts['parallel'] ?? Config::get('crew.parallel', false);
-        $wantParallel = $multiHost || ($pOpt !== false && $pOpt !== 0 && $pOpt !== '0' && $pOpt !== '');
+        // Low-resource: never run multiple single-box coders at once (each is another
+        // model instance = multiplied VRAM/RAM). Multi-host parallelism still spreads
+        // across machines, so it stays allowed.
+        $lowRes = (bool)Config::get('ollama.lowResource', false);
+        $wantParallel = $multiHost || (!$lowRes && $pOpt !== false && $pOpt !== 0 && $pOpt !== '0' && $pOpt !== '');
         $parallel = count($jobs) > 1 && $canFork && $wantParallel;
         // Concurrency cap: --parallel N pins it; else one slot per host (multi-host)
         // or crew.parallelMax (single-box, default 2) so we don't thrash one GPU.

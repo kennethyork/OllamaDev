@@ -884,6 +884,10 @@ ok('doctor health-check command (Ollama/model/GPU/disk/git, with fixes + --json)
 ok('--careful self-review pass (re-check + fix own work — lifts weak models on hard tasks)',
     strpos($mainSrc0, "'--careful'") !== false && strpos($src, "Config::get('agents.selfReview'") !== false
     && strpos($src, 'check them against the ORIGINAL task') !== false && strpos($src, '🔎 self-review') !== false);
+ok('--light / keepAlive resource controls (small KV cache, unload idle, leave CPU, no crew parallel)',
+    strpos($mainSrc0, "'--light'") !== false && strpos($src, 'ollama.lowResource') !== false
+    && strpos($src, 'function keepAlive(') !== false && strpos($src, "'keep_alive' => \$ka") !== false
+    && strpos($src, 'ollama.lowResourceCtx') !== false);
 
 echo "\n== Air-gap attestation removed; web-access toggle kept ==\n";
 ok('no Attest class / attest command / air-gap naming remains',

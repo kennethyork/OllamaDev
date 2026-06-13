@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.9.17 (2026-06-13) — resource controls: stop a local model freezing your machine
+
+### Added
+- **`--light` / `--low-resource`** (config `ollama.lowResource`) — be gentle on the machine: a smaller context window (smaller KV cache → less VRAM), unload the model 60s after you stop (frees VRAM/RAM), leave half the CPU cores for the OS so it stays responsive, and never run crew coders in parallel (each is another model instance). For laptops, or when a big run was freezing the box.
+- **`ollama.keepAlive`** config — how long Ollama keeps the model resident after a request. Set `"0"` to unload immediately and get your VRAM back the moment you stop, `"30s"`/`"10m"` for a window, or `"-1"` to pin it loaded. Default (unset) = Ollama's 5 minutes.
+
+### Note
+- **All of this is LOCAL-only.** A cloud model runs on Ollama's servers, so it has no local VRAM/RAM/CPU footprint — `keep_alive`, the context cap, and the thread cap are skipped for `:cloud` models, which keep their full context. Verified: local gets the caps + keep_alive; cloud is untouched. Vanilla PHP. 653 smoke tests pass.
+
 ## v0.9.16 (2026-06-13) — `--careful`: agent self-review (lift a local model on hard tasks)
 
 ### Added

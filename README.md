@@ -175,6 +175,7 @@ ollamadev                      # start a chat session
 ollamadev --auto               # auto-approve all tools (no prompts)
 ollamadev --readonly           # plan mode: block all mutating tools
 ollamadev --careful            # self-review pass: re-check + fix own work (better on hard tasks)
+ollamadev --light              # be gentle on the machine: small context, unload model when idle, leave CPU free, no crew parallel (local models)
 ollamadev -m qwen2.5-coder     # pick a model for this session
 ollamadev resume               # pick a recent session to resume
 ollamadev -c                   # continue the most recent session
