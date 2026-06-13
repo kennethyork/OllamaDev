@@ -170,11 +170,16 @@ class Crew {
         // automatic as before. One local Ollama serves concurrent requests up to
         // OLLAMA_NUM_PARALLEL (queuing the rest), and tool/git/IO overlap regardless.
         $pOpt = $opts['parallel'] ?? Config::get('crew.parallel', false);
-        // Low-resource: never run multiple single-box coders at once (each is another
-        // model instance = multiplied VRAM/RAM). Multi-host parallelism still spreads
-        // across machines, so it stays allowed.
+        // Low-resource throttles single-box parallelism ONLY when a LOCAL coder is
+        // involved — each local coder is another model instance on your GPU. CLOUD
+        // coders run on Ollama's servers (no local footprint), so they keep fanning
+        // out in parallel even in --light mode. Multi-host parallelism stays allowed.
         $lowRes = (bool)Config::get('ollama.lowResource', false);
-        $wantParallel = $multiHost || (!$lowRes && $pOpt !== false && $pOpt !== 0 && $pOpt !== '0' && $pOpt !== '');
+        $coderModels = $mCoderList ?: [$mCoder];
+        $anyLocalCoder = false;
+        foreach ($coderModels as $cm) { if ((string)$cm !== '' && !Models::isCloud((string)$cm)) { $anyLocalCoder = true; break; } }
+        $lowResLocal = $lowRes && $anyLocalCoder;
+        $wantParallel = $multiHost || (!$lowResLocal && $pOpt !== false && $pOpt !== 0 && $pOpt !== '0' && $pOpt !== '');
         $parallel = count($jobs) > 1 && $canFork && $wantParallel;
         // Concurrency cap: --parallel N pins it; else one slot per host (multi-host)
         // or crew.parallelMax (single-box, default 2) so we don't thrash one GPU.

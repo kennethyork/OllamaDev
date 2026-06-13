@@ -888,6 +888,9 @@ ok('--light / keepAlive resource controls (small KV cache, unload idle, leave CP
     strpos($mainSrc0, "'--light'") !== false && strpos($src, 'ollama.lowResource') !== false
     && strpos($src, 'function keepAlive(') !== false && strpos($src, "'keep_alive' => \$ka") !== false
     && strpos($src, 'ollama.lowResourceCtx') !== false);
+ok('--light throttles only LOCAL crew coders — cloud coders still run in parallel',
+    strpos($src, '$anyLocalCoder') !== false && strpos($src, '$lowResLocal') !== false
+    && strpos($src, 'Models::isCloud((string)$cm)') !== false);
 
 echo "\n== Air-gap attestation removed; web-access toggle kept ==\n";
 ok('no Attest class / attest command / air-gap naming remains',

@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.9.18 (2026-06-13) — fix: --light kept cloud crews sequential
+
+### Fixed
+- **`--light` was disabling crew parallelism even for cloud coders.** The low-resource throttle (one coder at a time) is only meant to protect your *local* GPU — each local coder is another model instance. A **cloud** coder runs on Ollama's servers with no local footprint, so it should keep running in parallel. Now the throttle applies only when a LOCAL coder is involved: an all-cloud crew fans out in parallel even in `--light` mode; a mix (any local coder) stays sequential to protect the GPU. Default (no `--light`) is unchanged.
+
 ## v0.9.17 (2026-06-13) — resource controls: stop a local model freezing your machine
 
 ### Added
