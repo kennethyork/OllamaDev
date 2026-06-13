@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.8.96 (2026-06-12) — /context shows GPU load; thinking models nudged to use their reasoning channel
+
+### Added
+- **`/context` now shows how the model is loaded on your hardware** — GPU vs CPU split and VRAM, from Ollama's `/api/ps`. E.g. `Hardware: 100% GPU · 9.3 GB VRAM · ctx 16384`, or a yellow warning when layers spill to CPU (slower). Makes it obvious at a glance whether you're fully on the GPU.
+
+### Changed
+- **Thinking models are told to keep step-by-step reasoning in their dedicated reasoning channel** (added to the agent system prompt for models reporting a `thinking` capability), so the CLI shows the reasoning live and dimmed — like the chat REPL — instead of narrating it into the visible reply. Pairs with the `think:true` routing from v0.8.95.
+
+### Note
+- If the CLI ever feels "brittle" (text-parsed tool calls, reasoning shown plain instead of dimmed), check `tools.mode` — a stale `tools.mode: text` in `~/.ollamadev/config.json` forces the old text-protocol path. Remove it (or set `native`) to use Ollama's native function-calling + the dimmed reasoning channel. The default (no key) is `auto`, which prefers native.
+
 ## v0.8.95 (2026-06-12) — CLI/crew route reasoning to the dimmed thinking channel
 
 ### Changed

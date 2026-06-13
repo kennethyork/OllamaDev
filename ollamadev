@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '0.8.95');
+define('OLLAMADEV_VERSION', '0.8.96');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -1145,6 +1145,35 @@ class OllamaClient {
     // Does this model report tool / function-calling support?
     public static function modelSupportsTools(string $model, string $host = ''): bool {
         return in_array('tools', self::modelCapabilities($model, $host), true);
+    }
+
+    // How the currently-loaded model is split across GPU/CPU, from Ollama's /api/ps.
+    // Returns [] if the model isn't loaded; otherwise size (bytes), vram (bytes in
+    // VRAM), gpuPct (0-100, how much is on the GPU vs spilled to CPU/RAM), and the
+    // loaded context length. Lets `/context` show whether you're 100% GPU or paying
+    // a CPU-offload penalty.
+    public static function psInfo(string $model = '', string $host = ''): array {
+        $host = $host ?: Config::get('ollama.host', 'http://localhost:11434');
+        $ch = curl_init($host . '/api/ps');
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 5]);
+        $resp = curl_exec($ch);
+        curl_close($ch);
+        $j = json_decode((string)$resp, true);
+        if (!is_array($j) || empty($j['models'])) return [];
+        $pick = null;
+        foreach ($j['models'] as $m) {
+            if ($model === '' || ($m['name'] ?? '') === $model || ($m['model'] ?? '') === $model) { $pick = $m; break; }
+        }
+        if ($pick === null) return [];
+        $size = (int)($pick['size'] ?? 0);
+        $vram = (int)($pick['size_vram'] ?? 0);
+        return [
+            'name'    => (string)($pick['name'] ?? $model),
+            'size'    => $size,
+            'vram'    => $vram,
+            'gpuPct'  => $size > 0 ? (int)round($vram / $size * 100) : 0,
+            'context' => (int)($pick['context_length'] ?? 0),
+        ];
     }
 
     // Request params that turn ON Ollama's dedicated reasoning channel, so a thinking
@@ -4990,6 +5019,15 @@ class Agent {
             $prompt .= "\n\nPLAN MODE: Investigate with READ-ONLY tools only — do NOT create/edit files or run mutating commands yet. When you have a concrete plan, call exit_plan_mode(plan: \"…\") and wait for the user's approval before implementing.";
         }
 
+        // Thinking models: keep step-by-step reasoning in the dedicated reasoning
+        // channel (the CLI shows it live, dimmed) so the visible reply is the answer
+        // or the tool call — not reasoning narrated into the content. Without this,
+        // the "reply in plain text for explanations" guidance below pulls reasoning
+        // INTO content, where it reads as part of the answer.
+        if (!$this->chatMode && $this->modelSupportsThinking()) {
+            $prompt .= "\n\nREASONING: You are a thinking model. Do all your step-by-step reasoning in your private reasoning/thinking channel (it is streamed to the user separately). Your visible reply must contain ONLY the final answer or a tool call — never narrate your reasoning into the reply.";
+        }
+
         $projectMemory = '';
         $memoryFiles = ['OLLAMADEV.md', '.ollamadev.md', '.ollamadev'];
         foreach ($memoryFiles as $mf) {
@@ -5131,6 +5169,12 @@ User: run the tests
         $caps = $this->client::modelCapabilities($this->model, $this->host());
         if (empty($caps)) return null;                 // couldn't determine
         return in_array('tools', $caps, true);
+    }
+
+    // Does the engine report this model has a dedicated reasoning channel?
+    public function modelSupportsThinking(): bool {
+        if (!method_exists($this->client, 'modelCapabilities')) return false;
+        return in_array('thinking', $this->client::modelCapabilities($this->model, $this->host()), true);
     }
 
     // Summarize a transcript with the model itself (one-shot, no tools). Used by
@@ -9287,7 +9331,7 @@ class Session {
             'git' => $this->runGit($args),
             'status' => $this->renderStatusLine(),
             'tools' => $this->listTools(),
-            'context' => "📁 " . getcwd() . "\nContext: " . Usage::contextMeter($this->countTokens()) . "\nMessages: " . count($this->messages) . " | Model: {$this->model}\n",
+            'context' => $this->renderContext(),
             'pwd' => getcwd() . "\n",
             'cd' => $this->changeDir($args),
             'ls' => crossPlatformLs($args ?: '.') . "\n",
@@ -9898,6 +9942,31 @@ return "Available: " . implode(', ', array_keys($gitAliases)) . "\n";
     }
 
     private function countTokens(): int { $total = 0; foreach ($this->messages as $msg) $total += strlen($msg['content'] ?? '') / 4; return (int)$total; }
+
+    // /context — working dir, the live token/window meter, and how the model is
+    // loaded on the hardware (GPU vs CPU spill + VRAM), so you can see at a glance
+    // whether you're running fully on the GPU.
+    private function renderContext(): string {
+        $c = "\033[36m"; $d = "\033[2m"; $r = "\033[0m";
+        $out = "📁 " . getcwd() . "\n";
+        $out .= "Context: " . Usage::contextMeter($this->countTokens()) . "\n";
+        $out .= "Messages: " . count($this->messages) . " | Model: {$this->model}\n";
+        // Hardware load from Ollama's /api/ps (GPU/CPU split + VRAM).
+        $ps = class_exists('OllamaClient') ? OllamaClient::psInfo($this->model, $this->agent->host()) : [];
+        if (!empty($ps)) {
+            $gpu = (int)($ps['gpuPct'] ?? 0);
+            $vram = $this->formatBytes((int)($ps['vram'] ?? 0));
+            if ($gpu >= 100)      $load = "{$c}100% GPU{$r} {$d}· {$vram} VRAM{$r}";
+            elseif ($gpu <= 0)    $load = "\033[33m100% CPU{$r} {$d}· no GPU offload (slow){$r}";
+            else                  $load = "\033[33m{$gpu}% GPU / " . (100 - $gpu) . "% CPU{$r} {$d}· {$vram} VRAM · spilling to CPU (slower){$r}";
+            $ctxLoaded = (int)($ps['context'] ?? 0);
+            $out .= "Hardware: {$load}" . ($ctxLoaded > 0 ? " {$d}· ctx {$ctxLoaded}{$r}" : "") . "\n";
+        } else {
+            $out .= "Hardware: {$d}model not loaded yet (run a prompt; check again with /context){$r}\n";
+        }
+        return $out;
+    }
+
     private function renderStatusLine(): string {
         $meter = Usage::contextMeter($this->countTokens());
         $turn = Usage::haveReal()

@@ -39,6 +39,15 @@ class Agent {
             $prompt .= "\n\nPLAN MODE: Investigate with READ-ONLY tools only — do NOT create/edit files or run mutating commands yet. When you have a concrete plan, call exit_plan_mode(plan: \"…\") and wait for the user's approval before implementing.";
         }
 
+        // Thinking models: keep step-by-step reasoning in the dedicated reasoning
+        // channel (the CLI shows it live, dimmed) so the visible reply is the answer
+        // or the tool call — not reasoning narrated into the content. Without this,
+        // the "reply in plain text for explanations" guidance below pulls reasoning
+        // INTO content, where it reads as part of the answer.
+        if (!$this->chatMode && $this->modelSupportsThinking()) {
+            $prompt .= "\n\nREASONING: You are a thinking model. Do all your step-by-step reasoning in your private reasoning/thinking channel (it is streamed to the user separately). Your visible reply must contain ONLY the final answer or a tool call — never narrate your reasoning into the reply.";
+        }
+
         $projectMemory = '';
         $memoryFiles = ['OLLAMADEV.md', '.ollamadev.md', '.ollamadev'];
         foreach ($memoryFiles as $mf) {
@@ -180,6 +189,12 @@ User: run the tests
         $caps = $this->client::modelCapabilities($this->model, $this->host());
         if (empty($caps)) return null;                 // couldn't determine
         return in_array('tools', $caps, true);
+    }
+
+    // Does the engine report this model has a dedicated reasoning channel?
+    public function modelSupportsThinking(): bool {
+        if (!method_exists($this->client, 'modelCapabilities')) return false;
+        return in_array('thinking', $this->client::modelCapabilities($this->model, $this->host()), true);
     }
 
     // Summarize a transcript with the model itself (one-shot, no tools). Used by

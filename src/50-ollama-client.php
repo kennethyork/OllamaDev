@@ -180,6 +180,35 @@ class OllamaClient {
         return in_array('tools', self::modelCapabilities($model, $host), true);
     }
 
+    // How the currently-loaded model is split across GPU/CPU, from Ollama's /api/ps.
+    // Returns [] if the model isn't loaded; otherwise size (bytes), vram (bytes in
+    // VRAM), gpuPct (0-100, how much is on the GPU vs spilled to CPU/RAM), and the
+    // loaded context length. Lets `/context` show whether you're 100% GPU or paying
+    // a CPU-offload penalty.
+    public static function psInfo(string $model = '', string $host = ''): array {
+        $host = $host ?: Config::get('ollama.host', 'http://localhost:11434');
+        $ch = curl_init($host . '/api/ps');
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 5]);
+        $resp = curl_exec($ch);
+        curl_close($ch);
+        $j = json_decode((string)$resp, true);
+        if (!is_array($j) || empty($j['models'])) return [];
+        $pick = null;
+        foreach ($j['models'] as $m) {
+            if ($model === '' || ($m['name'] ?? '') === $model || ($m['model'] ?? '') === $model) { $pick = $m; break; }
+        }
+        if ($pick === null) return [];
+        $size = (int)($pick['size'] ?? 0);
+        $vram = (int)($pick['size_vram'] ?? 0);
+        return [
+            'name'    => (string)($pick['name'] ?? $model),
+            'size'    => $size,
+            'vram'    => $vram,
+            'gpuPct'  => $size > 0 ? (int)round($vram / $size * 100) : 0,
+            'context' => (int)($pick['context_length'] ?? 0),
+        ];
+    }
+
     // Request params that turn ON Ollama's dedicated reasoning channel, so a thinking
     // model routes its chain-of-thought to the `thinking` field (shown dimmed) and
     // keeps `content` as the clean final answer — instead of narrating reasoning

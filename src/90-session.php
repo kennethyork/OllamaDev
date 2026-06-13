@@ -199,7 +199,7 @@ class Session {
             'git' => $this->runGit($args),
             'status' => $this->renderStatusLine(),
             'tools' => $this->listTools(),
-            'context' => "📁 " . getcwd() . "\nContext: " . Usage::contextMeter($this->countTokens()) . "\nMessages: " . count($this->messages) . " | Model: {$this->model}\n",
+            'context' => $this->renderContext(),
             'pwd' => getcwd() . "\n",
             'cd' => $this->changeDir($args),
             'ls' => crossPlatformLs($args ?: '.') . "\n",
@@ -810,6 +810,31 @@ return "Available: " . implode(', ', array_keys($gitAliases)) . "\n";
     }
 
     private function countTokens(): int { $total = 0; foreach ($this->messages as $msg) $total += strlen($msg['content'] ?? '') / 4; return (int)$total; }
+
+    // /context — working dir, the live token/window meter, and how the model is
+    // loaded on the hardware (GPU vs CPU spill + VRAM), so you can see at a glance
+    // whether you're running fully on the GPU.
+    private function renderContext(): string {
+        $c = "\033[36m"; $d = "\033[2m"; $r = "\033[0m";
+        $out = "📁 " . getcwd() . "\n";
+        $out .= "Context: " . Usage::contextMeter($this->countTokens()) . "\n";
+        $out .= "Messages: " . count($this->messages) . " | Model: {$this->model}\n";
+        // Hardware load from Ollama's /api/ps (GPU/CPU split + VRAM).
+        $ps = class_exists('OllamaClient') ? OllamaClient::psInfo($this->model, $this->agent->host()) : [];
+        if (!empty($ps)) {
+            $gpu = (int)($ps['gpuPct'] ?? 0);
+            $vram = $this->formatBytes((int)($ps['vram'] ?? 0));
+            if ($gpu >= 100)      $load = "{$c}100% GPU{$r} {$d}· {$vram} VRAM{$r}";
+            elseif ($gpu <= 0)    $load = "\033[33m100% CPU{$r} {$d}· no GPU offload (slow){$r}";
+            else                  $load = "\033[33m{$gpu}% GPU / " . (100 - $gpu) . "% CPU{$r} {$d}· {$vram} VRAM · spilling to CPU (slower){$r}";
+            $ctxLoaded = (int)($ps['context'] ?? 0);
+            $out .= "Hardware: {$load}" . ($ctxLoaded > 0 ? " {$d}· ctx {$ctxLoaded}{$r}" : "") . "\n";
+        } else {
+            $out .= "Hardware: {$d}model not loaded yet (run a prompt; check again with /context){$r}\n";
+        }
+        return $out;
+    }
+
     private function renderStatusLine(): string {
         $meter = Usage::contextMeter($this->countTokens());
         $turn = Usage::haveReal()
