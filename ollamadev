@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '0.8.98');
+define('OLLAMADEV_VERSION', '0.8.99');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -407,12 +407,10 @@ class McpServer {
         // SECURITY: an MCP client is a remote caller. Default to READ-ONLY so a
         // connected client can't run bash/write/rm on the user's machine; mutations
         // require an explicit opt-in (`mcp serve --allow-writes` or mcp.allowWrites).
-        // Non-interactive either way (calls can't block on an approval prompt); the
-        // air-gap (offline) flag still hard-blocks network tools.
+        // Non-interactive either way (calls can't block on an approval prompt).
         $allowWrites = $allowWrites || (Config::get('mcp.allowWrites', false) === true);
         Permission::setMode($allowWrites ? 'auto' : 'readonly');
         Permission::setInteractive(false);
-        if (Config::get('network.offline', false)) Permission::setOffline(true);
         $in = fopen('php://stdin', 'r');
         if (!$in) return 1;
         while (($line = fgets($in)) !== false) {
@@ -484,11 +482,12 @@ class Permission {
     private static string $planReturn = 'ask'; // mode restored when plan mode is approved
     private static array $toolAllow = []; // when non-empty, ONLY these tools may run (hard gate)
     private static bool $interactive = false;
-    private static bool $offline = false; // air-gapped: hard-block all network tools
+    private static bool $webEnabled = true; // when false, the agent's network tools are blocked
 
-    // Tools that reach the network. Blocked outright in offline mode, regardless
-    // of permission mode — the air-gap guarantee cannot be waived by 'auto' or by
-    // a prior allow(). (git_fetch is read-only but still hits the network.)
+    // Tools that reach the network — gated by the Web-access toggle. When web
+    // access is OFF these are blocked regardless of permission mode or a prior
+    // allow(), so the agent can't search/fetch/use remote git. (git_fetch is
+    // read-only but still hits the network.)
     private static array $network = [
         'fetch', 'search', 'web_search', 'web_fetch',
         'git_fetch', 'git_push', 'git_pull', 'git_clone',
@@ -523,10 +522,10 @@ class Permission {
     public static function exitPlan(): string { self::$mode = self::$planReturn; return self::$mode; }
     public static function setInteractive(bool $v): void { self::$interactive = $v; }
     public static function isInteractive(): bool { return self::$interactive; }
-    public static function setOffline(bool $v): void { self::$offline = $v; }
-    public static function isOffline(): bool { return self::$offline; }
+    // Web access: ON (default) lets the agent use network tools; OFF blocks them.
+    public static function setWebAccess(bool $on): void { self::$webEnabled = $on; }
+    public static function webEnabled(): bool { return self::$webEnabled; }
     public static function isNetwork(string $tool): bool { return in_array($tool, self::$network, true); }
-    public static function listNetwork(): array { return self::$network; }
 
     // Legacy compatibility shims.
     public static function autoAllow(): void { self::$mode = 'auto'; }
@@ -542,7 +541,7 @@ class Permission {
     // The gate enforced by Tools::run. Returns true if the tool may run.
     public static function check(string $tool, array $params = []): bool {
         if (isset(self::$denied[$tool])) return false;
-        if (self::$offline && self::isNetwork($tool)) return false; // air-gap: nothing leaves the machine
+        if (!self::$webEnabled && self::isNetwork($tool)) return false; // web access off → no network tools
         // Hard allowlist (custom agent's tools:): a MUTATING tool off the list is
         // blocked. Always-safe read-only tools (view/grep/ls…) and control tools
         // (exit_plan_mode) stay available — confinement limits what the agent can
@@ -581,90 +580,6 @@ class Permission {
     }
 }
 
-// ATTESTATION — prove an OllamaDev run can't send your code off the machine.
-// For air-gapped / regulated use: a single command that audits the local
-// configuration (model host, offline mode, network-capable tools) and emits a
-// signed-by-hash report. The point isn't cryptographic trust; it's a clear,
-// reproducible statement of what is and isn't reachable.
-class Attest {
-    // Is a model host loopback-only (so inference never leaves the box)?
-    public static function isLoopbackHost(string $host): bool {
-        $host = trim($host);
-        if ($host === '') return false;
-        // Pull the hostname out of a URL (or accept a bare host[:port]).
-        $h = parse_url($host, PHP_URL_HOST);
-        if ($h === null || $h === false) {
-            $h = preg_replace('#^[a-z]+://#i', '', $host);
-            $h = explode('/', $h)[0];
-            $h = preg_replace('/:\d+$/', '', $h);
-        }
-        $h = trim((string)$h, '[]'); // strip IPv6 brackets
-        if (strcasecmp($h, 'localhost') === 0) return true;
-        if ($h === '::1') return true;
-        if (filter_var($h, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) return strpos($h, '127.') === 0;
-        return false;
-    }
-
-    // Build the attestation as structured data.
-    public static function gather(): array {
-        $provider = 'ollama';   // OllamaDev talks to Ollama only
-        $host = ModelClient::default()->host();
-        $loopback = self::isLoopbackHost($host);
-        $offline = Permission::isOffline();
-        $net = Permission::listNetwork();
-        // In offline mode every network tool is blocked; otherwise they're live.
-        $tools = [];
-        foreach ($net as $t) $tools[$t] = $offline ? 'blocked' : 'allowed';
-
-        $checks = [
-            'offline_mode'    => $offline,
-            'model_host_loopback' => $loopback,
-            'network_tools_blocked' => $offline,
-        ];
-        // "Fully air-gapped" = offline mode on AND the model host is loopback.
-        $airgapped = $offline && $loopback;
-
-        $report = [
-            'version'   => defined('OLLAMADEV_VERSION') ? OLLAMADEV_VERSION : '',
-            'provider'  => $provider,
-            'model_host' => $host,
-            'model_host_loopback' => $loopback,
-            'offline_mode' => $offline,
-            'network_tools' => $tools,
-            'air_gapped' => $airgapped,
-            'checks' => $checks,
-        ];
-        // Hash the canonical body so the same config yields the same fingerprint.
-        $body = json_encode($report, JSON_UNESCAPED_SLASHES);
-        $report['fingerprint'] = hash('sha256', (string)$body);
-        return $report;
-    }
-
-    // Human-readable report (or JSON when $json).
-    public static function render(bool $json = false): string {
-        $r = self::gather();
-        if ($json) return json_encode($r, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
-
-        $c = "\033[36m"; $d = "\033[2m"; $g = "\033[32m"; $y = "\033[33m"; $b = "\033[1m"; $rs = "\033[0m";
-        $tick = fn(bool $ok) => $ok ? "{$g}✓{$rs}" : "{$y}✗{$rs}";
-        $out  = "\n{$b}OllamaDev — air-gap attestation{$rs}  {$d}v{$r['version']}{$rs}\n";
-        $out .= str_repeat('─', 48) . "\n";
-        $out .= "  Provider          {$c}{$r['provider']}{$rs}\n";
-        $out .= "  Model host        {$c}{$r['model_host']}{$rs}\n";
-        $out .= "  " . $tick($r['model_host_loopback']) . " model host is loopback (inference stays local)\n";
-        $out .= "  " . $tick($r['offline_mode']) . " offline mode " . ($r['offline_mode'] ? 'ON' : "OFF {$d}(network tools are LIVE){$rs}") . "\n";
-        $out .= "\n  Network-capable tools:\n";
-        foreach ($r['network_tools'] as $t => $state) {
-            $mark = $state === 'blocked' ? "{$g}blocked{$rs}" : "{$y}allowed{$rs}";
-            $out .= "    {$d}-{$rs} " . str_pad($t, 12) . " $mark\n";
-        }
-        $out .= "\n  " . ($r['air_gapped']
-            ? "{$g}{$b}● FULLY AIR-GAPPED{$rs} {$d}— offline mode on and the model host is loopback.{$rs}"
-            : "{$y}{$b}● NOT fully air-gapped.{$rs} {$d}Run with --offline and point the model at localhost to lock it down.{$rs}");
-        $out .= "\n  {$d}fingerprint {$r['fingerprint']}{$rs}\n";
-        return $out . "\n";
-    }
-}
 class LSPClient {
     private string $command;
     private array $args;
@@ -1579,6 +1494,41 @@ class Models {
         ];
     }
 
+    // Curated CLOUD catalog: Ollama-hosted models that run on Ollama's servers
+    // (ollama.com) but are reached through your LOCAL Ollama daemon — same API,
+    // same `-m <tag>` everywhere (CLI / desktop / web). Kept SEPARATE from the
+    // local presets/chain so they're strictly opt-in: pull one, sign in
+    // (`ollama signin`), then select it. Prompts to a cloud model leave the
+    // machine — that's the trade for frontier-scale models on small hardware.
+    public static function cloudPresets(): array {
+        return [
+            'qwen3-coder-cloud' => ['tag' => 'qwen3-coder:480b-cloud',  'tools' => true, 'role' => 'agentic coding', 'note' => 'Frontier coding agent (480B) — top cloud pick for the crew.'],
+            'gpt-oss-cloud'     => ['tag' => 'gpt-oss:120b-cloud',      'tools' => true, 'role' => 'general + tools', 'note' => 'Strong open generalist with reliable tool-calling.'],
+            'gpt-oss-mini-cloud'=> ['tag' => 'gpt-oss:20b-cloud',       'tools' => true, 'role' => 'general + tools', 'note' => 'Smaller, faster gpt-oss — cheaper cloud turns.'],
+            'deepseek-cloud'    => ['tag' => 'deepseek-v3.1:671b-cloud', 'tools' => true, 'role' => 'reasoning + coding', 'note' => 'Big reasoning/coding model (671B).'],
+            'qwen3-max-cloud'   => ['tag' => 'qwen3-max:cloud',          'tools' => true, 'role' => 'general + tools', 'note' => 'Qwen3 flagship, cloud-hosted.'],
+            'glm-cloud'         => ['tag' => 'glm-4.6:cloud',            'tools' => true, 'role' => 'coding',          'note' => 'GLM-4.6 — capable coder.'],
+            'kimi-cloud'        => ['tag' => 'kimi-k2:1t-cloud',         'tools' => true, 'role' => 'general',         'note' => 'Kimi K2 (1T) — very large general model.'],
+            'minimax-cloud'     => ['tag' => 'minimax-m2:cloud',         'tools' => true, 'role' => 'general',         'note' => 'MiniMax M2 — general assistant.'],
+        ];
+    }
+
+    // Is this an Ollama cloud model? Cloud tags end in `-cloud` (e.g.
+    // qwen3-coder:480b-cloud) or `:cloud` (e.g. glm-4.6:cloud).
+    public static function isCloud(string $tag): bool {
+        $t = strtolower(trim($tag));
+        return $t !== '' && (str_ends_with($t, '-cloud') || str_ends_with($t, ':cloud'));
+    }
+
+    // Is this /api/tags entry a cloud model? Ollama flags them with a remote host
+    // (the daemon proxies to ollama.com) — the authoritative signal for an
+    // INSTALLED model, with the name suffix as a fallback.
+    public static function isCloudEntry(array $entry): bool {
+        if (trim((string)($entry['remote_host'] ?? '')) !== '') return true;
+        if (trim((string)($entry['remote_model'] ?? '')) !== '') return true;
+        return self::isCloud((string)($entry['name'] ?? ''));
+    }
+
     // Preferred order for the agentic tool path, most→least preferred. Used both
     // to pick a sane default when none is configured and to choose a fallback
     // when the active model can't do native tools.
@@ -1725,7 +1675,9 @@ class Models {
         $n = trim($nameOrAlias);
         $p = self::presets();
         if (isset($p[$n])) return $p[$n]['tag'];
-        return $n; // already a tag (e.g. "qwen2.5-coder:32b") or unknown — pass through
+        $cloud = self::cloudPresets();
+        if (isset($cloud[$n])) return $cloud[$n]['tag'];
+        return $n; // already a tag (e.g. "qwen2.5-coder:32b" / "glm-4.6:cloud") or unknown — pass through
     }
 }
 // MODEL CLIENT — factory for the Ollama backend. OllamaDev talks to Ollama only
@@ -2095,10 +2047,9 @@ class SttClient {
     // --- Auto-provision (the "bake-in") --------------------------------------
     // Download a self-contained whisper.cpp engine (this platform's release
     // asset) + the ggml model for $size into ~/.ollamadev/stt, so /voice works
-    // with no manual install. One-time; needs network once, then fully offline.
-    // Air-gap blocks it. $onProgress($label, $done, $total) is optional.
+    // with no manual install. One-time; needs network once, then fully local.
+    // $onProgress($label, $done, $total) is optional.
     public static function provision(?callable $onProgress = null, string $size = ''): bool {
-        if (class_exists('Permission') && Permission::isOffline()) return false;
         $dir = self::sttDir();
         if (!is_dir($dir)) @mkdir($dir, 0755, true);
         if (!is_dir($dir)) return false;
@@ -2502,8 +2453,8 @@ class Verify {
 }
 // GITFLOW — close the loop from "wrote code" to "shipped it": AI commit
 // messages, opening a PR, and reviewing a PR with the local model. Local git is
-// never gated; the PR commands reach GitHub (via `gh`) and are blocked in
-// air-gap mode. Vanilla PHP — shells out to git/gh.
+// never gated; the PR commands reach GitHub (via `gh`). Vanilla PHP — shells
+// out to git/gh.
 class GitFlow {
     public static function sh(string $cmd): string { return trim((string)@shell_exec($cmd)); }
     public static function isRepo(): bool { return self::sh('git rev-parse --is-inside-work-tree 2>/dev/null') === 'true'; }
@@ -2945,7 +2896,7 @@ class Tools {
             'symbols'   => [['file_path'], [], 'List the symbols (functions/classes) in a file.'],
             'find_refs' => [['file_path', 'pattern'], [], 'Find references to a symbol.'],
             'format'    => [['file_path'], [], 'Format a file with the project formatter.'],
-            // Git (local; network ops blocked when air-gapped)
+            // Git (local + remote ops via gh/git)
             'git_status'   => [[], ['path'], 'Show working-tree status.'],
             'git_diff'     => [[], ['path', 'file', 'cached'], 'Show a diff (cached=true for staged).'],
             'git_log'      => [[], ['path', 'n'], 'Recent commits (n default 10).'],
@@ -3719,14 +3670,12 @@ Tools::register('ask_user', function($p) {
 Tools::register('search', function($p) {
     $q = $p['query'] ?? $p['q'] ?? '';
     if (empty($q)) return "missing query";
-    // Search-only kill switch (distinct from full air-gap): disables web search
-    // while leaving fetch and remote git available. Air-gap still overrides everything.
+    // Search kill switch: disable web search while leaving fetch + remote git available.
     if (!Config::get('search.enabled', true)) return "Web search is disabled (search.enabled is false). Enable it with: ollamadev config set search.enabled true";
     $limit = max(1, min(10, (int)($p['limit'] ?? 5)));
     // Pluggable backend: DuckDuckGo (default, no key), a self-hosted SearXNG
     // instance (most local-first), or the Brave Search API (opt-in, needs a key).
-    // None is an AI provider — only the query leaves the machine, and air-gap
-    // mode blocks the whole tool regardless.
+    // None is an AI provider — only the query leaves the machine.
     $provider = strtolower(trim((string)($p['provider'] ?? Config::get('search.provider', 'duckduckgo'))));
     $results = []; $err = '';
 
@@ -8072,7 +8021,7 @@ class Skills {
 
     // ---- Registry / discovery ------------------------------------------------
     // A registry is just a place to DISCOVER shareable skills before installing.
-    // Sources (local-first, air-gap friendly): the local registry dir plus any
+    // Sources (local-first): the local registry dir plus any
     // dirs/URLs in config `skills.registries`. Git/archive URLs are install-only
     // (browse can't list them without fetching); local dirs are browsable.
     public static function registryDir(): string { return (getenv('HOME') ?: sys_get_temp_dir()) . '/.ollamadev/registry'; }
@@ -9661,10 +9610,6 @@ ART;
         if (!SttClient::available()) {
             // The "bake-in": offer a one-time auto-download of a self-contained
             // whisper.cpp engine + model, so the user never installs anything.
-            if (class_exists('Permission') && Permission::isOffline()) {
-                return "  \xF0\x9F\x8E\x99 Voice needs a local speech-to-text engine, and \033[33mair-gap mode\033[0m blocks the one-time download.\n"
-                     . "    Bring your own offline: \033[36mpip install -U openai-whisper\033[0m, or drop a whisper.cpp binary + ggml model in \033[36m~/.ollamadev/stt\033[0m.\n";
-            }
             $size = SttClient::model();
             $approx = ['tiny' => '~80 MB', 'base' => '~150 MB', 'small' => '~480 MB', 'medium' => '~1.5 GB', 'large-v3' => '~3 GB', 'turbo' => '~1.6 GB'][$size] ?? '~150 MB';
             echo "  \xF0\x9F\x8E\x99 No speech-to-text engine yet. OllamaDev can download a self-contained one now\n"
@@ -11002,7 +10947,7 @@ for ($i = 1; $i < $argc; $i++) {
         else $flags['parallel'] = true;
     }
     elseif ($a === '--no-parallel') { $flags['parallel'] = false; }
-    elseif ($a === '--offline' || $a === '--air-gapped') { $flags['offline'] = true; }
+    elseif ($a === '--no-web') { $flags['noweb'] = true; }
     elseif ($a === '--interval') { $flags['interval'] = (int)($argv[++$i] ?? 2); }
     elseif ($a === '--once') { $flags['once'] = true; }
     elseif ($a === '--new') { $flags['new'] = true; }
@@ -11030,7 +10975,7 @@ for ($i = 1; $i < $argc; $i++) {
 }
 
 // Normalize argv so a global flag placed BEFORE the subcommand (e.g.
-// `ollamadev --offline search "x"` or `-m qwen eval`) doesn't hide the command
+// `ollamadev --auto search "x"` or `-m qwen eval`) doesn't hide the command
 // from the raw-$argv[1] dispatch below. Re-root argv at the first positional;
 // the command's own trailing args/flags are preserved, and global flags were
 // already captured into $flags above regardless of where they appeared.
@@ -11047,10 +10992,10 @@ if (empty($flags['model']) && getenv('MODEL')) $flags['model'] = getenv('MODEL')
 // box, or one on another port). Stays 100% local unless you point it elsewhere.
 if (!empty($flags['host'])) ModelClient::$override = $flags['host'];
 
-// Air-gapped mode (--offline / --air-gapped, OLLAMADEV_OFFLINE=1, or config
-// offline:true): hard-block every network tool for the rest of this process.
-$offlineMode = !empty($flags['offline']) || getenv('OLLAMADEV_OFFLINE') || Config::get('offline', false);
-if ($offlineMode) Permission::setOffline(true);
+// Web access: ON by default. `--no-web` (or config web.enabled:false) blocks the
+// agent's network tools (search / fetch / remote git) for this run — local work
+// is untouched. The desktop's 🌐 Web toggle flips the same web.enabled config.
+if (!empty($flags['noweb']) || Config::get('web.enabled', true) === false) Permission::setWebAccess(false);
 
 // --num-ctx N: pin the context window to exactly N for this run (overrides auto).
 if (!empty($flags['numCtx']) && $flags['numCtx'] > 0) {
@@ -11059,11 +11004,6 @@ if (!empty($flags['numCtx']) && $flags['numCtx'] > 0) {
     Config::set('ollama.autoContext', false);
 }
 
-// Attestation Command — audit + prove the air-gap posture.
-if ($argc >= 2 && $argv[1] === 'attest') {
-    echo Attest::render(in_array('--json', $argv, true));
-    exit(0);
-}
 
 // Context Tuner — probe hardware + model, recommend a safe num_ctx.
 if ($argc >= 2 && $argv[1] === 'context') {
@@ -11349,7 +11289,6 @@ if ($argc >= 2 && $argv[1] === 'voice') {
     if ($sub === 'clear-history') { SttClient::clearHistory(); echo "cleared\n"; exit(0); }
     // Auto-provision the self-contained engine + model (no manual install).
     if ($sub === 'install' || $sub === 'download') {
-        if (Permission::isOffline()) { echo "✗ air-gap mode blocks the download. Bring your own engine into ~/.ollamadev/stt.\n"; exit(1); }
         $size = $argv[3] ?? SttClient::model();
         $quiet = in_array('--quiet', $argv, true) || in_array('--json', $argv, true);
         if (SttClient::hasBundledEngine() && SttClient::ggmlModelFile($size) !== '' && !in_array('--force', $argv, true)) {
@@ -11389,8 +11328,7 @@ if ($argc >= 2 && $argv[1] === 'voice') {
     exit(0);
 }
 
-// Web search — run the search tool directly from the CLI. Honors air-gap mode
-// (--offline / OLLAMADEV_OFFLINE / config offline) like the agent tool does.
+// Web search — run the search tool directly from the CLI.
 if ($argc >= 2 && $argv[1] === 'search') {
     $args = array_slice($argv, 2);
     $query = ''; $limit = 5; $provider = '';
@@ -11401,7 +11339,6 @@ if ($argc >= 2 && $argv[1] === 'search') {
         elseif (!str_starts_with($a, '-')) { $query .= ($query === '' ? '' : ' ') . $a; }
     }
     if (trim($query) === '') { echo "Usage: ollamadev search \"<query>\" [--limit N] [--provider duckduckgo|searxng|brave]\n"; exit(1); }
-    if (Permission::isOffline()) { echo "\033[33m✈️  Offline/air-gapped mode — web search is disabled.\033[0m\n"; exit(1); }
     if (!Config::get('search.enabled', true)) { echo "\033[33m🔍 Web search is turned off (search.enabled:false).\033[0m Enable it: ollamadev config set search.enabled true\n"; exit(1); }
     $sp = ['query' => $query, 'limit' => $limit];
     if ($provider !== '') $sp['provider'] = $provider;
@@ -11464,7 +11401,6 @@ if ($argc >= 2 && $argv[1] === 'commit') {
 // PR workflow — open a PR from this branch, or review a PR. Reaches GitHub via gh.
 if ($argc >= 2 && $argv[1] === 'pr') {
     $sub = $argv[2] ?? '';
-    if (Permission::isOffline()) { echo "\033[33m✈️  Offline mode — PR commands reach GitHub and are blocked.\033[0m\n"; exit(1); }
     if (GitFlow::gh() === '') { echo "Needs the GitHub CLI (gh): https://cli.github.com/  (then `gh auth login`).\n"; exit(1); }
     if (!GitFlow::isRepo()) { echo "Not a git repository.\n"; exit(1); }
     if ($sub === 'create') {
@@ -11869,27 +11805,61 @@ if ($argc >= 2 && $argv[1] === 'models') {
         $installed = $client->listModels();
         if (in_array('--json', $argv, true)) {
             $out = [];
-            foreach (Models::presets() as $alias => $p) $out[] = $p + ['alias' => $alias, 'installed' => Models::match($p['tag'], $installed) !== ''];
+            foreach (Models::presets() as $alias => $p) $out[] = $p + ['alias' => $alias, 'cloud' => false, 'installed' => Models::match($p['tag'], $installed) !== ''];
+            foreach (Models::cloudPresets() as $alias => $p) $out[] = $p + ['alias' => $alias, 'cloud' => true, 'installed' => Models::match($p['tag'], $installed) !== ''];
             echo json_encode($out) . "\n"; exit(0);
         }
         echo "Recommended models (pull with: \033[36mollamadev models pull <alias>\033[0m)\n\n";
+        echo "  \033[1mLocal\033[0m \033[2m— run on your machine\033[0m\n";
         foreach (Models::presets() as $alias => $p) {
             $have = Models::match($p['tag'], $installed) !== '' ? "\033[32m✓ installed\033[0m" : "\033[2mnot installed\033[0m";
             $tools = $p['tools'] ? "\033[32mtools\033[0m" : "\033[2mno-tools\033[0m";
             echo sprintf("  \033[1m%-18s\033[0m %-22s %-7s %-5s %s\n      \033[2m%s\033[0m\n",
                 $alias, $p['tag'], $p['size'], $tools, $have, $p['note']);
         }
+        echo "\n  \033[1m☁ Cloud\033[0m \033[2m— run on Ollama's servers (needs `ollama signin`); prompts leave this machine\033[0m\n";
+        foreach (Models::cloudPresets() as $alias => $p) {
+            $have = Models::match($p['tag'], $installed) !== '' ? "\033[32m✓ installed\033[0m" : "\033[2mnot installed\033[0m";
+            $tools = $p['tools'] ? "\033[32mtools\033[0m" : "\033[2mno-tools\033[0m";
+            echo sprintf("  \033[1m%-18s\033[0m %-24s %-7s %s\n      \033[2m%s\033[0m\n",
+                $alias, $p['tag'], $tools, $have, $p['note']);
+        }
+        echo "\n\033[2mMore on cloud models: ollamadev models cloud\033[0m\n";
+        exit(0);
+    }
+
+    // Cloud models: the curated list + how to enable them.
+    if ($sub === 'cloud') {
+        $installed = $client->listModels();
+        if (in_array('--json', $argv, true)) {
+            $out = [];
+            foreach (Models::cloudPresets() as $alias => $p) $out[] = $p + ['alias' => $alias, 'cloud' => true, 'installed' => Models::match($p['tag'], $installed) !== ''];
+            echo json_encode($out) . "\n"; exit(0);
+        }
+        echo "\033[1m☁ Ollama cloud models\033[0m\n";
+        echo "\033[2mRun on Ollama's servers, reached through your local Ollama daemon — still Ollama-only,\nbut prompts leave this machine. Frontier-scale models without the local VRAM.\033[0m\n\n";
+        echo "  1. Sign in once:  \033[36mollama signin\033[0m   \033[2m(creates a free ollama.com key)\033[0m\n";
+        echo "  2. Pull one:      \033[36mollamadev models pull <alias|tag>\033[0m\n";
+        echo "  3. Use it:        \033[36mollamadev -m <tag>\033[0m   \033[2m(or /model in chat — works in CLI, desktop & web)\033[0m\n\n";
+        foreach (Models::cloudPresets() as $alias => $p) {
+            $have = Models::match($p['tag'], $installed) !== '' ? "\033[32m✓ installed\033[0m" : "\033[2mnot installed\033[0m";
+            echo sprintf("  \033[1m%-18s\033[0m %-24s %-5s %s\n      \033[2m%s\033[0m\n", $alias, $p['tag'], $have, $p['role'], $p['note']);
+        }
+        echo "\n\033[2mAny `<name>-cloud` / `:cloud` tag works too, not just these.\033[0m\n";
         exit(0);
     }
 
     // Pull a curated preset by alias (or any tag) via Ollama.
     if ($sub === 'pull') {
-        if (Permission::isOffline()) { echo "✗ offline mode is on — pulling a model reaches the network and is blocked.\n"; exit(1); }
         $name = $argv[3] ?? '';
         if ($name === '') { echo "Usage: ollamadev models pull <alias|tag>   (see: ollamadev models presets)\n"; exit(1); }
         $tag = Models::resolveTag($name);
+        $cloud = Models::isCloud($tag);
+        if ($cloud) echo "\033[2m☁ cloud model — runs on Ollama's servers; needs `ollama signin`. Prompts leave this machine.\033[0m\n";
         echo "Pulling \033[36m$tag\033[0m" . ($tag !== $name ? " (alias \"$name\")" : '') . "…\n";
-        exit(Puller::pull($tag, $config['ollama']['host'] ?? 'http://localhost:11434') ? 0 : 1);
+        $ok = Puller::pull($tag, $config['ollama']['host'] ?? 'http://localhost:11434');
+        if (!$ok && $cloud) echo "\033[33m  ↳ Cloud pulls need authentication — run \033[36mollama signin\033[33m first, then retry.\033[0m\n";
+        exit($ok ? 0 : 1);
     }
 
     // Show the fallback chain and which entries are installed.
@@ -11923,10 +11893,15 @@ if ($argc >= 2 && $argv[1] === 'models') {
         ]);
         exit(0);
     }
-    $models = $client->listModels();
+    $models = $client->listModelsDetailed();
     echo "Available Models:\n";
-    foreach ($models as $m) echo "  $m\n";
-    echo "\n\033[2mBrowse recommended models: ollamadev models presets · fallback chain: ollamadev models chain\033[0m\n";
+    foreach ($models as $m) {
+        $name = is_array($m) ? (string)($m['name'] ?? '') : (string)$m;
+        if ($name === '') continue;
+        $badge = (is_array($m) && Models::isCloudEntry($m)) ? " \033[36m☁ cloud\033[0m" : '';
+        echo "  $name$badge\n";
+    }
+    echo "\n\033[2mBrowse recommended models: ollamadev models presets · cloud: ollamadev models cloud · chain: ollamadev models chain\033[0m\n";
     exit(0);
 }
 
@@ -12249,13 +12224,13 @@ Commands:
                          --pack <name> to reuse a saved team; crew pack save/list;
                          crew role list/add — roles the Director assigns per subtask)
   ollamadev watch <task> Re-run a task whenever files change (background agent)
-  ollamadev search <q>  Web search (--provider duckduckgo|searxng|brave); blocked when air-gapped
+  ollamadev search <q>  Web search (--provider duckduckgo|searxng|brave)
   ollamadev index build Build a local semantic code index (embeddings); also: status, clear
   ollamadev code-search <q>   Semantic search over the repo by meaning (local embeddings)
   ollamadev test        Run the project's tests (auto-detected)
   ollamadev verify      Run tests, then let the agent fix failures until green (--max N)
   ollamadev eval        Measure the agent's pass rate on a fixed task suite (--only, --model, --json)
-  ollamadev models      List models; also: presets (recommended), pull <alias>, chain (fallback)
+  ollamadev models      List models; also: presets (recommended), cloud (☁ Ollama cloud), pull <alias>, chain (fallback)
   ollamadev diff        Show the working-tree diff for review (--json); powers the desktop Review panel
   ollamadev commit      Commit with an AI-generated message (-a stages all, -m to override)
   ollamadev pr create|review <n>   Open a PR, or review one with the local model (needs gh)
@@ -12264,7 +12239,6 @@ Commands:
   ollamadev agents      List file-defined custom agent types (.ollamadev/agents/*.md)
   ollamadev hooks       View/add/remove shell hooks (list|add <event> <cmd>|remove <event> <i>)
   ollamadev mcp serve   Expose this CLI's tools to any MCP client over stdio
-  ollamadev attest      Audit + prove the air-gap posture (--offline to lock down)
   ollamadev git        Git commands (status, diff, commit, etc.)
   ollamadev terminal   Terminal multiplexer
   ollamadev lsp        LSP server for IDEs (AI completions, linter diagnostics)
@@ -12458,7 +12432,6 @@ if ($cmd === 'chat') {
 } elseif ($cmd === 'list') {
     foreach (Session::listAll($config) as $s) echo "{$s['id']} | {$s['title']} | {$s['model']} | {$s['updated_at']}\n";
 } elseif ($cmd === 'update') {
-    if (Permission::isOffline()) { echo "✗ offline mode is on — `update` reaches GitHub and is blocked. Drop --offline to update.\n"; exit(1); }
     $install = isset($flags['install']);
     $current = OLLAMADEV_VERSION;
     $ctx = stream_context_create(['http' => ['timeout' => 10, 'ignore_errors' => true, 'header' => "User-Agent: OllamaDev/" . OLLAMADEV_VERSION . "\r\n"]]);

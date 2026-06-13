@@ -554,7 +554,7 @@ textarea.field { min-height: 84px; resize: vertical; line-height: 1.5; }
 .cs-file .cs-loc { color: var(--dim); font-weight: 400; }
 .cs-file .cs-score { float: right; color: var(--dim); font-weight: 400; font-size: 11px; }
 .cs-snip { margin-top: 3px; font-size: 11px; line-height: 1.4; }
-/* Network toggles — off/air-gapped state */
+/* Network toggles — off state */
 #webToggle.off, #searchToggle.off { color: var(--warn); border-color: var(--warn); }
 #searchToggle:disabled { opacity: .45; cursor: not-allowed; }
 /* Crew roles manager (modal) */

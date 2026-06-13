@@ -266,10 +266,9 @@ class SttClient {
     // --- Auto-provision (the "bake-in") --------------------------------------
     // Download a self-contained whisper.cpp engine (this platform's release
     // asset) + the ggml model for $size into ~/.ollamadev/stt, so /voice works
-    // with no manual install. One-time; needs network once, then fully offline.
-    // Air-gap blocks it. $onProgress($label, $done, $total) is optional.
+    // with no manual install. One-time; needs network once, then fully local.
+    // $onProgress($label, $done, $total) is optional.
     public static function provision(?callable $onProgress = null, string $size = ''): bool {
-        if (class_exists('Permission') && Permission::isOffline()) return false;
         $dir = self::sttDir();
         if (!is_dir($dir)) @mkdir($dir, 0755, true);
         if (!is_dir($dir)) return false;

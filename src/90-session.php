@@ -562,10 +562,6 @@ ART;
         if (!SttClient::available()) {
             // The "bake-in": offer a one-time auto-download of a self-contained
             // whisper.cpp engine + model, so the user never installs anything.
-            if (class_exists('Permission') && Permission::isOffline()) {
-                return "  \xF0\x9F\x8E\x99 Voice needs a local speech-to-text engine, and \033[33mair-gap mode\033[0m blocks the one-time download.\n"
-                     . "    Bring your own offline: \033[36mpip install -U openai-whisper\033[0m, or drop a whisper.cpp binary + ggml model in \033[36m~/.ollamadev/stt\033[0m.\n";
-            }
             $size = SttClient::model();
             $approx = ['tiny' => '~80 MB', 'base' => '~150 MB', 'small' => '~480 MB', 'medium' => '~1.5 GB', 'large-v3' => '~3 GB', 'turbo' => '~1.6 GB'][$size] ?? '~150 MB';
             echo "  \xF0\x9F\x8E\x99 No speech-to-text engine yet. OllamaDev can download a self-contained one now\n"

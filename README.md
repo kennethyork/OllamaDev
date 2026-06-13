@@ -2,9 +2,9 @@
 
 **Local AI coding agent powered by Ollama — 100% private, zero dependencies.**
 
-OllamaDev is a terminal coding agent that runs entirely against your local [Ollama](https://ollama.com) instance. Nothing leaves your machine — no cloud, no API keys, no subscription. It's a single self-contained **vanilla PHP** binary (no Composer, no extensions beyond PHP core + curl), with diff-previewed edits, undo, an interruptible agent loop, real context management, and 60+ tools.
+OllamaDev is a terminal coding agent that runs against your local [Ollama](https://ollama.com) instance. By default nothing leaves your machine — no API keys, no subscription — and you can opt into Ollama's **cloud models** when you want frontier-scale horsepower (still one Ollama backend, same `-m <tag>`). It's a single self-contained **vanilla PHP** binary (no Composer, no extensions beyond PHP core + curl), with diff-previewed edits, undo, an interruptible agent loop, real context management, and 60+ tools.
 
-It also ships a **crew** — a deterministic team of agents (a **Director** that plans, **Coders** that each work in an isolated git worktree, and an **Auditor** that reviews every diff and sends flagged work back for one fix before it lands) — surfaced in an **ADE** (Agentic Development Environment) that runs as a desktop app *and* in the browser off one shared engine. Its workspace is a single **infinite, pannable/zoomable canvas** where everything — terminals, the editor, file tree, code search, the task board, the memory graph, a localhost browser preview, a voice-control window, and a **live crew topology** — is a draggable window. Unlike cloud multi-agent canvases (cnvs, BridgeSpace, Plyrium Forge), the whole team runs on **your** hardware: no per-seat pricing, no agents phoning home, **air-gappable end to end** — you trade frontier-model horsepower for total control and zero cost.
+It also ships a **crew** — a deterministic team of agents (a **Director** that plans, **Coders** that each work in an isolated git worktree, and an **Auditor** that reviews every diff and sends flagged work back for one fix before it lands) — surfaced in an **ADE** (Agentic Development Environment) that runs as a desktop app *and* in the browser off one shared engine. Its workspace is a single **infinite, pannable/zoomable canvas** where everything — terminals, the editor, file tree, code search, the task board, the memory graph, a localhost browser preview, a voice-control window, and a **live crew topology** — is a draggable window. Unlike cloud multi-agent canvases (cnvs, BridgeSpace, Plyrium Forge), the whole team runs on **your** hardware: no per-seat pricing, no agents phoning home, **local by default** — or reach for Ollama's cloud models (one Ollama backend) when a task wants frontier horsepower.
 
 ```
 > create a Fastify server in server.js with a /health route
@@ -41,7 +41,7 @@ It also ships a **crew** — a deterministic team of agents (a **Director** that
 ### Context & input
 - **`@file` mentions** — `explain @src/foo.php` inlines the file into your message.
 - **Image / vision input** — attach images with `@image.png`, `@~/shot.png`, or `/image <path>` for multimodal models. OllamaDev base64-encodes them into Ollama's `images` field, and warns (with a suggested installed model) if the active model has no vision capability.
-- **Voice input (local STT) — no install needed** — `/voice` records your mic and transcribes it locally, then submits the text as your prompt. The **Whisper engine is baked in**: the desktop builds (AppImage / Windows installer) bundle a self-contained whisper.cpp + model so it works instantly offline, and the standalone CLI auto-downloads it once on first use (into `~/.ollamadev/stt`). **CPU-only, 100% on-device** — nothing leaves the machine, works air-gapped after setup. Pick accuracy with `/voice model <tiny|base|small|medium|large-v3|turbo>`; review past transcriptions with `/voice history`. Also a mic button + model dropdown in the desktop/web app.
+- **Voice input (local STT) — no install needed** — `/voice` records your mic and transcribes it locally, then submits the text as your prompt. The **Whisper engine is baked in**: the desktop builds (AppImage / Windows installer) bundle a self-contained whisper.cpp + model so it works instantly offline, and the standalone CLI auto-downloads it once on first use (into `~/.ollamadev/stt`). **CPU-only, 100% on-device** — nothing leaves the machine, works fully offline after setup. Pick accuracy with `/voice model <tiny|base|small|medium|large-v3|turbo>`; review past transcriptions with `/voice history`. Also a mic button + model dropdown in the desktop/web app.
 - **Real token/context meter** — `/status` and `/context` show actual Ollama token counts and context fill.
 - **Auto-compaction** — older messages are summarized by the model to stay within the window. Triggers automatically on **real context fill** (≥75% of `num_ctx`, using Ollama's actual prompt-token count) *or* a message-count threshold, keeping the most recent turns verbatim and preserving tool output the recent steps still reference. Tune with `agents.compactContextPct` / `agents.compactThreshold` / `agents.compactKeep`; force it anytime with `/compact`.
 - **Markdown rendering** — headings, lists, and code blocks are styled in the terminal.
@@ -60,7 +60,8 @@ It also ships a **crew** — a deterministic team of agents (a **Director** that
 - **Crew (multi-agent)** — a Director plans and assigns each subtask a **role** (built-ins: coder, tester, docs, refactor, security — or define your own with `crew role add`), agents build in isolated git worktrees, an Auditor reviews every diff (and sends flagged work back for one fix). Each role can pin its own model and permission mode, and you can **save per-role models as defaults**. `--amplify N` trades free local compute for quality (N-sample plan self-consistency + an N-reviewer adversarial audit panel); `crew pack save <name>` / `--pack <name>` reuse and share tuned teams; **`--parallel [N]`** runs coders concurrently on one box (bounded pool).
 - **Crew cockpit (ADE)** — a **live topology window** maps the running crew: the Director + Researcher + Auditor with their models, and each coder's branch, the files it's touching, the Auditor's verdict, and its **real-time activity** (✎ editing / 👁 reading / ⚡ running). You can **launch and steer the crew by voice** ("start a crew to add tests", "tell coder 2 to focus on edge cases"), and picking a by-project-type team auto-loads that team's skill.
 - **Watch (background agent)** — `ollamadev watch "<task>"` re-runs a task (tests, auto-fix, docs) whenever files change. Continuous agents are cheap because the compute is local.
-- **Air-gapped mode** — `--offline` (or `OLLAMADEV_OFFLINE=1`) hard-blocks every network tool, unwaivable even in `auto` mode. `ollamadev attest` audits and prints a fingerprinted report proving nothing can leave the machine.
+- **Cloud models (optional)** — opt into Ollama's hosted frontier models (`qwen3-coder:480b-cloud`, `gpt-oss:120b-cloud`, …) through your local Ollama daemon — still one Ollama backend. `ollama signin`, then `ollamadev models cloud` / `models pull <alias>` and `-m <tag>`. Mix local + cloud per crew role. Prompts to a cloud model leave the machine (the catalog says so).
+- **Web-access toggle** — `--no-web` (or `web.enabled:false`, or the 🌐 **Web** button in the ADE) blocks the agent's network tools (search / fetch / remote git) for a run; local work is untouched. A separate 🔍 **Search** switch (`search.enabled`) governs just web search.
 - **Skills** — reusable instructions the agent loads on demand (the `skill` tool). **60+ built in**: *capability* skills (payments-money, testing-discipline, auth-security, …) that crews load by focus, plus a *per-team starter* for every crew team (website, ecommerce, rest-api, …). View / create / edit / delete them in the ADE's **Skills window**, or discover shareable ones with `ollamadev skills browse` / `skills search <q>` / `skills add <name>` (registry sources under `skills.registries`).
 - **60+ built-in tools** — files, search, shell, git, web fetch/search, code navigation.
 - **Custom slash commands** — drop prompt templates in `~/.ollamadev/commands/*.md` and invoke them as `/name`.
@@ -201,7 +202,7 @@ ollamadev crew role list # roles the Director assigns per subtask (add your own)
 ollamadev watch <task>   # re-run a task on file changes (background agent)
 ollamadev transcribe <f> # speech-to-text on an audio file (local Whisper; --enabled to probe)
 ollamadev voice model <s># get/set the STT model (also: voice history, voice status)
-ollamadev search <q>     # web search (--provider duckduckgo|searxng|brave); off when air-gapped
+ollamadev search <q>     # web search (--provider duckduckgo|searxng|brave)
 ollamadev index build    # local semantic code index (embeddings)
 ollamadev code-search <q># find code by meaning over the index
 ollamadev test           # run the project's tests (auto-detected)
@@ -210,7 +211,7 @@ ollamadev diff           # working-tree diff for review (--json; desktop ⇄ Rev
 ollamadev commit -a      # commit with an AI-generated message
 ollamadev pr create      # push + open a PR (AI title/body) via gh
 ollamadev config set <k> <v>  # persist a setting to ~/.ollamadev/config.json
-ollamadev attest         # prove the air-gap posture (pair with --offline)
+ollamadev models cloud   # ☁ Ollama cloud models (catalog + how to enable)
 ollamadev skills browse  # discover shareable skills (search/add/install)
 ollamadev git <cmd>      # run git
 ollamadev terminal ...   # terminal multiplexer
@@ -356,8 +357,8 @@ And the **ADE** (the agent canvas) versus the cloud multi-agent environments it'
 
 | | OllamaDev ADE | cnvs.dev | BridgeSpace | Plyrium Forge |
 |---|---|---|---|---|
-| Models | **Local Ollama** | cloud (Claude/GPT/…) | cloud | cloud + local |
-| Runs offline / air-gapped | **Yes, by default** | No | No | optional |
+| Models | **Local Ollama** (+ optional Ollama cloud) | cloud (Claude/GPT/…) | cloud | cloud + local |
+| Runs locally by default | **Yes** (cloud is opt-in) | No | No | optional |
 | Cost | **Free** | paid | paid | $19–59/mo |
 | Surfaces | **CLI + desktop + web** (one engine) | macOS app only | desktop | Electron desktop |
 | Infinite agent canvas | Yes | Yes | — | — |

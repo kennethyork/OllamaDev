@@ -388,23 +388,23 @@ final class Bindings
         return $this->crewRoleList();
     }
 
-    // --- Web access toggle: flips the air-gap (config `offline`) flag through the
-    // CLI, so the same setting governs the terminal, desktop, and web. ON = web
-    // tools (search/fetch/remote git) allowed; OFF = air-gapped. Applies to new
-    // agent runs. -------------------------------------------------------------
+    // --- Web access toggle: governs the agent's network tools (search / fetch /
+    // remote git) through the CLI's `web.enabled` config, so the same setting
+    // applies in the terminal, desktop, and web. ON = allowed; OFF = blocked.
+    // Applies to new agent runs. ---------------------------------------------
     public function webAccess(): bool
     {
-        $v = trim((string) @shell_exec('php ' . escapeshellarg($this->cli) . ' config get offline 2>/dev/null'));
-        return $v !== 'true'; // web is on unless explicitly offline
+        $v = trim((string) @shell_exec('php ' . escapeshellarg($this->cli) . ' config get web.enabled 2>/dev/null'));
+        return $v !== 'false'; // web access is on unless explicitly disabled
     }
     public function setWebAccess(bool $on): bool
     {
-        @shell_exec('php ' . escapeshellarg($this->cli) . ' config set offline ' . ($on ? 'false' : 'true') . ' 2>/dev/null');
+        @shell_exec('php ' . escapeshellarg($this->cli) . ' config set web.enabled ' . ($on ? 'true' : 'false') . ' 2>/dev/null');
         return $this->webAccess();
     }
 
-    // Search-only switch (distinct from the full air-gap above): toggles just web
-    // search, leaving fetch/remote git alone. Defaults ON when unset.
+    // Search switch (finer than the Web toggle above): toggles just web search,
+    // leaving fetch / remote git alone. Defaults ON when unset.
     public function searchEnabled(): bool
     {
         $v = trim((string) @shell_exec('php ' . escapeshellarg($this->cli) . ' config get search.enabled 2>/dev/null'));

@@ -202,12 +202,10 @@ class McpServer {
         // SECURITY: an MCP client is a remote caller. Default to READ-ONLY so a
         // connected client can't run bash/write/rm on the user's machine; mutations
         // require an explicit opt-in (`mcp serve --allow-writes` or mcp.allowWrites).
-        // Non-interactive either way (calls can't block on an approval prompt); the
-        // air-gap (offline) flag still hard-blocks network tools.
+        // Non-interactive either way (calls can't block on an approval prompt).
         $allowWrites = $allowWrites || (Config::get('mcp.allowWrites', false) === true);
         Permission::setMode($allowWrites ? 'auto' : 'readonly');
         Permission::setInteractive(false);
-        if (Config::get('network.offline', false)) Permission::setOffline(true);
         $in = fopen('php://stdin', 'r');
         if (!$in) return 1;
         while (($line = fgets($in)) !== false) {

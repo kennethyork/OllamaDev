@@ -5,11 +5,12 @@ class Permission {
     private static string $planReturn = 'ask'; // mode restored when plan mode is approved
     private static array $toolAllow = []; // when non-empty, ONLY these tools may run (hard gate)
     private static bool $interactive = false;
-    private static bool $offline = false; // air-gapped: hard-block all network tools
+    private static bool $webEnabled = true; // when false, the agent's network tools are blocked
 
-    // Tools that reach the network. Blocked outright in offline mode, regardless
-    // of permission mode — the air-gap guarantee cannot be waived by 'auto' or by
-    // a prior allow(). (git_fetch is read-only but still hits the network.)
+    // Tools that reach the network — gated by the Web-access toggle. When web
+    // access is OFF these are blocked regardless of permission mode or a prior
+    // allow(), so the agent can't search/fetch/use remote git. (git_fetch is
+    // read-only but still hits the network.)
     private static array $network = [
         'fetch', 'search', 'web_search', 'web_fetch',
         'git_fetch', 'git_push', 'git_pull', 'git_clone',
@@ -44,10 +45,10 @@ class Permission {
     public static function exitPlan(): string { self::$mode = self::$planReturn; return self::$mode; }
     public static function setInteractive(bool $v): void { self::$interactive = $v; }
     public static function isInteractive(): bool { return self::$interactive; }
-    public static function setOffline(bool $v): void { self::$offline = $v; }
-    public static function isOffline(): bool { return self::$offline; }
+    // Web access: ON (default) lets the agent use network tools; OFF blocks them.
+    public static function setWebAccess(bool $on): void { self::$webEnabled = $on; }
+    public static function webEnabled(): bool { return self::$webEnabled; }
     public static function isNetwork(string $tool): bool { return in_array($tool, self::$network, true); }
-    public static function listNetwork(): array { return self::$network; }
 
     // Legacy compatibility shims.
     public static function autoAllow(): void { self::$mode = 'auto'; }
@@ -63,7 +64,7 @@ class Permission {
     // The gate enforced by Tools::run. Returns true if the tool may run.
     public static function check(string $tool, array $params = []): bool {
         if (isset(self::$denied[$tool])) return false;
-        if (self::$offline && self::isNetwork($tool)) return false; // air-gap: nothing leaves the machine
+        if (!self::$webEnabled && self::isNetwork($tool)) return false; // web access off → no network tools
         // Hard allowlist (custom agent's tools:): a MUTATING tool off the list is
         // blocked. Always-safe read-only tools (view/grep/ls…) and control tools
         // (exit_plan_mode) stay available — confinement limits what the agent can

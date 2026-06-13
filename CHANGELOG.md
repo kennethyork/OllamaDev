@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.8.99 (2026-06-13) — Ollama cloud models; air-gap attestation dropped (web-access toggle kept)
+
+### Added
+- **Ollama cloud models are now first-class.** Frontier-scale models (`qwen3-coder:480b-cloud`, `gpt-oss:120b-cloud`, `deepseek-v3.1:671b-cloud`, …) run on Ollama's servers but are reached through your **local Ollama daemon** — so it's **still Ollama-only**, one backend, same `-m <tag>` everywhere (CLI, desktop, web). They work across the whole engine, including the **crew** (mix local + cloud per role freely).
+  - `ollamadev models cloud` — curated catalog + how to enable (`ollama signin`).
+  - `ollamadev models pull <alias|tag>` — pulls cloud models too (with a sign-in hint on auth failure).
+  - `ollamadev models presets` now has a **☁ Cloud** section; `ollamadev models` badges installed cloud models with `☁ cloud` (detected from Ollama's remote-host flag).
+  - Opt-in by nature: you pull + select a cloud model. Prompts to a cloud model leave the machine — the catalog says so plainly.
+
+### Removed
+- **Air-gap *attestation* dropped.** Gone: the `ollamadev attest` command, the `Attest` class, the `--offline` / `--air-gapped` flags, `OLLAMADEV_OFFLINE`, and all "air-gapped / fully air-gapped" framing. (It didn't fit a world where you can opt into cloud models.)
+
+### Changed
+- **The web-access control stays — rebranded, not air-gap.** The 🌐 **Web** toggle (desktop/web) and the new **`--no-web`** flag / **`web.enabled`** config still let you block the agent's network tools (search / fetch / remote git) for a run. It's a practical "can the agent reach the web" switch now, with no air-gap guarantee or attestation attached. The separate 🔍 **Search** switch (`search.enabled`) is unchanged.
+
 ## v0.8.98 (2026-06-12) — Ollama-only (LM Studio support removed)
 
 ### Removed

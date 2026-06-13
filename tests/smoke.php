@@ -725,25 +725,47 @@ ok('--no-ideas flag wired', strpos($src, "\$flagOpts['ideas'] = false") !== fals
 $ideaJs = (string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/app.js');
 ok('desktop board renders idea cards', strpos($ideaJs, 'run-idea') !== false && strpos($ideaJs, 'crewBoard.ideas') !== false);
 
-echo "\n== Air-gap + attestation ==\n";
+echo "\n== Ollama cloud models ==\n";
+if (preg_match('/class Models \{.*?\n\}/s', $src, $cm)) {
+    if (!class_exists('Models')) eval($cm[0]);
+    ok('Models::isCloud detects -cloud and :cloud tags',
+        Models::isCloud('qwen3-coder:480b-cloud') === true && Models::isCloud('glm-4.6:cloud') === true
+        && Models::isCloud('qwen2.5-coder:7b') === false && Models::isCloud('mistral:latest') === false);
+    ok('Models::isCloudEntry trusts the /api/tags remote host',
+        Models::isCloudEntry(['name' => 'x:latest', 'remote_host' => 'https://ollama.com:443']) === true
+        && Models::isCloudEntry(['name' => 'glm-4.6:cloud']) === true
+        && Models::isCloudEntry(['name' => 'qwen2.5-coder:7b']) === false);
+    ok('cloud catalog is curated, tool-capable, and all :cloud/-cloud tags',
+        count(Models::cloudPresets()) >= 4
+        && array_reduce(Models::cloudPresets(), fn($a, $p) => $a && Models::isCloud($p['tag']) && !empty($p['tools']), true));
+    ok('cloud aliases resolve to their tag', Models::resolveTag('gpt-oss-cloud') === 'gpt-oss:120b-cloud');
+    ok('cloud models are kept OUT of the local fallback chain',
+        array_reduce(Models::defaultChain(), fn($a, $t) => $a && !Models::isCloud($t), true));
+} else { ok('Models class extractable', false); }
+ok('CLI surfaces cloud models (models cloud command + signin guidance + badge)',
+    strpos($src, "\$sub === 'cloud'") !== false && strpos($src, 'ollama signin') !== false
+    && strpos($src, 'Models::isCloud(') !== false && strpos($src, '☁') !== false);
+
+echo "\n== Air-gap attestation removed; web-access toggle kept ==\n";
+ok('no Attest class / attest command / air-gap naming remains',
+    strpos($src, 'class Attest') === false && strpos($src, "=== 'attest'") === false
+    && strpos($src, 'setOffline') === false && strpos($src, 'isOffline') === false
+    && strpos($src, "'--offline'") === false && strpos($src, '--air-gapped') === false
+    && strpos($src, 'OLLAMADEV_OFFLINE') === false && stripos($src, 'air-gap') === false);
 if (preg_match('/class Permission \{.*?\n\}/s', $src, $pm)) {
     if (!class_exists('Permission')) eval($pm[0]);
-    Permission::setOffline(true);
-    ok('offline blocks network tools', Permission::check('fetch') === false && Permission::check('git_push') === false);
-    ok('offline keeps local readonly tools', Permission::check('view') === true);
+    Permission::setMode('auto');
+    ok('web access ON lets network tools through', Permission::check('fetch') === true && Permission::check('git_push') === true);
+    Permission::setWebAccess(false);
+    ok('web access OFF blocks network tools (but not local readonly)',
+        Permission::check('fetch') === false && Permission::check('git_push') === false && Permission::check('view') === true);
     Permission::allow('fetch');
-    ok('offline overrides an explicit allow()', Permission::check('fetch') === false);
-    Permission::setOffline(false);
-    ok('online lets network tools through (auto)', (function () { Permission::setMode('auto'); return Permission::check('fetch'); })() === true);
+    ok('web access OFF overrides an explicit allow()', Permission::check('fetch') === false);
+    Permission::setWebAccess(true);
     Permission::setMode('ask');
-} else { ok('Permission class extractable for air-gap', false); }
-if (preg_match('/class Attest \{.*?\n\}/s', $src, $am)) {
-    if (!class_exists('Attest')) eval($am[0]);
-    ok('Attest detects loopback hosts', Attest::isLoopbackHost('http://localhost:11434') && Attest::isLoopbackHost('http://127.0.0.1:1234/v1') && Attest::isLoopbackHost('http://[::1]:11434'));
-    ok('Attest rejects remote hosts', !Attest::isLoopbackHost('http://192.168.1.9:11434') && !Attest::isLoopbackHost('https://api.example.com'));
-} else { ok('Attest class extractable', false); }
-ok('attest command + offline flag wired', strpos($src, "=== 'attest'") !== false && strpos($src, 'Permission::setOffline(true)') !== false);
-ok('update blocked when offline', strpos($src, 'offline mode is on') !== false);
+} else { ok('Permission class extractable', false); }
+ok('CLI wires the --no-web flag + web.enabled config', strpos($src, "'--no-web'") !== false &&
+    strpos($src, "Config::get('web.enabled', true)") !== false && strpos($src, 'Permission::setWebAccess(false)') !== false);
 
 echo "\n== Skill registry + crew packs ==\n";
 ok('skills search/browse/add wired', strpos($src, "\$sub === 'browse'") !== false && strpos($src, 'Skills::addFromRegistry(') !== false);
@@ -869,7 +891,6 @@ ok('SttClient provisions a self-contained engine (download + sttDir + platformTa
     strpos($src, 'function platformTarget(') !== false && strpos($src, 'function whisperCppBin(') !== false);
 ok('engine fetched from OllamaDev releases + model from Hugging Face',
     strpos($src, 'releases/latest/download/') !== false && strpos($src, 'huggingface.co/ggerganov/whisper.cpp') !== false);
-ok('auto-provision is air-gap gated', strpos($src, 'Permission::isOffline()') !== false && strpos($src, 'OLLAMADEV_STT_DIR') !== false);
 ok('CLI exposes `voice install` + /voice offers a one-time download',
     strpos($src, "\$sub === 'install'") !== false && strpos($src, 'function provisionVoice(') !== false);
 // Behavioral: a bundled engine dir (OLLAMADEV_STT_DIR) is detected, no PATH/network.
@@ -1584,19 +1605,18 @@ $cfgSrc = (string)@file_get_contents($repoRoot . '/src/10-config.php');
 ok('search tool has pluggable backends (duckduckgo/searxng/brave)',
     strpos($toolsSrc, "Config::get('search.provider'") !== false && strpos($toolsSrc, "'searxng'") !== false &&
     strpos($toolsSrc, 'api.search.brave.com') !== false && strpos($toolsSrc, '/search?') !== false);
-ok('CLI has a direct `search` command honoring air-gap', strpos($mainSrc, "\$argv[1] === 'search'") !== false &&
-    strpos($mainSrc, 'Permission::isOffline()') !== false && strpos($mainSrc, "Tools::run('search'") !== false);
+ok('CLI has a direct `search` command', strpos($mainSrc, "\$argv[1] === 'search'") !== false &&
+    strpos($mainSrc, "Tools::run('search'") !== false);
 ok('CLI has a `config get/set` command', strpos($mainSrc, "\$argv[1] === 'config'") !== false &&
     strpos($mainSrc, 'Config::persist(') !== false);
 ok('Config::persist writes the user config file', strpos($cfgSrc, 'public static function persist(') !== false &&
     strpos($cfgSrc, '/.ollamadev/config.json') !== false && strpos($cfgSrc, 'JSON_PRETTY_PRINT') !== false);
-ok('Bindings expose the web-access toggle', strpos($bindFull, "'webAccess', 'setWebAccess'") !== false &&
-    strpos($bindFull, 'function webAccess(') !== false && strpos($bindFull, 'config set offline') !== false);
-ok('Boson + web bridge expose the web toggle', strpos($idxPhp, "\$b->bind('webAccess'") !== false &&
-    strpos($idxPhp, "\$b->bind('setWebAccess'") !== false && strpos($bridgeJs, "'webAccess', 'setWebAccess'") !== false);
-ok('web toggle button + Net module in the UI', strpos($idxHtml2, 'id="webToggle"') !== false &&
-    strpos($appjs, 'var Net = {') !== false && strpos($appjs, 'Net.bind(); Net.load();') !== false &&
-    strpos($appjs, 'window.setWebAccess') !== false);
+ok('desktop exposes the web-access toggle (bindings + UI), governing web.enabled',
+    strpos($bindFull, 'function webAccess(') !== false && strpos($bindFull, 'config set web.enabled') !== false &&
+    strpos($idxPhp, "\$b->bind('webAccess'") !== false && strpos($bridgeJs, "'webAccess', 'setWebAccess'") !== false &&
+    strpos($idxHtml2, 'id="webToggle"') !== false && strpos($appjs, 'window.setWebAccess') !== false);
+ok('web-access toggle carries no "air-gap"/"offline" wording', stripos($appjs, 'air-gap') === false &&
+    stripos($bindFull, 'air-gap') === false && strpos($appjs, "config get offline") === false);
 // Voice (STT) model + history exposed to desktop AND web, backed by the one CLI.
 ok('CLI exposes a voice command (model/history/status) for the UI bindings',
     strpos($mainSrc, "\$argv[1] === 'voice'") !== false && strpos($mainSrc, "voice history") !== false &&
@@ -1609,20 +1629,18 @@ ok('Boson + web bridge expose the STT model/history bindings',
 ok('voice model dropdown + history panel in the UI (Stt module, additive)',
     strpos($idxHtml2, 'id="sttSelect"') !== false && strpos($idxHtml2, 'id="voiceOverlay"') !== false &&
     strpos($appjs, 'var Stt = {') !== false && strpos($appjs, 'Stt.bind();') !== false);
-// Functional: the built binary round-trips config + refuses search when offline.
+// Functional: the built binary round-trips a config value through the file.
 if (isset($bin) && is_file($bin)) {
     $hh = sys_get_temp_dir() . '/odv-cfgtest-' . getmypid();
     @mkdir($hh, 0755, true);
     $env = 'HOME=' . escapeshellarg($hh) . ' ';
-    @shell_exec($env . 'php ' . escapeshellarg($bin) . ' config set offline true 2>/dev/null');
-    $got = trim((string)@shell_exec($env . 'php ' . escapeshellarg($bin) . ' config get offline 2>/dev/null'));
-    ok('config set/get round-trips through the config file', $got === 'true');
-    $searchOut = (string)@shell_exec($env . 'php ' . escapeshellarg($bin) . ' search "anything" 2>&1');
-    ok('search refuses in air-gapped mode', stripos($searchOut, 'offline') !== false || stripos($searchOut, 'air-gap') !== false);
+    @shell_exec($env . 'php ' . escapeshellarg($bin) . ' config set search.provider brave 2>/dev/null');
+    $got = trim((string)@shell_exec($env . 'php ' . escapeshellarg($bin) . ' config get search.provider 2>/dev/null'), " \n\"");
+    ok('config set/get round-trips through the config file', $got === 'brave');
     @shell_exec('rm -rf ' . escapeshellarg($hh));
 }
 
-// ---- v4.5.1 — search-only kill switch (search.enabled), separate from air-gap. ----
+// ---- web-search kill switch (search.enabled). ----
 ok('search tool honors search.enabled', strpos($toolsSrc, "Config::get('search.enabled', true)") !== false);
 ok('CLI search command checks search.enabled', strpos($mainSrc, "!Config::get('search.enabled', true)") !== false);
 ok('Bindings expose searchEnabled/setSearchEnabled', strpos($bindFull, "'searchEnabled', 'setSearchEnabled'") !== false &&
@@ -1631,15 +1649,14 @@ ok('Boson + web bridge expose the search switch', strpos($idxPhp, "\$b->bind('se
     strpos($bridgeJs, "'searchEnabled', 'setSearchEnabled'") !== false);
 ok('search toggle button + handler in the UI', strpos($idxHtml2, 'id="searchToggle"') !== false &&
     strpos($appjs, 'toggleSearch:') !== false && strpos($appjs, 'window.setSearchEnabled') !== false);
-// Functional: search.enabled gates ONLY search; air-gap stays independent.
+// Functional: search.enabled=false turns off web search.
 if (isset($bin) && is_file($bin)) {
     $h3 = sys_get_temp_dir() . '/odv-setest-' . getmypid();
     @mkdir($h3, 0755, true);
     $env = 'HOME=' . escapeshellarg($h3) . ' ';
     @shell_exec($env . 'php ' . escapeshellarg($bin) . ' config set search.enabled false 2>/dev/null');
     $so = (string)@shell_exec($env . 'php ' . escapeshellarg($bin) . ' search "x" 2>&1');
-    $off = trim((string)@shell_exec($env . 'php ' . escapeshellarg($bin) . ' config get offline 2>/dev/null'));
-    ok('disabling search blocks search but not the air-gap flag', stripos($so, 'search is turned off') !== false && $off !== 'true');
+    ok('disabling search turns web search off', stripos($so, 'search is turned off') !== false);
     @shell_exec('rm -rf ' . escapeshellarg($h3));
 }
 
@@ -1679,7 +1696,6 @@ ok('GitFlow generates commit messages + PR text + review', strpos($gf, 'class Gi
     strpos($gf, 'function message') !== false && strpos($gf, 'function prText') !== false && strpos($gf, 'function review') !== false);
 ok('CLI exposes commit + pr create/review', strpos($mainSrc, "\$argv[1] === 'commit'") !== false &&
     strpos($mainSrc, "\$argv[1] === 'pr'") !== false && strpos($mainSrc, "'create'") !== false && strpos($mainSrc, "'review'") !== false);
-ok('PR commands are air-gap gated; commit is local', strpos($mainSrc, "Offline mode — PR commands") !== false);
 // Functional: detection + commit-message round-trips (no model needed for detect).
 if (isset($bin) && is_file($bin)) {
     $td = sys_get_temp_dir() . '/odv-feat-' . getmypid();
@@ -1769,7 +1785,6 @@ ok('session nudges off a weak model toward a better installed one (gated, non-ov
     strpos($sessSrc, 'modelIsWeakForTools(') !== false && strpos($sessSrc, "model.nagWeakModel") !== false &&
     strpos($sessSrc, 'Models::bestInstalled(') !== false);
 ok('weak-model nudge is silenceable via config', strpos($sessSrc, "Config::get('model.nagWeakModel', true)") !== false);
-ok('models pull stays air-gap gated', strpos($mainSrc, 'offline mode is on — pulling a model') !== false);
 
 // 2b) Vision: discoverable vision presets + capability-based "no vision" warning.
 $ollSrc = (string)@file_get_contents($repoRoot . '/src/50-ollama-client.php');
@@ -1795,7 +1810,7 @@ ok('diff review styles present', strpos($appcss, '.diff-code') !== false && strp
 
 // Comparison page.
 $cmpPage = (string)@file_get_contents($repoRoot . '/docs/compare.html');
-ok('compare.html leads with privacy/cost/air-gap + evals', strpos($cmpPage, 'air-gap') !== false &&
+ok('compare.html leads with privacy/cost + evals',
     (strpos($cmpPage, 'privacy') !== false || strpos($cmpPage, 'private') !== false) && strpos($cmpPage, 'eval') !== false);
 ok('compare page is honest about where hosted leads', strpos($cmpPage, 'Where hosted tools still lead') !== false);
 ok('nav links to the compare page', strpos($land, 'compare.html') !== false);
@@ -1812,8 +1827,8 @@ if (isset($bin) && is_file($bin)) {
     $mp = (string)@shell_exec('php ' . escapeshellarg($bin) . ' models presets --json 2>&1');
     ok('models presets emits JSON with installed flags', strpos($mp, '"alias"') !== false && strpos($mp, '"installed"') !== false);
     // A global flag BEFORE the subcommand must not hide the command (argv re-root).
-    $lead = (string)@shell_exec('php ' . escapeshellarg($bin) . ' --offline eval list 2>&1');
-    ok('global flag before subcommand still routes (--offline eval list)', stripos($lead, 'create-file') !== false && stripos($lead, 'Unknown command') === false);
+    $lead = (string)@shell_exec('php ' . escapeshellarg($bin) . ' --auto eval list 2>&1');
+    ok('global flag before subcommand still routes (--auto eval list)', stripos($lead, 'create-file') !== false && stripos($lead, 'Unknown command') === false);
     $leadM = (string)@shell_exec('php ' . escapeshellarg($bin) . ' -m foo eval list 2>&1');
     ok('-m before subcommand still routes', stripos($leadM, 'create-file') !== false);
 }

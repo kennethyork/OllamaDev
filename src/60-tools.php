@@ -148,7 +148,7 @@ class Tools {
             'symbols'   => [['file_path'], [], 'List the symbols (functions/classes) in a file.'],
             'find_refs' => [['file_path', 'pattern'], [], 'Find references to a symbol.'],
             'format'    => [['file_path'], [], 'Format a file with the project formatter.'],
-            // Git (local; network ops blocked when air-gapped)
+            // Git (local + remote ops via gh/git)
             'git_status'   => [[], ['path'], 'Show working-tree status.'],
             'git_diff'     => [[], ['path', 'file', 'cached'], 'Show a diff (cached=true for staged).'],
             'git_log'      => [[], ['path', 'n'], 'Recent commits (n default 10).'],

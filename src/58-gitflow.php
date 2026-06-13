@@ -1,7 +1,7 @@
 // GITFLOW — close the loop from "wrote code" to "shipped it": AI commit
 // messages, opening a PR, and reviewing a PR with the local model. Local git is
-// never gated; the PR commands reach GitHub (via `gh`) and are blocked in
-// air-gap mode. Vanilla PHP — shells out to git/gh.
+// never gated; the PR commands reach GitHub (via `gh`). Vanilla PHP — shells
+// out to git/gh.
 class GitFlow {
     public static function sh(string $cmd): string { return trim((string)@shell_exec($cmd)); }
     public static function isRepo(): bool { return self::sh('git rev-parse --is-inside-work-tree 2>/dev/null') === 'true'; }

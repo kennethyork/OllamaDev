@@ -99,7 +99,7 @@ class Skills {
 
     // ---- Registry / discovery ------------------------------------------------
     // A registry is just a place to DISCOVER shareable skills before installing.
-    // Sources (local-first, air-gap friendly): the local registry dir plus any
+    // Sources (local-first): the local registry dir plus any
     // dirs/URLs in config `skills.registries`. Git/archive URLs are install-only
     // (browse can't list them without fetching); local dirs are browsable.
     public static function registryDir(): string { return (getenv('HOME') ?: sys_get_temp_dir()) . '/.ollamadev/registry'; }

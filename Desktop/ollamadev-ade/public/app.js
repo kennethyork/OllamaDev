@@ -1909,9 +1909,10 @@ var HookMgr = {
 };
 
 // ---------- Network toggles, shared with the CLI via config ----------
-// 🌐 Web = the air-gap (offline) flag: all network tools (search/fetch/remote git).
-// 🔍 Search = a finer switch for web search only (fetch/git unaffected).
-// Both persist to config through the CLI, so terminal/desktop/web agree.
+// 🌐 Web = web access (config web.enabled): all the agent's network tools
+// (search/fetch/remote git). 🔍 Search = a finer switch for web search only
+// (fetch/git unaffected). Both persist through the CLI, so terminal/desktop/web
+// agree. Applies to new agent runs.
 var Net = {
     on: true, search: true,
     bind: function () {
@@ -1930,7 +1931,7 @@ var Net = {
         if (!window.setWebAccess) { banner('web toggle unavailable here', 'err'); return; }
         Promise.resolve(window.setWebAccess(!this.on)).then(function (on) {
             self.on = (on !== false); self.render();
-            banner(self.on ? 'web access on' : 'air-gapped (offline) — applies to new runs', 'ok');
+            banner(self.on ? 'web access on' : 'web access off — agent network tools blocked (applies to new runs)', 'ok');
         }).catch(function () { banner('could not change web access', 'err'); });
     },
     toggleSearch: function () {
@@ -1944,17 +1945,16 @@ var Net = {
     render: function () {
         var w = $('#webToggle');
         if (w) {
-            w.textContent = this.on ? '🌐 Web' : '✈️ Offline';
+            w.textContent = this.on ? '🌐 Web' : '🚫 Web off';
             w.classList.toggle('off', !this.on);
-            w.title = (this.on ? 'Web access ON — agent may search/fetch/use remote git.' : 'Air-gapped — all network tools blocked.') + ' Click to toggle (applies to new runs).';
+            w.title = (this.on ? 'Web access ON — agent may search/fetch/use remote git.' : 'Web access OFF — agent network tools blocked.') + ' Click to toggle (applies to new runs).';
         }
         var s = $('#searchToggle');
         if (s) {
-            // When air-gapped, search is moot — show it disabled.
             s.textContent = this.search ? '🔍 Search' : '🔍 Search off';
             s.classList.toggle('off', !this.search);
             s.disabled = !this.on;
-            s.title = !this.on ? 'Air-gapped — search is blocked by the Web toggle.'
+            s.title = !this.on ? 'Web access is off — search is blocked by the Web toggle.'
                 : (this.search ? 'Web search ON. Click to disable search only (fetch/git stay on).' : 'Web search OFF (fetch/git still allowed). Click to enable.');
         }
     }
@@ -1965,7 +1965,7 @@ var Net = {
 // Vite's 5173, etc.) right next to the terminals. Keeps its OWN history stack
 // of bar-entered URLs — the iframe's cross-origin history isn't reachable from
 // here, so back/forward walk our stack and reset the frame src. Non-localhost
-// URLs are gated by the same air-gap flag as the agent's network tools (Net.on).
+// URLs are gated by the same web-access toggle as the agent's network tools (Net.on).
 var Browser = {
     stack: [], idx: -1, COMMON_PORTS: [3000, 5173, 8080, 8000, 4321, 41434],
     bind: function () {
@@ -2010,7 +2010,7 @@ var Browser = {
     go: function (raw) {
         var u = this.normalize(raw);
         if (!u) return;
-        if (!this.isLocal(u) && !Net.on) { banner('air-gapped — only localhost previews are allowed (toggle 🌐 Web to load external sites)', 'err'); return; }
+        if (!this.isLocal(u) && window.Net && !Net.on) { banner('web access off — only localhost previews are allowed (toggle 🌐 Web to load external sites)', 'err'); return; }
         // Truncate forward history, push, and load.
         this.stack = this.stack.slice(0, this.idx + 1);
         this.stack.push(u); this.idx = this.stack.length - 1;

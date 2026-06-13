@@ -606,14 +606,12 @@ Tools::register('ask_user', function($p) {
 Tools::register('search', function($p) {
     $q = $p['query'] ?? $p['q'] ?? '';
     if (empty($q)) return "missing query";
-    // Search-only kill switch (distinct from full air-gap): disables web search
-    // while leaving fetch and remote git available. Air-gap still overrides everything.
+    // Search kill switch: disable web search while leaving fetch + remote git available.
     if (!Config::get('search.enabled', true)) return "Web search is disabled (search.enabled is false). Enable it with: ollamadev config set search.enabled true";
     $limit = max(1, min(10, (int)($p['limit'] ?? 5)));
     // Pluggable backend: DuckDuckGo (default, no key), a self-hosted SearXNG
     // instance (most local-first), or the Brave Search API (opt-in, needs a key).
-    // None is an AI provider — only the query leaves the machine, and air-gap
-    // mode blocks the whole tool regardless.
+    // None is an AI provider — only the query leaves the machine.
     $provider = strtolower(trim((string)($p['provider'] ?? Config::get('search.provider', 'duckduckgo'))));
     $results = []; $err = '';
 

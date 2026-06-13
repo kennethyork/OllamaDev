@@ -30,6 +30,41 @@ class Models {
         ];
     }
 
+    // Curated CLOUD catalog: Ollama-hosted models that run on Ollama's servers
+    // (ollama.com) but are reached through your LOCAL Ollama daemon — same API,
+    // same `-m <tag>` everywhere (CLI / desktop / web). Kept SEPARATE from the
+    // local presets/chain so they're strictly opt-in: pull one, sign in
+    // (`ollama signin`), then select it. Prompts to a cloud model leave the
+    // machine — that's the trade for frontier-scale models on small hardware.
+    public static function cloudPresets(): array {
+        return [
+            'qwen3-coder-cloud' => ['tag' => 'qwen3-coder:480b-cloud',  'tools' => true, 'role' => 'agentic coding', 'note' => 'Frontier coding agent (480B) — top cloud pick for the crew.'],
+            'gpt-oss-cloud'     => ['tag' => 'gpt-oss:120b-cloud',      'tools' => true, 'role' => 'general + tools', 'note' => 'Strong open generalist with reliable tool-calling.'],
+            'gpt-oss-mini-cloud'=> ['tag' => 'gpt-oss:20b-cloud',       'tools' => true, 'role' => 'general + tools', 'note' => 'Smaller, faster gpt-oss — cheaper cloud turns.'],
+            'deepseek-cloud'    => ['tag' => 'deepseek-v3.1:671b-cloud', 'tools' => true, 'role' => 'reasoning + coding', 'note' => 'Big reasoning/coding model (671B).'],
+            'qwen3-max-cloud'   => ['tag' => 'qwen3-max:cloud',          'tools' => true, 'role' => 'general + tools', 'note' => 'Qwen3 flagship, cloud-hosted.'],
+            'glm-cloud'         => ['tag' => 'glm-4.6:cloud',            'tools' => true, 'role' => 'coding',          'note' => 'GLM-4.6 — capable coder.'],
+            'kimi-cloud'        => ['tag' => 'kimi-k2:1t-cloud',         'tools' => true, 'role' => 'general',         'note' => 'Kimi K2 (1T) — very large general model.'],
+            'minimax-cloud'     => ['tag' => 'minimax-m2:cloud',         'tools' => true, 'role' => 'general',         'note' => 'MiniMax M2 — general assistant.'],
+        ];
+    }
+
+    // Is this an Ollama cloud model? Cloud tags end in `-cloud` (e.g.
+    // qwen3-coder:480b-cloud) or `:cloud` (e.g. glm-4.6:cloud).
+    public static function isCloud(string $tag): bool {
+        $t = strtolower(trim($tag));
+        return $t !== '' && (str_ends_with($t, '-cloud') || str_ends_with($t, ':cloud'));
+    }
+
+    // Is this /api/tags entry a cloud model? Ollama flags them with a remote host
+    // (the daemon proxies to ollama.com) — the authoritative signal for an
+    // INSTALLED model, with the name suffix as a fallback.
+    public static function isCloudEntry(array $entry): bool {
+        if (trim((string)($entry['remote_host'] ?? '')) !== '') return true;
+        if (trim((string)($entry['remote_model'] ?? '')) !== '') return true;
+        return self::isCloud((string)($entry['name'] ?? ''));
+    }
+
     // Preferred order for the agentic tool path, most→least preferred. Used both
     // to pick a sane default when none is configured and to choose a fallback
     // when the active model can't do native tools.
@@ -176,6 +211,8 @@ class Models {
         $n = trim($nameOrAlias);
         $p = self::presets();
         if (isset($p[$n])) return $p[$n]['tag'];
-        return $n; // already a tag (e.g. "qwen2.5-coder:32b") or unknown — pass through
+        $cloud = self::cloudPresets();
+        if (isset($cloud[$n])) return $cloud[$n]['tag'];
+        return $n; // already a tag (e.g. "qwen2.5-coder:32b" / "glm-4.6:cloud") or unknown — pass through
     }
 }
