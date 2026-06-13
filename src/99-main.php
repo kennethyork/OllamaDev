@@ -674,9 +674,13 @@ if (!empty($flags['careful'])) Config::set('agents.selfReview', true);
 // cache → less VRAM), unload the model 60s after you stop (frees VRAM/RAM, lets the
 // GPU idle down so fans settle), leave half the CPU cores for the OS, and never run
 // crew coders in parallel. It only touches LOCAL models — cloud is never throttled.
-// Opt out with --full / --heavy (or persist ollama.lowResource:false) when you want
-// the local model running flat-out; --light forces it on regardless.
+// Toggle it without a config file: set OLLAMADEV_POWER=full (or =light) in your shell
+// profile to make it stick across runs. Per-run --full / --heavy / --light wins over
+// the env var, which wins over the built-in default.
+$envPower = strtolower((string)(getenv('OLLAMADEV_POWER') ?: ''));
 $lightOn = Config::get('ollama.lowResource', true);   // default ON for local
+if (in_array($envPower, ['full', 'heavy', 'high', 'off'], true)) $lightOn = false;
+elseif (in_array($envPower, ['light', 'low', 'on'], true)) $lightOn = true;
 if (!empty($flags['full'])) $lightOn = false;
 elseif (!empty($flags['light'])) $lightOn = true;
 Config::set('ollama.lowResource', $lightOn);

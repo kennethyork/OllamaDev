@@ -934,6 +934,12 @@ ok('light mode defaults ON (lowResource default true) with a --full / --heavy op
     strpos($mainSrc0, "Config::get('ollama.lowResource', true)") !== false
     && strpos($mainSrc0, "'--full'") !== false && strpos($mainSrc0, "'--heavy'") !== false
     && strpos($mainSrc0, '$lightOn = false') !== false);
+// Persist the choice WITHOUT a config file via OLLAMADEV_POWER=full|light; per-run
+// flags still win over the env var, which wins over the default.
+ok('OLLAMADEV_POWER env toggles light/full with no config file',
+    strpos($mainSrc0, "getenv('OLLAMADEV_POWER')") !== false
+    && strpos($mainSrc0, "['full', 'heavy', 'high', 'off']") !== false
+    && strpos($mainSrc0, "['light', 'low', 'on']") !== false);
 
 echo "\n== Air-gap attestation removed; web-access toggle kept ==\n";
 ok('no Attest class / attest command / air-gap naming remains',
