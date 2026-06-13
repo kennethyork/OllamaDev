@@ -539,6 +539,15 @@ if (!empty($flags['host'])) ModelClient::$override = $flags['host'];
 // is untouched. The desktop's 🌐 Web toggle flips the same web.enabled config.
 if (!empty($flags['noweb']) || Config::get('web.enabled', true) === false) Permission::setWebAccess(false);
 
+// --cwd <dir>: run the agent and its tools in this directory. The ADE uses a
+// shell `cd` when spawning, so make the bare flag behave the same for the CLI —
+// otherwise relative tool paths (write/edit/ls) resolve against wherever you
+// launched from, not the project you pointed at.
+if (!empty($flags['cwd'])) {
+    if (is_dir($flags['cwd'])) @chdir($flags['cwd']);
+    else { fwrite(STDERR, "✗ --cwd: not a directory: {$flags['cwd']}\n"); exit(1); }
+}
+
 // --num-ctx N: pin the context window to exactly N for this run (overrides auto).
 if (!empty($flags['numCtx']) && $flags['numCtx'] > 0) {
     Config::set('ollama.contextWindow', (int)$flags['numCtx']);
