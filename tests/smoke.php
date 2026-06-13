@@ -777,6 +777,20 @@ ok('edit requires a UNIQUE old_string (no silent first-of-many match)',
 ok('edit accepts a literal "0" old_string (=== "" not empty())',
     strpos($src, "if (\$oldStr === '') return \"missing old_string\"") !== false);
 
+// --- audit fixes: summarize, cloud-auth, web-serve guard, per-coder models, expanded eval ---
+$serverSrc = (string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/web/server.php');
+ok('summarize is a real model summary (placeholder gone)',
+    strpos($src, 'Summary placeholder') === false && strpos($src, "Tools::register('summarize'") !== false && strpos($src, 'Summarize the following') !== false);
+ok('cloud-auth: ollama signin guidance wired into preflight + chat startup',
+    strpos($src, 'cloudAuthError') !== false && substr_count($src, 'cloudAuthError(') >= 3 && strpos($src, 'ollama signin') !== false);
+ok('web server is loopback-only without a token (no LAN exposure by default)',
+    strpos($serverSrc, '$isLoopback') !== false && strpos($serverSrc, "\$token === '' && !\$isLoopback") !== false);
+ok('crew supports per-coder models (--coder-models, round-robin)',
+    strpos($src, '--coder-models') !== false && strpos($src, 'coderModelFor') !== false && strpos($src, 'function modelList(') !== false);
+ok('eval suite expanded with harder tasks (algorithms/class/multi-file/multi-bug)',
+    strpos($src, "'binary-search'") !== false && strpos($src, "'bank-class'") !== false
+    && strpos($src, "'refactor-extract'") !== false && strpos($src, "'fix-two-bugs'") !== false);
+
 echo "\n== Air-gap attestation removed; web-access toggle kept ==\n";
 ok('no Attest class / attest command / air-gap naming remains',
     strpos($src, 'class Attest') === false && strpos($src, "=== 'attest'") === false

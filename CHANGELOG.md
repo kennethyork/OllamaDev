@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.9.4 (2026-06-13) — audit pass: 6 CLI/desktop/web fixes
+
+### Fixed
+- **`summarize` tool was a placeholder** — it returned a hard-coded "configure MCP summarizer" string. It now produces a real summary via the local model (falling back to the raw transcript if the model is unreachable), so it's actually useful to the agent.
+- **No cloud-auth guidance at runtime** — picking a cloud model in chat/agent without `ollama signin` gave a cryptic "no reply." A 1-token auth probe now runs at chat/agent startup for cloud models and points at `ollama signin` (no false-positive on an authed model).
+- **`edit`/`cd` rejected a literal `"0"`** — `empty()` guards treated the string `"0"` as missing; switched to `=== ''`.
+
+### Added
+- **Crew per-coder models** — `--coder-models a,b,c` (or `crew.coderModels`) assigns DIFFERENT models to parallel coders, round-robin by coder number. Mix local + cloud across coders; empty keeps the single coder model (unchanged default).
+- **Expanded the eval suite** — 6 harder tasks (binary search, a stateful class, CSV parsing, memoized fib, a multi-file refactor, a two-bug fix) for a more honest capability signal. Now 26 tasks.
+
+### Security
+- **Web server is loopback-only without a token** — `web/server.php` now refuses non-localhost requests unless `OLLAMADEV_SERVE_TOKEN` is set, so binding to `0.0.0.0` without a token can't expose command-running bindings to the LAN. The CLI `serve` stub now points at the real web command instead of "not implemented."
+
 ## v0.9.3 (2026-06-13) — edit `old_string` must be unique; accepts a literal "0"
 
 ### Fixed

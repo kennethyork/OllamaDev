@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '0.9.3');
+define('OLLAMADEV_VERSION', '0.9.4');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -1174,6 +1174,32 @@ class OllamaClient {
 
     // The num_ctx most recently sent (so the /status meter shows the real window).
     public static function effectiveContext(): int { return self::$lastCtx; }
+
+    // For a cloud model, check whether the local Ollama can actually reach it —
+    // i.e. you've run `ollama signin`. Returns a short reason string when the
+    // failure is an AUTH problem (so the caller can point at `ollama signin`), or
+    // null when it's fine or the failure is something else (model still loading,
+    // network). Cheap: a 1-token /api/chat probe.
+    public static function cloudAuthError(string $model, string $host = ''): ?string {
+        $host = rtrim($host ?: Config::get('ollama.host', 'http://localhost:11434'), '/');
+        $ch = curl_init($host . '/api/chat');
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode(['model' => $model, 'messages' => [['role' => 'user', 'content' => 'hi']], 'stream' => false, 'options' => ['num_predict' => 1]]),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 25,
+        ]);
+        $resp = (string)curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($code === 200) return null;
+        $j = json_decode($resp, true);
+        $err = is_array($j) ? (string)($j['error'] ?? '') : $resp;
+        if ($code === 401 || $code === 403 || preg_match('/unauthor|sign ?in|not.*log|authenticat|api key|forbidden|requires/i', $err)) {
+            return $err !== '' ? $err : "HTTP $code";
+        }
+        return null;   // not an auth failure (e.g. the model is still loading)
+    }
 
     // A model's trained context length via /api/show (model_info "*.context_length").
     // Cached per model; returns 0 if unknown / Ollama unreachable.
@@ -2651,6 +2677,39 @@ class Evals {
                 'prompt' => 'Create README.md with a level-1 heading for the project title (a line starting with "# ") and a section titled "## Usage".',
                 'check' => ['type' => 'command', 'cmd' => '{php} -r \'$r=@file_get_contents("README.md"); echo ($r && preg_match("/^# /m",$r) && stripos($r,"## Usage")!==false)?"OK":"NO";\'', 'expect' => 'OK'],
             ],
+            // ---- harder: bigger algorithms, stateful classes, multi-file, multi-bug ----
+            [
+                'name' => 'binary-search',
+                'prompt' => 'Create bsearch.php defining function bsearch(array $sorted, int $target): int — return the index of $target in the ascending-sorted array using binary search, or -1 if absent. No output on include.',
+                'check' => ['type' => 'command', 'cmd' => '{php} -r \'include "bsearch.php"; echo bsearch([1,3,5,7,9,11],7).",".bsearch([1,3,5,7,9,11],4);\'', 'expect' => '3,-1'],
+            ],
+            [
+                'name' => 'bank-class',
+                'prompt' => 'Create Account.php defining a class Account that starts with balance 0 and has methods deposit(int $n), withdraw(int $n) which must NOT let the balance go negative (ignore an over-withdraw), and balance(): int. No output on include.',
+                'check' => ['type' => 'command', 'cmd' => '{php} -r \'include "Account.php"; $a=new Account(); $a->deposit(100); $a->withdraw(30); $a->withdraw(1000); echo $a->balance();\'', 'expect' => '70'],
+            ],
+            [
+                'name' => 'csv-parse',
+                'prompt' => 'Create csv.php defining function parseCsv(string $s): array — split the text into rows by newline and each row into fields by comma, skipping blank lines. Returns an array of arrays. No output on include.',
+                'check' => ['type' => 'command', 'cmd' => '{php} -r \'include "csv.php"; $r=parseCsv("a,b,c\n1,2,3"); echo $r[1][2];\'', 'expect' => '3'],
+            ],
+            [
+                'name' => 'fib-memo',
+                'prompt' => 'Create fib.php defining function fib(int $n): int returning the nth Fibonacci number (fib(0)=0, fib(1)=1). It must compute fib(30) fast — use iteration or memoization, not naive recursion. No output on include.',
+                'check' => ['type' => 'command', 'cmd' => '{php} -r \'include "fib.php"; echo fib(30);\'', 'expect' => '832040'],
+            ],
+            [
+                'name' => 'refactor-extract',
+                'files' => ['app.php' => "<?php\nfunction greet(\$n) { return 'Hi ' . \$n; }\necho greet('A');\n"],
+                'prompt' => 'Refactor app.php: MOVE the greet() function out into a new file helpers.php, and make app.php require/include helpers.php instead of defining greet itself. Running app.php must still print "Hi A".',
+                'check' => ['type' => 'command', 'cmd' => '{php} -r \'$a=(string)@file_get_contents("app.php"); $h=(string)@file_get_contents("helpers.php"); echo (strpos($h,"function greet")!==false && strpos($a,"function greet")===false && strpos($a,"helpers.php")!==false)?"OK":"NO";\'', 'expect' => 'OK'],
+            ],
+            [
+                'name' => 'fix-two-bugs',
+                'files' => ['shape.php' => "<?php\nfunction area(\$w, \$h) { return \$w + \$h; }\nfunction perimeter(\$w, \$h) { return \$w * \$h; }\n"],
+                'prompt' => 'shape.php has TWO bugs: area() should return width*height (it adds), and perimeter() should return 2*(width+height) (it multiplies). Fix both functions.',
+                'check' => ['type' => 'command', 'cmd' => '{php} -r \'include "shape.php"; echo area(3,4).",".perimeter(3,4);\'', 'expect' => '12,14'],
+            ],
         ];
     }
 
@@ -3385,8 +3444,8 @@ Tools::register('pwd', function($p) {
 });
 
 Tools::register('cd', function($p) {
-    $path = $p['path'] ?? $p['dir'] ?? '';
-    if (empty($path)) return "missing path";
+    $path = (string)($p['path'] ?? $p['dir'] ?? '');
+    if ($path === '') return "missing path";
     if (!is_dir($path)) return "Not a directory: $path";
     if (!chdir($path)) return "Failed to change directory: $path";
     return "Changed to: " . getcwd();
@@ -3981,10 +4040,25 @@ Tools::register('permission', function($p) {
 
 Tools::register('summarize', function($p) {
     $msgs = $p['messages'] ?? [];
-    $context = $p['context'] ?? '';
-    if (empty($msgs)) return "No messages to summarize";
-    $text = implode("\n", array_map(fn($m) => $m['role'] . ': ' . substr($m['content'], 0, 200), $msgs));
-    return "Summary placeholder - configure MCP summarizer for full functionality";
+    $context = trim((string)($p['context'] ?? ''));
+    $hasMsgs = is_array($msgs) ? !empty($msgs) : trim((string)$msgs) !== '';
+    if (!$hasMsgs && $context === '') return "No messages to summarize";
+    // Build a bounded transcript from the messages (or raw text).
+    $text = is_array($msgs)
+        ? implode("\n", array_map(fn($m) => (string)($m['role'] ?? '?') . ': ' . substr((string)($m['content'] ?? ''), 0, 1000), $msgs))
+        : (string)$msgs;
+    if ($context !== '') $text = "Context: $context\n\n$text";
+    $text = substr($text, 0, 12000);
+    // Real summary via the local model; fall back to the raw transcript if it's
+    // unreachable, so the tool is always useful (never a placeholder).
+    try {
+        $model = (string)Config::get('ollama.defaultModel', '');
+        $sys = ['role' => 'system', 'content' => 'Summarize the following conversation/text concisely: key decisions, facts, file changes, and open items. Plain prose, no preamble or markdown headers.'];
+        $out = trim((string)ModelClient::default()->chatWithModel($model !== '' ? $model : 'llama3.2:latest', [$sys, ['role' => 'user', 'content' => $text]], null, false));
+        return $out !== '' ? $out : ("(model returned nothing — raw transcript)\n" . $text);
+    } catch (\Throwable $e) {
+        return "(summary unavailable: " . $e->getMessage() . ")\n" . $text;
+    }
 });
 
 Tools::register('patch', function($p) {
@@ -6911,6 +6985,11 @@ class Crew {
         $mResearcher = $rm('researcherModel');
         $mCoder      = $rm('coderModel');
         $mAuditor    = $rm('auditorModel');
+        // Per-coder models (optional): --coder-models a,b,c (or crew.coderModels)
+        // assigns DIFFERENT models to the parallel coders, round-robin by coder #.
+        // Empty → every coder uses $mCoder (unchanged default). Mix local + cloud.
+        $mCoderList  = self::modelList($opts['coderModels'] ?? Config::get('crew.coderModels', null));
+        $coderModelFor = fn(int $n): string => $mCoderList ? $mCoderList[($n - 1) % count($mCoderList)] : $mCoder;
         $maxCoders = max(1, min(6, (int)($opts['max'] ?? Config::get('crew.maxCoders', 4))));
         $maxIter = max(2, (int)($opts['iterations'] ?? Config::get('crew.coderIterations', 10)));
         // Weak local models sometimes "describe" a change without calling the write
@@ -6942,8 +7021,9 @@ class Crew {
         echo "\n{$b}👥 OllamaDev Crew{$r}  {$d}model {$c}{$model}{$r}{$d} · base {$base}@" . substr($baseCommit, 0, 7) . ($amplify > 1 ? " · amplify ×{$amplify}" : '') . "{$r}\n";
         if (!empty($teamSkills)) echo "  {$d}team skills: " . implode(', ', array_map(fn($s) => $s['name'], $teamSkills)) . "{$r}\n";
         // Show per-role models when any role differs from the base (mix-and-match).
-        if ($mDirector !== $model || $mResearcher !== $model || $mCoder !== $model || $mAuditor !== $model) {
-            echo "  {$d}roles:{$r} Director {$c}{$mDirector}{$r}{$d} · Researcher {$c}{$mResearcher}{$r}{$d} · Coder {$c}{$mCoder}{$r}{$d} · Auditor {$c}{$mAuditor}{$r}\n";
+        if ($mDirector !== $model || $mResearcher !== $model || $mCoder !== $model || $mAuditor !== $model || $mCoderList) {
+            $coderShow = $mCoderList ? implode(', ', $mCoderList) . ' (per-coder)' : $mCoder;
+            echo "  {$d}roles:{$r} Director {$c}{$mDirector}{$r}{$d} · Researcher {$c}{$mResearcher}{$r}{$d} · Coder {$c}{$coderShow}{$r}{$d} · Auditor {$c}{$mAuditor}{$r}\n";
         }
 
         // ---- Researcher: survey the codebase, write a shared findings vault ----
@@ -6983,7 +7063,7 @@ class Crew {
             'models' => ['director' => $mDirector, 'researcher' => $mResearcher, 'coder' => $mCoder, 'auditor' => $mAuditor],
             'amplify' => $amplify, 'focus' => $focus, 'subtasks' => []];
         foreach ($subtasks as $i => $st) $board['subtasks'][] = ['n' => $i + 1, 'title' => $st['title'] ?? ('task ' . ($i + 1)), 'role' => $st['role'] ?? 'coder', 'state' => 'todo',
-            'branch' => self::branchFor($runId, $i + 1, $st['title'] ?? ('task' . ($i + 1))), 'model' => $mCoder];
+            'branch' => self::branchFor($runId, $i + 1, $st['title'] ?? ('task' . ($i + 1))), 'model' => $coderModelFor($i + 1)];
         $writeBoard = function () use (&$board, $boardFile) { $board['ts'] = time(); @file_put_contents($boardFile, json_encode($board)); };
         $setState = function (int $n, string $s) use (&$board, $writeBoard) { foreach ($board['subtasks'] as &$bs) { if ($bs['n'] === $n) $bs['state'] = $s; } unset($bs); $writeBoard(); };
         // Additive: merge extra display fields (files owned, audit verdict) into a
@@ -6993,7 +7073,7 @@ class Crew {
 
         // Persist the full plan (incl. subtask prompts + branch names) so this run
         // is resumable from disk if it's interrupted. Only the reusable opts are kept.
-        $resumeOpts = array_intersect_key($opts, array_flip(['directorModel', 'coderModel', 'auditorModel', 'researcherModel', 'focus', 'max', 'amplify', 'land', 'research', 'audit', 'skills', 'hosts', 'ideas', 'memory', 'forceSkills', 'parallel']));
+        $resumeOpts = array_intersect_key($opts, array_flip(['directorModel', 'coderModel', 'coderModels', 'auditorModel', 'researcherModel', 'focus', 'max', 'amplify', 'land', 'research', 'audit', 'skills', 'hosts', 'ideas', 'memory', 'forceSkills', 'parallel']));
         $diskPlan = [];
         foreach ($subtasks as $i => $st) {
             $n = $i + 1; $title = $st['title'] ?? ('task ' . $n);
@@ -7068,13 +7148,13 @@ class Crew {
                     $resFile = $wtRoot . '/result-' . $job['n'] . '.json';
                     $pid = pcntl_fork();
                     if ($pid === 0) { // child: build in isolation, write the result, exit
-                        self::runCoder($job['wt'], $job['st'], $mCoder, $maxIter, $research, $task, $focus, $host, $job['log']);
+                        self::runCoder($job['wt'], $job['st'], $coderModelFor($job['n']), $maxIter, $research, $task, $focus, $host, $job['log']);
                         @file_put_contents($resFile, json_encode(self::collectCoderResult($job, $baseCommit)));
                         exit(0);
                     } elseif ($pid > 0) {
                         $pids[$pid] = ['job' => $job, 'file' => $resFile];
                     } else { // fork failed: run inline as a fallback
-                        self::runCoder($job['wt'], $job['st'], $mCoder, $maxIter, $research, $task, $focus, $host, $job['log']);
+                        self::runCoder($job['wt'], $job['st'], $coderModelFor($job['n']), $maxIter, $research, $task, $focus, $host, $job['log']);
                         $results[] = self::collectCoderResult($job, $baseCommit);
                     }
                 }
@@ -7093,18 +7173,19 @@ class Crew {
             foreach ($jobs as $idx => $job) {
                 $host = $spread ? $hosts[$idx % count($hosts)] : '';
                 echo "\n{$b}▸ Coder {$job['n']}{$r} {$d}[" . ($job['st']['role'] ?? 'coder') . "] {$job['branch']}" . ($host !== '' ? " · {$host}" : '') . "{$r}\n";
-                self::runCoder($job['wt'], $job['st'], $mCoder, $maxIter, $research, $task, $focus, $host, $job['log'], true);
+                $jobModel = $coderModelFor($job['n']);
+                self::runCoder($job['wt'], $job['st'], $jobModel, $maxIter, $research, $task, $focus, $host, $job['log'], true);
                 $res = self::collectCoderResult($job, $baseCommit);
                 // Empty diff = the model didn't actually edit. Retry with a firm nudge,
                 // and AUTO-ESCALATE to a bigger installed model when one exists — so a
                 // weak coder that can't complete the task hands off to a stronger one.
                 // $climb advances each retry so successive retries reach larger tiers,
                 // not the same next-up every time.
-                $climb = $mCoder;
+                $climb = $jobModel;
                 for ($try = 1; $res['empty'] && $try <= $coderRetries; $try++) {
                     $retryModel = $climb;
                     if ($escalate) { $bigger = Models::escalate($climb, $installedModels); if ($bigger !== null) { $retryModel = $bigger; $climb = $bigger; } }
-                    $esc = $retryModel !== $mCoder ? " {$c}↑ escalating to {$retryModel}{$r}" : '';
+                    $esc = $retryModel !== $jobModel ? " {$c}↑ escalating to {$retryModel}{$r}" : '';
                     echo "  {$y}no changes — retry {$try}/{$coderRetries} (model didn't edit the files){$r}{$esc}\n";
                     $retry = $job['st'];
                     $retry['prompt'] = (string)($job['st']['prompt'] ?? '') . "\n\nIMPORTANT: Your previous attempt made NO file changes. You MUST actually create/edit the files by CALLING your write/edit/bash tools now — do not merely describe the change in text.";
@@ -7830,6 +7911,20 @@ class Crew {
     // Deterministic branch name for a subtask (so resume reuses the same branch).
     private static function branchFor(string $runId, int $n, string $title): string {
         return 'crew/' . substr($runId, 6) . '-' . $n . '-' . self::slug($title ?: ('task' . $n));
+    }
+
+    // Parse a per-coder model spec (CSV string or array) into a clean, alias-resolved
+    // list of tags. Empty/invalid → [] (callers fall back to the single coder model).
+    private static function modelList($spec): array {
+        if (is_string($spec)) $spec = explode(',', $spec);
+        if (!is_array($spec)) return [];
+        $out = [];
+        foreach ($spec as $m) {
+            $m = trim((string)$m);
+            if ($m === '') continue;
+            $out[] = class_exists('Models') ? Models::resolveTag($m) : $m;
+        }
+        return $out;
     }
 
     private static function isGitRepo(): bool { return self::sh('git rev-parse --is-inside-work-tree 2>/dev/null') === 'true'; }
@@ -10092,6 +10187,15 @@ $GLOBALS['currentSessionModel'] = null;
             echo "\n";
             return false;
         }
+        // Cloud model selected but not signed in → the first prompt would fail with a
+        // cryptic auth error. Catch it up front and point at `ollama signin`.
+        if (class_exists('Models') && Models::isCloud($this->model)
+            && ($authErr = OllamaClient::cloudAuthError($this->model, $host)) !== null) {
+            echo "\n{$yel}  ⚠ Cloud model {$r}{$cyan}{$this->model}{$r}{$yel} needs authentication.{$r}{$dim}  (" . substr($authErr, 0, 80) . "){$r}\n";
+            echo "{$dim}    Sign in once:  {$r}{$cyan}ollama signin{$r}{$dim}  (free ollama.com key), then retry.{$r}\n";
+            echo "{$dim}    Or use a local model:  {$r}{$cyan}/model qwen3.5:9b{$r}{$dim}.{$r}\n\n";
+            return false;
+        }
         return true;
     }
 
@@ -10884,9 +10988,15 @@ if ($argc >= 2 && ($argv[1] === 'workspace' || $argv[1] === 'ws')) {
 // Serve/Web Command
 if ($argc >= 2 && $argv[1] === 'serve') {
     $config = Config::load();
-    $port = $argv[2] ?? 41434;
-    echo "Starting OllamaDev web server on port $port...\n";
-    echo "Web UI not yet implemented - use interactive mode: ollamadev\n";
+    $port = (int)($argv[2] ?? 41434);
+    // The web UI (the same ADE that ships as the desktop app) is served from the
+    // ADE directory, not this single-file CLI. Point the user at the real command.
+    echo "The OllamaDev web UI is served from the ADE app directory:\n\n";
+    echo "  cd Desktop/ollamadev-ade\n";
+    echo "  php -S localhost:$port web/server.php      # then open http://localhost:$port\n\n";
+    echo "Localhost-only by default. To reach it from another device, bind the host\n";
+    echo "(e.g. php -S 0.0.0.0:$port …) AND set OLLAMADEV_SERVE_TOKEN — without a token,\n";
+    echo "non-localhost requests are refused. Or just run the desktop app.\n";
     exit(0);
 }
 
@@ -10974,6 +11084,7 @@ for ($i = 1; $i < $argc; $i++) {
     elseif ($a === '--max') { $flags['max'] = (int)($argv[++$i] ?? 0); }
     elseif ($a === '--director-model') { $flags['directorModel'] = $argv[++$i] ?? null; }
     elseif ($a === '--coder-model') { $flags['coderModel'] = $argv[++$i] ?? null; }
+    elseif ($a === '--coder-models') { $flags['coderModels'] = $argv[++$i] ?? null; }   // CSV: per-coder models, round-robin
     elseif ($a === '--auditor-model') { $flags['auditorModel'] = $argv[++$i] ?? null; }
     elseif ($a === '--researcher-model') { $flags['researcherModel'] = $argv[++$i] ?? null; }
     elseif ($a === '--focus') { $flags['focus'] = $argv[++$i] ?? null; }
@@ -11183,6 +11294,15 @@ if ($argc >= 2 && $argv[1] === 'chat') {
     if (!$client->checkConnection()) {
         echo $c('✗ ' . ModelClient::activeLabel() . ' not reachable.', '31') . " Is Ollama running?  (start it with: ollama serve)\n";
         exit(1);
+    }
+    // Cloud model picked but not signed in → warn up front instead of a cryptic
+    // "no reply" on the first message.
+    if (class_exists('Models') && Models::isCloud($model)) {
+        $authErr = OllamaClient::cloudAuthError($model);
+        if ($authErr !== null) {
+            echo $c('⚠ Cloud model ' . $model . ' needs authentication.', '33') . $c('  (' . substr($authErr, 0, 80) . ')', '2') . "\n";
+            echo $c('  Sign in once: ', '2') . $c('ollama signin', '36') . $c('  (free ollama.com key), then restart chat. Or use a local model with -m.', '2') . "\n";
+        }
     }
     // Full transcript (system + any resumed turns). Saved verbatim; only a recent slice
     // is sent to the model (below) so context stays bounded on long chats.
@@ -12551,7 +12671,7 @@ if ($cmd === 'chat') {
     // Build the team-shaped opts from the current flags (used for `pack save` and
     // as the override layer on top of a loaded --pack).
     $flagOpts = [];
-    foreach (['directorModel', 'coderModel', 'auditorModel', 'researcherModel', 'focus'] as $fk) if (!empty($flags[$fk])) $flagOpts[$fk] = $flags[$fk];
+    foreach (['directorModel', 'coderModel', 'coderModels', 'auditorModel', 'researcherModel', 'focus'] as $fk) if (!empty($flags[$fk])) $flagOpts[$fk] = $flags[$fk];
     if (!empty($flags['max'])) $flagOpts['max'] = (int)$flags['max'];
     if (!empty($flags['amplify'])) $flagOpts['amplify'] = (int)$flags['amplify'];
     if (array_key_exists('parallel', $flags)) $flagOpts['parallel'] = $flags['parallel']; // true / N / false (--no-parallel)

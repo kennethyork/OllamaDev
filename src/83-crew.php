@@ -36,6 +36,11 @@ class Crew {
         $mResearcher = $rm('researcherModel');
         $mCoder      = $rm('coderModel');
         $mAuditor    = $rm('auditorModel');
+        // Per-coder models (optional): --coder-models a,b,c (or crew.coderModels)
+        // assigns DIFFERENT models to the parallel coders, round-robin by coder #.
+        // Empty → every coder uses $mCoder (unchanged default). Mix local + cloud.
+        $mCoderList  = self::modelList($opts['coderModels'] ?? Config::get('crew.coderModels', null));
+        $coderModelFor = fn(int $n): string => $mCoderList ? $mCoderList[($n - 1) % count($mCoderList)] : $mCoder;
         $maxCoders = max(1, min(6, (int)($opts['max'] ?? Config::get('crew.maxCoders', 4))));
         $maxIter = max(2, (int)($opts['iterations'] ?? Config::get('crew.coderIterations', 10)));
         // Weak local models sometimes "describe" a change without calling the write
@@ -67,8 +72,9 @@ class Crew {
         echo "\n{$b}👥 OllamaDev Crew{$r}  {$d}model {$c}{$model}{$r}{$d} · base {$base}@" . substr($baseCommit, 0, 7) . ($amplify > 1 ? " · amplify ×{$amplify}" : '') . "{$r}\n";
         if (!empty($teamSkills)) echo "  {$d}team skills: " . implode(', ', array_map(fn($s) => $s['name'], $teamSkills)) . "{$r}\n";
         // Show per-role models when any role differs from the base (mix-and-match).
-        if ($mDirector !== $model || $mResearcher !== $model || $mCoder !== $model || $mAuditor !== $model) {
-            echo "  {$d}roles:{$r} Director {$c}{$mDirector}{$r}{$d} · Researcher {$c}{$mResearcher}{$r}{$d} · Coder {$c}{$mCoder}{$r}{$d} · Auditor {$c}{$mAuditor}{$r}\n";
+        if ($mDirector !== $model || $mResearcher !== $model || $mCoder !== $model || $mAuditor !== $model || $mCoderList) {
+            $coderShow = $mCoderList ? implode(', ', $mCoderList) . ' (per-coder)' : $mCoder;
+            echo "  {$d}roles:{$r} Director {$c}{$mDirector}{$r}{$d} · Researcher {$c}{$mResearcher}{$r}{$d} · Coder {$c}{$coderShow}{$r}{$d} · Auditor {$c}{$mAuditor}{$r}\n";
         }
 
         // ---- Researcher: survey the codebase, write a shared findings vault ----
@@ -108,7 +114,7 @@ class Crew {
             'models' => ['director' => $mDirector, 'researcher' => $mResearcher, 'coder' => $mCoder, 'auditor' => $mAuditor],
             'amplify' => $amplify, 'focus' => $focus, 'subtasks' => []];
         foreach ($subtasks as $i => $st) $board['subtasks'][] = ['n' => $i + 1, 'title' => $st['title'] ?? ('task ' . ($i + 1)), 'role' => $st['role'] ?? 'coder', 'state' => 'todo',
-            'branch' => self::branchFor($runId, $i + 1, $st['title'] ?? ('task' . ($i + 1))), 'model' => $mCoder];
+            'branch' => self::branchFor($runId, $i + 1, $st['title'] ?? ('task' . ($i + 1))), 'model' => $coderModelFor($i + 1)];
         $writeBoard = function () use (&$board, $boardFile) { $board['ts'] = time(); @file_put_contents($boardFile, json_encode($board)); };
         $setState = function (int $n, string $s) use (&$board, $writeBoard) { foreach ($board['subtasks'] as &$bs) { if ($bs['n'] === $n) $bs['state'] = $s; } unset($bs); $writeBoard(); };
         // Additive: merge extra display fields (files owned, audit verdict) into a
@@ -118,7 +124,7 @@ class Crew {
 
         // Persist the full plan (incl. subtask prompts + branch names) so this run
         // is resumable from disk if it's interrupted. Only the reusable opts are kept.
-        $resumeOpts = array_intersect_key($opts, array_flip(['directorModel', 'coderModel', 'auditorModel', 'researcherModel', 'focus', 'max', 'amplify', 'land', 'research', 'audit', 'skills', 'hosts', 'ideas', 'memory', 'forceSkills', 'parallel']));
+        $resumeOpts = array_intersect_key($opts, array_flip(['directorModel', 'coderModel', 'coderModels', 'auditorModel', 'researcherModel', 'focus', 'max', 'amplify', 'land', 'research', 'audit', 'skills', 'hosts', 'ideas', 'memory', 'forceSkills', 'parallel']));
         $diskPlan = [];
         foreach ($subtasks as $i => $st) {
             $n = $i + 1; $title = $st['title'] ?? ('task ' . $n);
@@ -193,13 +199,13 @@ class Crew {
                     $resFile = $wtRoot . '/result-' . $job['n'] . '.json';
                     $pid = pcntl_fork();
                     if ($pid === 0) { // child: build in isolation, write the result, exit
-                        self::runCoder($job['wt'], $job['st'], $mCoder, $maxIter, $research, $task, $focus, $host, $job['log']);
+                        self::runCoder($job['wt'], $job['st'], $coderModelFor($job['n']), $maxIter, $research, $task, $focus, $host, $job['log']);
                         @file_put_contents($resFile, json_encode(self::collectCoderResult($job, $baseCommit)));
                         exit(0);
                     } elseif ($pid > 0) {
                         $pids[$pid] = ['job' => $job, 'file' => $resFile];
                     } else { // fork failed: run inline as a fallback
-                        self::runCoder($job['wt'], $job['st'], $mCoder, $maxIter, $research, $task, $focus, $host, $job['log']);
+                        self::runCoder($job['wt'], $job['st'], $coderModelFor($job['n']), $maxIter, $research, $task, $focus, $host, $job['log']);
                         $results[] = self::collectCoderResult($job, $baseCommit);
                     }
                 }
@@ -218,18 +224,19 @@ class Crew {
             foreach ($jobs as $idx => $job) {
                 $host = $spread ? $hosts[$idx % count($hosts)] : '';
                 echo "\n{$b}▸ Coder {$job['n']}{$r} {$d}[" . ($job['st']['role'] ?? 'coder') . "] {$job['branch']}" . ($host !== '' ? " · {$host}" : '') . "{$r}\n";
-                self::runCoder($job['wt'], $job['st'], $mCoder, $maxIter, $research, $task, $focus, $host, $job['log'], true);
+                $jobModel = $coderModelFor($job['n']);
+                self::runCoder($job['wt'], $job['st'], $jobModel, $maxIter, $research, $task, $focus, $host, $job['log'], true);
                 $res = self::collectCoderResult($job, $baseCommit);
                 // Empty diff = the model didn't actually edit. Retry with a firm nudge,
                 // and AUTO-ESCALATE to a bigger installed model when one exists — so a
                 // weak coder that can't complete the task hands off to a stronger one.
                 // $climb advances each retry so successive retries reach larger tiers,
                 // not the same next-up every time.
-                $climb = $mCoder;
+                $climb = $jobModel;
                 for ($try = 1; $res['empty'] && $try <= $coderRetries; $try++) {
                     $retryModel = $climb;
                     if ($escalate) { $bigger = Models::escalate($climb, $installedModels); if ($bigger !== null) { $retryModel = $bigger; $climb = $bigger; } }
-                    $esc = $retryModel !== $mCoder ? " {$c}↑ escalating to {$retryModel}{$r}" : '';
+                    $esc = $retryModel !== $jobModel ? " {$c}↑ escalating to {$retryModel}{$r}" : '';
                     echo "  {$y}no changes — retry {$try}/{$coderRetries} (model didn't edit the files){$r}{$esc}\n";
                     $retry = $job['st'];
                     $retry['prompt'] = (string)($job['st']['prompt'] ?? '') . "\n\nIMPORTANT: Your previous attempt made NO file changes. You MUST actually create/edit the files by CALLING your write/edit/bash tools now — do not merely describe the change in text.";
@@ -955,6 +962,20 @@ class Crew {
     // Deterministic branch name for a subtask (so resume reuses the same branch).
     private static function branchFor(string $runId, int $n, string $title): string {
         return 'crew/' . substr($runId, 6) . '-' . $n . '-' . self::slug($title ?: ('task' . $n));
+    }
+
+    // Parse a per-coder model spec (CSV string or array) into a clean, alias-resolved
+    // list of tags. Empty/invalid → [] (callers fall back to the single coder model).
+    private static function modelList($spec): array {
+        if (is_string($spec)) $spec = explode(',', $spec);
+        if (!is_array($spec)) return [];
+        $out = [];
+        foreach ($spec as $m) {
+            $m = trim((string)$m);
+            if ($m === '') continue;
+            $out[] = class_exists('Models') ? Models::resolveTag($m) : $m;
+        }
+        return $out;
     }
 
     private static function isGitRepo(): bool { return self::sh('git rev-parse --is-inside-work-tree 2>/dev/null') === 'true'; }

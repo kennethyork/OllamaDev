@@ -120,6 +120,39 @@ class Evals {
                 'prompt' => 'Create README.md with a level-1 heading for the project title (a line starting with "# ") and a section titled "## Usage".',
                 'check' => ['type' => 'command', 'cmd' => '{php} -r \'$r=@file_get_contents("README.md"); echo ($r && preg_match("/^# /m",$r) && stripos($r,"## Usage")!==false)?"OK":"NO";\'', 'expect' => 'OK'],
             ],
+            // ---- harder: bigger algorithms, stateful classes, multi-file, multi-bug ----
+            [
+                'name' => 'binary-search',
+                'prompt' => 'Create bsearch.php defining function bsearch(array $sorted, int $target): int — return the index of $target in the ascending-sorted array using binary search, or -1 if absent. No output on include.',
+                'check' => ['type' => 'command', 'cmd' => '{php} -r \'include "bsearch.php"; echo bsearch([1,3,5,7,9,11],7).",".bsearch([1,3,5,7,9,11],4);\'', 'expect' => '3,-1'],
+            ],
+            [
+                'name' => 'bank-class',
+                'prompt' => 'Create Account.php defining a class Account that starts with balance 0 and has methods deposit(int $n), withdraw(int $n) which must NOT let the balance go negative (ignore an over-withdraw), and balance(): int. No output on include.',
+                'check' => ['type' => 'command', 'cmd' => '{php} -r \'include "Account.php"; $a=new Account(); $a->deposit(100); $a->withdraw(30); $a->withdraw(1000); echo $a->balance();\'', 'expect' => '70'],
+            ],
+            [
+                'name' => 'csv-parse',
+                'prompt' => 'Create csv.php defining function parseCsv(string $s): array — split the text into rows by newline and each row into fields by comma, skipping blank lines. Returns an array of arrays. No output on include.',
+                'check' => ['type' => 'command', 'cmd' => '{php} -r \'include "csv.php"; $r=parseCsv("a,b,c\n1,2,3"); echo $r[1][2];\'', 'expect' => '3'],
+            ],
+            [
+                'name' => 'fib-memo',
+                'prompt' => 'Create fib.php defining function fib(int $n): int returning the nth Fibonacci number (fib(0)=0, fib(1)=1). It must compute fib(30) fast — use iteration or memoization, not naive recursion. No output on include.',
+                'check' => ['type' => 'command', 'cmd' => '{php} -r \'include "fib.php"; echo fib(30);\'', 'expect' => '832040'],
+            ],
+            [
+                'name' => 'refactor-extract',
+                'files' => ['app.php' => "<?php\nfunction greet(\$n) { return 'Hi ' . \$n; }\necho greet('A');\n"],
+                'prompt' => 'Refactor app.php: MOVE the greet() function out into a new file helpers.php, and make app.php require/include helpers.php instead of defining greet itself. Running app.php must still print "Hi A".',
+                'check' => ['type' => 'command', 'cmd' => '{php} -r \'$a=(string)@file_get_contents("app.php"); $h=(string)@file_get_contents("helpers.php"); echo (strpos($h,"function greet")!==false && strpos($a,"function greet")===false && strpos($a,"helpers.php")!==false)?"OK":"NO";\'', 'expect' => 'OK'],
+            ],
+            [
+                'name' => 'fix-two-bugs',
+                'files' => ['shape.php' => "<?php\nfunction area(\$w, \$h) { return \$w + \$h; }\nfunction perimeter(\$w, \$h) { return \$w * \$h; }\n"],
+                'prompt' => 'shape.php has TWO bugs: area() should return width*height (it adds), and perimeter() should return 2*(width+height) (it multiplies). Fix both functions.',
+                'check' => ['type' => 'command', 'cmd' => '{php} -r \'include "shape.php"; echo area(3,4).",".perimeter(3,4);\'', 'expect' => '12,14'],
+            ],
         ];
     }
 

@@ -135,6 +135,32 @@ class OllamaClient {
     // The num_ctx most recently sent (so the /status meter shows the real window).
     public static function effectiveContext(): int { return self::$lastCtx; }
 
+    // For a cloud model, check whether the local Ollama can actually reach it —
+    // i.e. you've run `ollama signin`. Returns a short reason string when the
+    // failure is an AUTH problem (so the caller can point at `ollama signin`), or
+    // null when it's fine or the failure is something else (model still loading,
+    // network). Cheap: a 1-token /api/chat probe.
+    public static function cloudAuthError(string $model, string $host = ''): ?string {
+        $host = rtrim($host ?: Config::get('ollama.host', 'http://localhost:11434'), '/');
+        $ch = curl_init($host . '/api/chat');
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode(['model' => $model, 'messages' => [['role' => 'user', 'content' => 'hi']], 'stream' => false, 'options' => ['num_predict' => 1]]),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 25,
+        ]);
+        $resp = (string)curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($code === 200) return null;
+        $j = json_decode($resp, true);
+        $err = is_array($j) ? (string)($j['error'] ?? '') : $resp;
+        if ($code === 401 || $code === 403 || preg_match('/unauthor|sign ?in|not.*log|authenticat|api key|forbidden|requires/i', $err)) {
+            return $err !== '' ? $err : "HTTP $code";
+        }
+        return null;   // not an auth failure (e.g. the model is still loading)
+    }
+
     // A model's trained context length via /api/show (model_info "*.context_length").
     // Cached per model; returns 0 if unknown / Ollama unreachable.
     public static function modelContextLength(string $model, string $host = ''): int {

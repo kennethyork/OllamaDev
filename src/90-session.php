@@ -1000,6 +1000,15 @@ $GLOBALS['currentSessionModel'] = null;
             echo "\n";
             return false;
         }
+        // Cloud model selected but not signed in → the first prompt would fail with a
+        // cryptic auth error. Catch it up front and point at `ollama signin`.
+        if (class_exists('Models') && Models::isCloud($this->model)
+            && ($authErr = OllamaClient::cloudAuthError($this->model, $host)) !== null) {
+            echo "\n{$yel}  ⚠ Cloud model {$r}{$cyan}{$this->model}{$r}{$yel} needs authentication.{$r}{$dim}  (" . substr($authErr, 0, 80) . "){$r}\n";
+            echo "{$dim}    Sign in once:  {$r}{$cyan}ollama signin{$r}{$dim}  (free ollama.com key), then retry.{$r}\n";
+            echo "{$dim}    Or use a local model:  {$r}{$cyan}/model qwen3.5:9b{$r}{$dim}.{$r}\n\n";
+            return false;
+        }
         return true;
     }
 

@@ -311,8 +311,8 @@ Tools::register('pwd', function($p) {
 });
 
 Tools::register('cd', function($p) {
-    $path = $p['path'] ?? $p['dir'] ?? '';
-    if (empty($path)) return "missing path";
+    $path = (string)($p['path'] ?? $p['dir'] ?? '');
+    if ($path === '') return "missing path";
     if (!is_dir($path)) return "Not a directory: $path";
     if (!chdir($path)) return "Failed to change directory: $path";
     return "Changed to: " . getcwd();
@@ -907,10 +907,25 @@ Tools::register('permission', function($p) {
 
 Tools::register('summarize', function($p) {
     $msgs = $p['messages'] ?? [];
-    $context = $p['context'] ?? '';
-    if (empty($msgs)) return "No messages to summarize";
-    $text = implode("\n", array_map(fn($m) => $m['role'] . ': ' . substr($m['content'], 0, 200), $msgs));
-    return "Summary placeholder - configure MCP summarizer for full functionality";
+    $context = trim((string)($p['context'] ?? ''));
+    $hasMsgs = is_array($msgs) ? !empty($msgs) : trim((string)$msgs) !== '';
+    if (!$hasMsgs && $context === '') return "No messages to summarize";
+    // Build a bounded transcript from the messages (or raw text).
+    $text = is_array($msgs)
+        ? implode("\n", array_map(fn($m) => (string)($m['role'] ?? '?') . ': ' . substr((string)($m['content'] ?? ''), 0, 1000), $msgs))
+        : (string)$msgs;
+    if ($context !== '') $text = "Context: $context\n\n$text";
+    $text = substr($text, 0, 12000);
+    // Real summary via the local model; fall back to the raw transcript if it's
+    // unreachable, so the tool is always useful (never a placeholder).
+    try {
+        $model = (string)Config::get('ollama.defaultModel', '');
+        $sys = ['role' => 'system', 'content' => 'Summarize the following conversation/text concisely: key decisions, facts, file changes, and open items. Plain prose, no preamble or markdown headers.'];
+        $out = trim((string)ModelClient::default()->chatWithModel($model !== '' ? $model : 'llama3.2:latest', [$sys, ['role' => 'user', 'content' => $text]], null, false));
+        return $out !== '' ? $out : ("(model returned nothing — raw transcript)\n" . $text);
+    } catch (\Throwable $e) {
+        return "(summary unavailable: " . $e->getMessage() . ")\n" . $text;
+    }
 });
 
 Tools::register('patch', function($p) {

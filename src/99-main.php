@@ -382,9 +382,15 @@ if ($argc >= 2 && ($argv[1] === 'workspace' || $argv[1] === 'ws')) {
 // Serve/Web Command
 if ($argc >= 2 && $argv[1] === 'serve') {
     $config = Config::load();
-    $port = $argv[2] ?? 41434;
-    echo "Starting OllamaDev web server on port $port...\n";
-    echo "Web UI not yet implemented - use interactive mode: ollamadev\n";
+    $port = (int)($argv[2] ?? 41434);
+    // The web UI (the same ADE that ships as the desktop app) is served from the
+    // ADE directory, not this single-file CLI. Point the user at the real command.
+    echo "The OllamaDev web UI is served from the ADE app directory:\n\n";
+    echo "  cd Desktop/ollamadev-ade\n";
+    echo "  php -S localhost:$port web/server.php      # then open http://localhost:$port\n\n";
+    echo "Localhost-only by default. To reach it from another device, bind the host\n";
+    echo "(e.g. php -S 0.0.0.0:$port …) AND set OLLAMADEV_SERVE_TOKEN — without a token,\n";
+    echo "non-localhost requests are refused. Or just run the desktop app.\n";
     exit(0);
 }
 
@@ -472,6 +478,7 @@ for ($i = 1; $i < $argc; $i++) {
     elseif ($a === '--max') { $flags['max'] = (int)($argv[++$i] ?? 0); }
     elseif ($a === '--director-model') { $flags['directorModel'] = $argv[++$i] ?? null; }
     elseif ($a === '--coder-model') { $flags['coderModel'] = $argv[++$i] ?? null; }
+    elseif ($a === '--coder-models') { $flags['coderModels'] = $argv[++$i] ?? null; }   // CSV: per-coder models, round-robin
     elseif ($a === '--auditor-model') { $flags['auditorModel'] = $argv[++$i] ?? null; }
     elseif ($a === '--researcher-model') { $flags['researcherModel'] = $argv[++$i] ?? null; }
     elseif ($a === '--focus') { $flags['focus'] = $argv[++$i] ?? null; }
@@ -681,6 +688,15 @@ if ($argc >= 2 && $argv[1] === 'chat') {
     if (!$client->checkConnection()) {
         echo $c('✗ ' . ModelClient::activeLabel() . ' not reachable.', '31') . " Is Ollama running?  (start it with: ollama serve)\n";
         exit(1);
+    }
+    // Cloud model picked but not signed in → warn up front instead of a cryptic
+    // "no reply" on the first message.
+    if (class_exists('Models') && Models::isCloud($model)) {
+        $authErr = OllamaClient::cloudAuthError($model);
+        if ($authErr !== null) {
+            echo $c('⚠ Cloud model ' . $model . ' needs authentication.', '33') . $c('  (' . substr($authErr, 0, 80) . ')', '2') . "\n";
+            echo $c('  Sign in once: ', '2') . $c('ollama signin', '36') . $c('  (free ollama.com key), then restart chat. Or use a local model with -m.', '2') . "\n";
+        }
     }
     // Full transcript (system + any resumed turns). Saved verbatim; only a recent slice
     // is sent to the model (below) so context stays bounded on long chats.
@@ -2049,7 +2065,7 @@ if ($cmd === 'chat') {
     // Build the team-shaped opts from the current flags (used for `pack save` and
     // as the override layer on top of a loaded --pack).
     $flagOpts = [];
-    foreach (['directorModel', 'coderModel', 'auditorModel', 'researcherModel', 'focus'] as $fk) if (!empty($flags[$fk])) $flagOpts[$fk] = $flags[$fk];
+    foreach (['directorModel', 'coderModel', 'coderModels', 'auditorModel', 'researcherModel', 'focus'] as $fk) if (!empty($flags[$fk])) $flagOpts[$fk] = $flags[$fk];
     if (!empty($flags['max'])) $flagOpts['max'] = (int)$flags['max'];
     if (!empty($flags['amplify'])) $flagOpts['amplify'] = (int)$flags['amplify'];
     if (array_key_exists('parallel', $flags)) $flagOpts['parallel'] = $flags['parallel']; // true / N / false (--no-parallel)

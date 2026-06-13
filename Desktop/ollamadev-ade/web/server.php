@@ -24,6 +24,19 @@ $home = getenv('HOME') ?: sys_get_temp_dir();
 $token = getenv('OLLAMADEV_SERVE_TOKEN') ?: '';
 $uri = (string) parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
 
+// Safe-by-default: with NO token set, serve only loopback clients. Binding the
+// built-in server to 0.0.0.0 without a token would otherwise expose every binding
+// — which can run commands and write files — to anyone on the network. To reach
+// it from the LAN/another device, set OLLAMADEV_SERVE_TOKEN and pass it as
+// ?token= / X-ODV-Token (handled per-route below).
+$remote = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+$isLoopback = $remote === '' || $remote === '::1' || str_starts_with($remote, '127.');
+if ($token === '' && !$isLoopback) {
+    http_response_code(403);
+    echo 'OllamaDev web is localhost-only unless OLLAMADEV_SERVE_TOKEN is set. Set a token (and pass ?token=) to reach it from another device.';
+    return true;
+}
+
 // --- The app page: same HTML as the desktop, with the browser bridge injected
 // BEFORE app.js so window.<binding> exist when it runs. ------------------------
 if ($uri === '/' || $uri === '/index.html') {
