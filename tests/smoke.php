@@ -772,6 +772,10 @@ if (preg_match('/function editFuzzyFind\(.*?\n\}/s', $src, $efm)) {
     ok('edit fuzzy-match refuses ambiguous (multi-site) matches', $amb === null);
 } else { ok('editFuzzyFind extractable', false); }
 ok('edit + multi_edit fall back to editFuzzyFind on exact-match miss', substr_count($src, 'editFuzzyFind(') >= 3);
+ok('edit requires a UNIQUE old_string (no silent first-of-many match)',
+    strpos($src, 'substr_count($content, $oldStr)') !== false && strpos($src, 'old_string appears') !== false);
+ok('edit accepts a literal "0" old_string (=== "" not empty())',
+    strpos($src, "if (\$oldStr === '') return \"missing old_string\"") !== false);
 
 echo "\n== Air-gap attestation removed; web-access toggle kept ==\n";
 ok('no Attest class / attest command / air-gap naming remains',

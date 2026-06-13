@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.9.3 (2026-06-13) — edit `old_string` must be unique; accepts a literal "0"
+
+### Fixed
+- **`edit` / `multi_edit` now require `old_string` to match exactly one place.** The exact-match path used `strpos` (first occurrence), so an `old_string` that appeared more than once silently edited the *wrong* line. It now counts matches and returns a helpful "appears N times — add more context" error instead — consistent with the whitespace-fallback path, which already refused ambiguous matches. Exact-match is still tried before the fuzzy fallback, so unique edits are unaffected (the eval's edit tasks still pass).
+- **A literal `old_string` of `"0"` is no longer rejected as missing** — the guard used `empty()`, which is true for the string `"0"`; switched to `=== ''`. (Same fix on `file_path`.)
+
 ## v0.9.2 (2026-06-13) — edit tool tolerates slightly-off whitespace
 
 ### Changed

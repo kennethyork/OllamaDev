@@ -146,13 +146,17 @@ Tools::register('write', function($p) {
 
 Tools::register('edit', function($p) {
     $path = $p['file_path'] ?? ''; $oldStr = $p['old_string'] ?? ''; $newStr = $p['new_string'] ?? '';
-    if (empty($path)) return "missing file_path";
-    if (empty($oldStr)) return "missing old_string";
+    if ($path === '') return "missing file_path";
+    if ($oldStr === '') return "missing old_string";
     $content = file_get_contents($path);
     if ($content === false) return "Error reading file: $path";
-    $pos = strpos($content, $oldStr); $matchLen = strlen($oldStr);
-    if ($pos === false) {
-        $fz = editFuzzyFind($content, $oldStr);   // tolerate slightly-off whitespace (unambiguous only)
+    // Require old_string to identify EXACTLY ONE place. Editing the first of
+    // several identical matches silently changes the wrong line.
+    $count = substr_count($content, $oldStr);
+    if ($count > 1) return "old_string appears $count times in $path — include more surrounding lines so it matches exactly one place.";
+    if ($count === 1) { $pos = strpos($content, $oldStr); $matchLen = strlen($oldStr); }
+    else {
+        $fz = editFuzzyFind($content, $oldStr);   // exact miss: tolerate slightly-off whitespace (unambiguous only)
         if ($fz === null) return "old_string not found in file";
         [$pos, $matched] = $fz; $matchLen = strlen($matched);
     }
@@ -167,7 +171,7 @@ Tools::register('edit', function($p) {
 Tools::register('multi_edit', function($p) {
     $path = $p['file_path'] ?? '';
     $edits = $p['edits'] ?? [];
-    if (empty($path)) return "missing file_path";
+    if ($path === '') return "missing file_path";
     if (!is_array($edits) || empty($edits)) return "missing edits (array of {old_string, new_string, [replace_all]})";
     $content = file_get_contents($path);
     if ($content === false) return "Error reading file: $path";
@@ -180,9 +184,11 @@ Tools::register('multi_edit', function($p) {
             if (strpos($content, $old) === false) return "edit #" . ($i + 1) . ": old_string not found (no edits applied)";
             $content = str_replace($old, $new, $content, $cnt); $applied += $cnt;
         } else {
-            $pos = strpos($content, $old); $len = strlen($old);
-            if ($pos === false) {
-                $fz = editFuzzyFind($content, $old);   // tolerate slightly-off whitespace (unambiguous only)
+            $cnt = substr_count($content, $old); $len = strlen($old);
+            if ($cnt > 1) return "edit #" . ($i + 1) . ": old_string appears $cnt times — add surrounding context to target one place (no edits applied).";
+            if ($cnt === 1) { $pos = strpos($content, $old); }
+            else {
+                $fz = editFuzzyFind($content, $old);   // exact miss: tolerate slightly-off whitespace (unambiguous only)
                 if ($fz === null) return "edit #" . ($i + 1) . ": old_string not found (no edits applied)";
                 [$pos, $matched] = $fz; $len = strlen($matched);
             }
