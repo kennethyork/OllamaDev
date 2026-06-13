@@ -1303,17 +1303,29 @@ $GLOBALS['currentSessionModel'] = null;
         // Live token streamer: the model's reply appears as it's generated instead
         // of the screen sitting blank until the whole turn finishes. Content tokens
         // are shown normally (and tagged 'content' so the caller can buffer them for
-        // the markdown restyle); thinking tokens are shown dimmed as progress and
-        // tagged 'thinking' so they're NOT mistaken for the answer.
-        $live = $emit ? function($delta, $isThinking) use ($emit) {
-            $emit($isThinking ? "\033[2m{$delta}\033[0m" : $delta, $isThinking ? 'thinking' : 'content');
+        // the markdown restyle). Reasoning tokens stream dimmed through a per-turn
+        // Thinking collapser ($think, rebuilt each turn below) that folds the whole
+        // block into a one-line "💭 thought for Ns" summary the moment the answer or
+        // a tool call begins — so the reasoning is watchable but doesn't clutter.
+        $think = null;
+        $live = $emit ? function($delta, $isThinking) use ($emit, &$think) {
+            if ($isThinking) {
+                if ($think) $think->push($delta); else $emit("\033[2m{$delta}\033[0m", 'thinking');
+                return;
+            }
+            if ($think && $think->shown() && !$think->done()) $think->collapse();
+            $emit($delta, 'content');
         } : null;
         if (class_exists('Interrupt')) Interrupt::begin();
         try {
         $toolsUsed = false;   // has the model actually run any tool this turn-chain?
         for ($i = 0; $i < $maxIter; $i++) {
             if (class_exists('Interrupt') && Interrupt::aborted()) break;
+            // Fresh reasoning collapser for this turn. Streams dimmed bytes through
+            // $emit (tagged 'thinking' so they're not buffered as the answer).
+            $think = $emit ? new Thinking(function($b) use ($emit) { $emit($b, 'thinking'); }, ['control' => Render::enabled()]) : null;
             $turn = $this->agent->chatTurn($this->getMessages(), $live);
+            if ($think && $think->shown() && !$think->done()) $think->collapse();   // reasoned, then went straight to a tool call
             $response = $turn['content'];
             $calls = $turn['calls'];
             $streamed = !empty($turn['streamed']);  // content already shown live?

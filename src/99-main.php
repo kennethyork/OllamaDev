@@ -760,23 +760,31 @@ if ($argc >= 2 && $argv[1] === 'chat') {
             echo "\n";
         }
         $history[] = $userMsg;
-        // Stream the model's reasoning dimmed before the answer, so on a thinking
-        // model (qwen3.5:9b) you can watch where it's heading and Ctrl-C if it's
-        // wrong — instead of a blank line for the whole think phase. The reasoning
-        // is shown only; the saved reply stays answer-only. A "thinking…" cue covers
-        // the gap before the first token (and non-reasoning models that emit none).
-        echo $c("\n" . $model . " ▸ ", '1;36') . $c("thinking…", '2'); flush();
-        $prefix = "\r\033[K" . $c($model . " ▸ ", '1;36');   // redraw the prompt (same line) once output starts
-        $started = false; $wasThinking = false;
-        $onTok = function (string $delta) use (&$started, &$wasThinking, $prefix) {
-            if (!$started) { echo $prefix; $started = true; }
-            if ($wasThinking) { echo "\n"; $wasThinking = false; }   // separate the answer from the reasoning
-            echo $delta; flush();
+        // Stream the model's reasoning dimmed and live, then COLLAPSE the whole
+        // block into a one-line "💭 thought for Ns" summary the moment the answer
+        // starts — so on a thinking model (qwen3.5:9b) you can watch where it's
+        // heading and Ctrl-C if it's wrong, but the finished answer lands on its
+        // own clean line with the reasoning folded away. A "thinking…" cue covers
+        // the gap before the first token; the saved reply stays answer-only.
+        $pfx = $c($model . " ▸ ", '1;36');
+        echo "\n" . $pfx . $c("💭 thinking…", '2'); flush();
+        $think = new Thinking(function (string $b) { echo $b; flush(); }, [
+            'summaryPrefix' => $pfx,
+            'control' => Render::enabled(),
+        ]);
+        $primed = false;   // the reasoning box has taken over the cue line
+        $answer = false;   // answer begun: the reasoning box has been collapsed
+        $onThink = function (string $t) use (&$think, &$primed) {
+            if (!$primed) { echo "\r\033[K"; $primed = true; }   // drop the "💭 thinking…" cue; the box draws here
+            $think->push($t);
         };
-        $onThink = function (string $t) use (&$started, &$wasThinking, $prefix, $c) {
-            if (!$started) { echo $prefix; $started = true; }
-            $wasThinking = true;
-            echo $c($t, '2'); flush();   // dimmed chain-of-thought
+        $onTok = function (string $delta) use (&$think, &$answer, $pfx) {
+            if (!$answer) {
+                if ($think->shown()) { $think->collapse(); echo $pfx; }   // fold reasoning → summary line, then the answer prefix
+                else echo "\r\033[K" . $pfx;                              // no reasoning streamed — just redraw the prompt
+                $answer = true;
+            }
+            echo $delta; flush();
         };
         // Send a bounded recent window to the model (system + last ~48 turns).
         $ctx = count($history) > 49 ? array_merge([$history[0]], array_slice($history, -48)) : $history;
@@ -784,7 +792,11 @@ if ($argc >= 2 && $argv[1] === 'chat') {
         $reply = (string)$client->chatWithModel($model, $ctx, $onTok, false, $onThink);   // answer only; reasoning shown via $onThink
         $interrupted = class_exists('Interrupt') && Interrupt::aborted();
         if (class_exists('Interrupt')) Interrupt::end();
-        if (!$started) echo "\r\033[K" . $c($model . " ▸ ", '1;36');   // nothing streamed — drop the cue
+        if (!$answer) {
+            // Nothing answered. If reasoning is on screen (cancelled mid-think) keep
+            // it and break the line; otherwise drop the unused "thinking…" cue.
+            if ($think->shown()) echo "\n"; else echo "\r\033[K" . $pfx;
+        }
         if ($interrupted) { Interrupt::reset(); echo $c("  ⏹ cancelled", '2'); }
         echo "\n";
         if ($interrupted) { array_pop($history); continue; }

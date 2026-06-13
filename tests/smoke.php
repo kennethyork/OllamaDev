@@ -356,6 +356,53 @@ if ($c = $extract('DiffView')) { eval($c);
     ok('DiffView shows +/- changes', strpos($d, '-') !== false && strpos($d, '+') !== false);
 } else ok('DiffView extractable', false);
 
+// 2. Thinking — reasoning collapser: hard-wraps to make rows == newlines, then
+// climbs the block and erases it, leaving a one-line summary. Deterministic with
+// an explicit wrap width (cols) and a tall viewport (LINES) so the height guard
+// never trips here.
+putenv('LINES=50');
+if ($c = $extract('Thinking')) { eval($c);
+    ok('Thinking::visWidth strips ANSI and counts emoji as 2 cols',
+        Thinking::visWidth("\033[2mab\033[0m") === 2 && Thinking::visWidth("💭") === 2);
+
+    // 25 chars at width 10 ⇒ wraps after col 10 and 20 ⇒ a 3-row block.
+    $buf = '';
+    $t = new Thinking(function ($b) use (&$buf) { $buf .= $b; }, ['cols' => 10, 'control' => true]);
+    $t->push(str_repeat('y', 25));
+    ok('Thinking streams reasoning dimmed', strpos($buf, "\033[2m") !== false);
+    ok('Thinking hard-wraps long reasoning into rows', substr_count($buf, "\n") === 2, "newlines=" . substr_count($buf, "\n"));
+    $t->collapse();
+    ok('Thinking collapse climbs (rows-1) then erases to end of display',
+        preg_match('/\r\033\[2A\033\[J/', $buf) === 1, $buf);
+    ok('Thinking collapse leaves a one-line summary', strpos($buf, 'thought for') !== false);
+    ok('Thinking collapse ends on a fresh line for the answer', substr($buf, -1) === "\n");
+    $snapshot = $buf; $t->collapse();
+    ok('Thinking collapse is idempotent', $buf === $snapshot);
+
+    // Bounded box: with a 3-row window, reasoning longer than the box keeps only
+    // the last few lines pinned, so neither a repaint nor the collapse ever climbs
+    // more than window-1 rows (the guarantee that makes the fold always succeed,
+    // even when a model out-reasons the visible screen).
+    $bb = '';
+    $tb = new Thinking(function ($b) use (&$bb) { $bb .= $b; }, ['cols' => 8, 'window' => 3, 'control' => true]);
+    $tb->push(str_repeat('a', 8) . str_repeat('b', 8) . str_repeat('c', 8) . str_repeat('d', 8) . 'ee');   // 5 rows of content
+    $tb->collapse();
+    preg_match_all('/\033\[(\d+)A/', $bb, $mUp);
+    $maxUp = $mUp[1] ? max(array_map('intval', $mUp[1])) : 0;
+    ok('Thinking box never climbs past window-1 rows', $maxUp <= 2, "maxUp=$maxUp");
+
+    // Nothing streamed ⇒ collapse is silent (the caller draws the no-reasoning case).
+    $b2 = ''; (new Thinking(function ($b) use (&$b2) { $b2 .= $b; }, ['control' => true]))->collapse();
+    ok('Thinking collapse is a no-op when no reasoning streamed', $b2 === '');
+
+    // Piped / non-tty (control=false): stream dimmed but never move the cursor;
+    // separate the answer with a plain newline.
+    $b3 = ''; $t3 = new Thinking(function ($b) use (&$b3) { $b3 .= $b; }, ['control' => false]);
+    $t3->push('reasoning'); $t3->collapse();
+    ok('Thinking without cursor control never emits cursor moves', preg_match('/\033\[\d*[AJ]/', $b3) === 0, $b3);
+    ok('Thinking without cursor control still separates with a newline', substr($b3, -1) === "\n");
+} else ok('Thinking extractable', false);
+
 // 3. interrupt — trip/aborted/reset state machine.
 if ($c = $extract('Interrupt')) { eval($c);
     Interrupt::reset();

@@ -948,6 +948,25 @@ Terminal.prototype.write = function (text) {
                 } else if (this.alt && this.grid) {
                     if (fin !== 'h' && fin !== 'l') this.grid.csi(pp, fin);   // ignore other private mode sets
                 } else if (fin === 'm') this.sgr(pp);
+                // Cursor up N logical lines (line mode). Used by the reasoning
+                // collapse (\r ESC[nA ESC[J) to climb back over a hard-wrapped
+                // thinking block before erasing it. Each emitted line is one div
+                // (the CLI hard-wraps so no soft-wrap splits a row), so moving N
+                // divs up matches a real terminal moving N rows up.
+                else if (fin === 'A' && this.line) {
+                    var up = parseInt(pp, 10) || 1, L = this.line;
+                    while (up-- > 0 && L && L.previousSibling && L.previousSibling.classList
+                           && L.previousSibling.classList.contains('term-line')) L = L.previousSibling;
+                    this.line = L;
+                }
+                // Erase to end of display (ESC[J / ESC[0J): clear the current line
+                // and drop every line below it — wipes the thinking block so the
+                // one-line summary replaces it. ESC[1J/ESC[2J keep the old
+                // clear-current-line behaviour (screen clears go through alt mode).
+                else if (fin === 'J' && (pp === '' || pp === '0') && this.line) {
+                    this.line.innerHTML = '';
+                    while (this.line.nextSibling) this.screen.removeChild(this.line.nextSibling);
+                }
                 else if ((fin === 'K' || fin === 'J') && this.line) this.line.innerHTML = '';
                 i += csi[0].length; continue;
             }

@@ -605,13 +605,21 @@ class Crew {
             // reasoning dimmed + its reply so you can watch what it's about to do and
             // Ctrl-C if it's wrong. Forked/parallel coders write to their log instead
             // (streaming N children to one terminal would interleave into noise).
-            $streamer = $live ? function ($delta, $isThinking) {
-                echo $isThinking ? "\033[2m{$delta}\033[0m" : $delta; @flush();
-            } : null;
             for ($i = 0; $i < $maxIter; $i++) {
                 if ($steerN > 0) self::injectSteerFor($messages, $steerFile, $steerN, $agent);   // separate Director redirects (incl. "model <name>" hot-swap)
                 if (!$live) { echo "\033[2m·\033[0m"; @flush(); }   // heartbeat (live mode streams real text instead)
+                // Per-turn reasoning collapser: stream the thinking dimmed, then fold
+                // it into a one-line "💭 thought for Ns" summary when the reply or a
+                // tool call begins, so each iteration stays readable.
+                $think = $live ? new Thinking(function ($b) { echo $b; @flush(); }) : null;
+                $answered = false;
+                $streamer = $live ? function ($delta, $isThinking) use ($think, &$answered) {
+                    if ($isThinking) { $think->push($delta); return; }
+                    if (!$answered) { if ($think->shown()) $think->collapse(); $answered = true; }
+                    echo $delta; @flush();
+                } : null;
                 $turn = $agent->chatTurn($messages, $streamer);
+                if ($think && $think->shown() && !$think->done()) $think->collapse();   // reasoned then went straight to a tool call
                 $calls = $turn['calls'] ?? [];
                 $think = trim(preg_replace('/\s+/', ' ', $agent->stripToolMarkup((string)($turn['content'] ?? ''))));
                 if ($dbg) fwrite(STDERR, "    [coder iter $i] calls=" . count($calls) . " content=" . substr($think, 0, 120) . "\n");

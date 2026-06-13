@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '0.8.96');
+define('OLLAMADEV_VERSION', '0.8.97');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -965,6 +965,166 @@ class LSP {
     }
 }
 
+// Thinking: stream a model's reasoning live in a small fixed-height "thinking
+// box", then COLLAPSE the box into a one-line summary ("💭 thought for 4s") the
+// moment the answer starts — so the reasoning is watchable (Ctrl-C if it's going
+// wrong) but the finished transcript stays clean and the answer sits on its own
+// line.
+//
+// Why a bounded box instead of streaming the whole chain-of-thought: a real
+// terminal can only erase rows that are still on-screen — once reasoning scrolls
+// past the top, cursor-up can't reach it, so a full-height block can't be folded
+// away. A thinking model easily out-reasons the visible screen, so we instead
+// keep only the last few wrapped lines pinned in place (older lines scroll out of
+// the box). The box is always a handful of rows tall, so the collapse ALWAYS
+// succeeds — in a real terminal and in the embedded ADE web terminal alike.
+//
+// The box is hard-wrapped at the terminal width so one emitted line is exactly
+// one physical row in a real tty AND one logical <div> in the ADE line renderer;
+// the cursor-up row count is then correct in both. (The ADE line renderer gained
+// matching cursor-up + erase-to-end-of-display support; see app.js.)
+//
+// Pure vanilla PHP, ANSI escapes only.
+class Thinking {
+    /** @var callable(string):void where the bytes go (echo, or an $emit shim). */
+    private $sink;
+    private int $cols;            // hard-wrap width (one shy of the real width)
+    private int $window;          // max rows the live box occupies
+    private array $buf = [];      // completed wrapped lines (kept to the last $window)
+    private string $cur = '';     // the in-progress (newest) line
+    private int $col = 0;         // visible column of $cur
+    private int $drawn = 0;       // rows currently painted on screen
+    private bool $shown = false;  // any reasoning streamed yet?
+    private bool $done = false;   // collapse already emitted? (idempotent)
+    private float $t0;
+    private bool $control;        // may we use cursor control (true tty/ADE)?
+    private string $summaryPrefix;
+
+    // $opt: sink-independent options.
+    //   cols          override the wrap width (defaults to the terminal width - 1)
+    //   window        rows the live thinking box may occupy (default 6)
+    //   control       false ⇒ piped/non-tty: stream dimmed but never move the cursor
+    //   summaryPrefix printed before "💭 thought for …" on the collapsed line
+    public function __construct(callable $sink, array $opt = []) {
+        $this->sink = $sink;
+        $this->cols = isset($opt['cols']) && (int)$opt['cols'] > 0 ? (int)$opt['cols'] : self::width();
+        $win = (int)($opt['window'] ?? 6);
+        // Never let the box exceed the screen, or its own collapse couldn't reach
+        // the top row. Clamp to a safe slice of the viewport.
+        $this->window = max(1, min($win, self::height() - 2));
+        $this->control = array_key_exists('control', $opt) ? (bool)$opt['control'] : true;
+        $this->summaryPrefix = (string)($opt['summaryPrefix'] ?? '');
+        $this->t0 = microtime(true);
+    }
+
+    // Terminal width, minus a 1-column margin so a wrapped line never brushes the
+    // real terminal's own soft-wrap edge (which would split it into 2 physical
+    // rows and throw the box's row count off by one).
+    public static function width(): int {
+        $c = (int)getenv('COLUMNS');
+        if ($c <= 0) $c = (int)@exec('tput cols 2>/dev/null');
+        if ($c <= 0) $c = 80;
+        return max(20, $c - 1);
+    }
+
+    public static function height(): int {
+        $r = (int)getenv('LINES');
+        if ($r <= 0) $r = (int)@exec('tput lines 2>/dev/null');
+        if ($r <= 0) $r = 24;
+        return max(8, $r);
+    }
+
+    // Visible width of $s (ANSI stripped; each codepoint 1 col, emoji 2).
+    public static function visWidth(string $s): int {
+        $s = preg_replace('/\033\[[0-9;?]*[A-Za-z]/', '', $s);
+        $w = 0; $n = strlen($s);
+        for ($i = 0; $i < $n; ) {
+            $o = ord($s[$i]);
+            if ($o < 0x80) { $len = 1; $cp = $o; }
+            elseif ($o >= 0xF0) { $len = 4; $cp = $o & 0x07; }
+            elseif ($o >= 0xE0) { $len = 3; $cp = $o & 0x0F; }
+            elseif ($o >= 0xC0) { $len = 2; $cp = $o & 0x1F; }
+            else { $len = 1; $cp = $o; }
+            for ($k = 1; $k < $len && $i + $k < $n; $k++) $cp = ($cp << 6) | (ord($s[$i + $k]) & 0x3F);
+            $i += $len;
+            $w += ($cp >= 0x1100 && ($cp >= 0x1F000 || $cp >= 0x2190 && $cp <= 0x2bff || $cp >= 0x3000 && $cp <= 0x9fff)) ? 2 : 1;
+        }
+        return $w;
+    }
+
+    // Stream a chunk of reasoning into the box. Folds the text into the wrapped
+    // line buffer, then repaints the (bounded) box in place.
+    public function push(string $t): void {
+        if ($t === '') return;
+        $this->shown = true;
+        if (!$this->control) { ($this->sink)("\033[2m" . $t . "\033[0m"); return; }
+        $n = strlen($t);
+        for ($i = 0; $i < $n; ) {
+            $o = ord($t[$i]);
+            $len = $o >= 0xF0 ? 4 : ($o >= 0xE0 ? 3 : ($o >= 0xC0 ? 2 : 1));
+            $ch = substr($t, $i, $len); $i += $len;
+            if ($ch === "\r") continue;                 // ignore stray carriage returns
+            if ($ch === "\n") { $this->commit(); continue; }
+            if ($ch === "\t") $ch = ' ';                // a tab counts as one column here
+            if ($this->col >= $this->cols) $this->commit();   // hard wrap at the box width
+            $this->cur .= $ch; $this->col++;
+        }
+        $this->repaint();
+    }
+
+    // Finish the current line and push it into the rolling buffer (oldest line
+    // scrolls out of the box once we exceed $window).
+    private function commit(): void {
+        $this->buf[] = $this->cur;
+        if (count($this->buf) > $this->window) array_shift($this->buf);
+        $this->cur = ''; $this->col = 0;
+    }
+
+    // Repaint the box in place: climb back to its first row, erase it, and reprint
+    // the last $window lines.
+    private function repaint(): void {
+        $vis = $this->buf;
+        if ($this->cur !== '' || empty($vis)) $vis[] = $this->cur;   // include the in-progress line
+        $vis = array_slice($vis, -$this->window);
+        $seq = $this->rewind();
+        $body = [];
+        foreach ($vis as $l) $body[] = "\033[2m" . $l . "\033[0m";
+        $seq .= implode("\n", $body);
+        $this->drawn = count($vis);
+        ($this->sink)($seq);
+    }
+
+    // Cursor sequence to return to the top-left of the currently-painted box and
+    // erase it (everything from there down).
+    private function rewind(): string {
+        if ($this->drawn <= 0) return '';
+        $up = $this->drawn - 1;
+        return "\r" . ($up > 0 ? "\033[{$up}A" : '') . "\033[J";
+    }
+
+    // Collapse the box into the one-line summary. Idempotent: a second call (e.g. a
+    // post-turn finalize after the answer path already collapsed) does nothing.
+    // No-op when nothing was streamed — the caller handles that case.
+    public function collapse(): void {
+        if ($this->done || !$this->shown) { $this->done = true; return; }
+        $this->done = true;
+        $label = "\033[2m💭 thought for " . self::dur(microtime(true) - $this->t0) . "\033[0m";
+        if (!$this->control) { ($this->sink)("\n"); return; }   // piped: just break to a new line
+        // Erase the box and replace it with the summary. The next write lands on a
+        // fresh line below it.
+        ($this->sink)($this->rewind() . $this->summaryPrefix . $label . "\n");
+    }
+
+    public function shown(): bool { return $this->shown; }
+    public function done(): bool { return $this->done; }
+
+    public static function dur(float $s): string {
+        if ($s < 1)  return round($s, 1) . 's';
+        if ($s < 60) return round($s) . 's';
+        $m = (int)floor($s / 60); $r = (int)round($s - $m * 60);
+        return $m . 'm' . ($r ? " {$r}s" : '');
+    }
+}
 class OllamaClient {
     private string $host;
     private int $timeout = 120;
@@ -7528,13 +7688,21 @@ class Crew {
             // reasoning dimmed + its reply so you can watch what it's about to do and
             // Ctrl-C if it's wrong. Forked/parallel coders write to their log instead
             // (streaming N children to one terminal would interleave into noise).
-            $streamer = $live ? function ($delta, $isThinking) {
-                echo $isThinking ? "\033[2m{$delta}\033[0m" : $delta; @flush();
-            } : null;
             for ($i = 0; $i < $maxIter; $i++) {
                 if ($steerN > 0) self::injectSteerFor($messages, $steerFile, $steerN, $agent);   // separate Director redirects (incl. "model <name>" hot-swap)
                 if (!$live) { echo "\033[2m·\033[0m"; @flush(); }   // heartbeat (live mode streams real text instead)
+                // Per-turn reasoning collapser: stream the thinking dimmed, then fold
+                // it into a one-line "💭 thought for Ns" summary when the reply or a
+                // tool call begins, so each iteration stays readable.
+                $think = $live ? new Thinking(function ($b) { echo $b; @flush(); }) : null;
+                $answered = false;
+                $streamer = $live ? function ($delta, $isThinking) use ($think, &$answered) {
+                    if ($isThinking) { $think->push($delta); return; }
+                    if (!$answered) { if ($think->shown()) $think->collapse(); $answered = true; }
+                    echo $delta; @flush();
+                } : null;
                 $turn = $agent->chatTurn($messages, $streamer);
+                if ($think && $think->shown() && !$think->done()) $think->collapse();   // reasoned then went straight to a tool call
                 $calls = $turn['calls'] ?? [];
                 $think = trim(preg_replace('/\s+/', ' ', $agent->stripToolMarkup((string)($turn['content'] ?? ''))));
                 if ($dbg) fwrite(STDERR, "    [coder iter $i] calls=" . count($calls) . " content=" . substr($think, 0, 120) . "\n");
@@ -10435,17 +10603,29 @@ $GLOBALS['currentSessionModel'] = null;
         // Live token streamer: the model's reply appears as it's generated instead
         // of the screen sitting blank until the whole turn finishes. Content tokens
         // are shown normally (and tagged 'content' so the caller can buffer them for
-        // the markdown restyle); thinking tokens are shown dimmed as progress and
-        // tagged 'thinking' so they're NOT mistaken for the answer.
-        $live = $emit ? function($delta, $isThinking) use ($emit) {
-            $emit($isThinking ? "\033[2m{$delta}\033[0m" : $delta, $isThinking ? 'thinking' : 'content');
+        // the markdown restyle). Reasoning tokens stream dimmed through a per-turn
+        // Thinking collapser ($think, rebuilt each turn below) that folds the whole
+        // block into a one-line "💭 thought for Ns" summary the moment the answer or
+        // a tool call begins — so the reasoning is watchable but doesn't clutter.
+        $think = null;
+        $live = $emit ? function($delta, $isThinking) use ($emit, &$think) {
+            if ($isThinking) {
+                if ($think) $think->push($delta); else $emit("\033[2m{$delta}\033[0m", 'thinking');
+                return;
+            }
+            if ($think && $think->shown() && !$think->done()) $think->collapse();
+            $emit($delta, 'content');
         } : null;
         if (class_exists('Interrupt')) Interrupt::begin();
         try {
         $toolsUsed = false;   // has the model actually run any tool this turn-chain?
         for ($i = 0; $i < $maxIter; $i++) {
             if (class_exists('Interrupt') && Interrupt::aborted()) break;
+            // Fresh reasoning collapser for this turn. Streams dimmed bytes through
+            // $emit (tagged 'thinking' so they're not buffered as the answer).
+            $think = $emit ? new Thinking(function($b) use ($emit) { $emit($b, 'thinking'); }, ['control' => Render::enabled()]) : null;
             $turn = $this->agent->chatTurn($this->getMessages(), $live);
+            if ($think && $think->shown() && !$think->done()) $think->collapse();   // reasoned, then went straight to a tool call
             $response = $turn['content'];
             $calls = $turn['calls'];
             $streamed = !empty($turn['streamed']);  // content already shown live?
@@ -11304,23 +11484,31 @@ if ($argc >= 2 && $argv[1] === 'chat') {
             echo "\n";
         }
         $history[] = $userMsg;
-        // Stream the model's reasoning dimmed before the answer, so on a thinking
-        // model (qwen3.5:9b) you can watch where it's heading and Ctrl-C if it's
-        // wrong — instead of a blank line for the whole think phase. The reasoning
-        // is shown only; the saved reply stays answer-only. A "thinking…" cue covers
-        // the gap before the first token (and non-reasoning models that emit none).
-        echo $c("\n" . $model . " ▸ ", '1;36') . $c("thinking…", '2'); flush();
-        $prefix = "\r\033[K" . $c($model . " ▸ ", '1;36');   // redraw the prompt (same line) once output starts
-        $started = false; $wasThinking = false;
-        $onTok = function (string $delta) use (&$started, &$wasThinking, $prefix) {
-            if (!$started) { echo $prefix; $started = true; }
-            if ($wasThinking) { echo "\n"; $wasThinking = false; }   // separate the answer from the reasoning
-            echo $delta; flush();
+        // Stream the model's reasoning dimmed and live, then COLLAPSE the whole
+        // block into a one-line "💭 thought for Ns" summary the moment the answer
+        // starts — so on a thinking model (qwen3.5:9b) you can watch where it's
+        // heading and Ctrl-C if it's wrong, but the finished answer lands on its
+        // own clean line with the reasoning folded away. A "thinking…" cue covers
+        // the gap before the first token; the saved reply stays answer-only.
+        $pfx = $c($model . " ▸ ", '1;36');
+        echo "\n" . $pfx . $c("💭 thinking…", '2'); flush();
+        $think = new Thinking(function (string $b) { echo $b; flush(); }, [
+            'summaryPrefix' => $pfx,
+            'control' => Render::enabled(),
+        ]);
+        $primed = false;   // the reasoning box has taken over the cue line
+        $answer = false;   // answer begun: the reasoning box has been collapsed
+        $onThink = function (string $t) use (&$think, &$primed) {
+            if (!$primed) { echo "\r\033[K"; $primed = true; }   // drop the "💭 thinking…" cue; the box draws here
+            $think->push($t);
         };
-        $onThink = function (string $t) use (&$started, &$wasThinking, $prefix, $c) {
-            if (!$started) { echo $prefix; $started = true; }
-            $wasThinking = true;
-            echo $c($t, '2'); flush();   // dimmed chain-of-thought
+        $onTok = function (string $delta) use (&$think, &$answer, $pfx) {
+            if (!$answer) {
+                if ($think->shown()) { $think->collapse(); echo $pfx; }   // fold reasoning → summary line, then the answer prefix
+                else echo "\r\033[K" . $pfx;                              // no reasoning streamed — just redraw the prompt
+                $answer = true;
+            }
+            echo $delta; flush();
         };
         // Send a bounded recent window to the model (system + last ~48 turns).
         $ctx = count($history) > 49 ? array_merge([$history[0]], array_slice($history, -48)) : $history;
@@ -11328,7 +11516,11 @@ if ($argc >= 2 && $argv[1] === 'chat') {
         $reply = (string)$client->chatWithModel($model, $ctx, $onTok, false, $onThink);   // answer only; reasoning shown via $onThink
         $interrupted = class_exists('Interrupt') && Interrupt::aborted();
         if (class_exists('Interrupt')) Interrupt::end();
-        if (!$started) echo "\r\033[K" . $c($model . " ▸ ", '1;36');   // nothing streamed — drop the cue
+        if (!$answer) {
+            // Nothing answered. If reasoning is on screen (cancelled mid-think) keep
+            // it and break the line; otherwise drop the unused "thinking…" cue.
+            if ($think->shown()) echo "\n"; else echo "\r\033[K" . $pfx;
+        }
         if ($interrupted) { Interrupt::reset(); echo $c("  ⏹ cancelled", '2'); }
         echo "\n";
         if ($interrupted) { array_pop($history); continue; }

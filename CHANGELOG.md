@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.8.97 (2026-06-12) — reasoning streams in a collapsing "thinking box"
+
+### Changed
+- **The model's reasoning now streams in a small, fixed-height "thinking box" that collapses to a one-line summary the moment the answer starts.** You still watch the reasoning live (and Ctrl-C if it's heading the wrong way), but once the reply begins the whole box folds into a dimmed `💭 thought for 4s` line and the answer lands on its own clean line below it. Applies everywhere reasoning is shown live: the **chat REPL**, the **agentic CLI**, and **crew** coders.
+- Why a bounded box: a terminal can only erase rows still on-screen, so a full chain-of-thought that out-scrolls the window can't be folded away. The box keeps just the last few wrapped lines pinned (older lines scroll out of it), so the collapse **always** succeeds — even in a short terminal, and in the desktop/web ADE alike.
+
+### Added
+- **The embedded ADE terminal learned cursor-up + erase-to-end-of-display** (line mode), so the collapse renders identically in the desktop/web chat as in a real terminal. The CLI hard-wraps the box to the terminal width so one emitted line is exactly one row in both.
+
+### Note
+- Pure vanilla PHP/JS/CSS/HTML, Ollama + LM Studio only — no new dependencies. When piped to a file (no TTY), reasoning still streams but the cursor is never moved; the answer is simply separated onto a new line.
+
 ## v0.8.96 (2026-06-12) — /context shows GPU load; thinking models nudged to use their reasoning channel
 
 ### Added
