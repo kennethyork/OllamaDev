@@ -622,6 +622,7 @@ CanvasRenderer.prototype._bindMouse = function () {
 // pty (and the raw-mode ollamadev CLI inside it) gets live keystrokes.
 function keyToBytes(e) {
     if (e.altKey) return null;
+    if (e.metaKey) return null;   // macOS Cmd combos: don't type the letter — let Cmd+V fire the native paste, Cmd+C copy, etc.
     var k = e.key;
     if (e.ctrlKey) {
         if (k === 'c') return '\x03';
@@ -766,7 +767,8 @@ Terminal.prototype.mount = function (host) {
         if (mod && e.shiftKey && (e.key === 'C' || e.key === 'c')) { e.preventDefault(); self.copySelection(); return; }
         if (mod && e.shiftKey && (e.key === 'V' || e.key === 'v')) { e.preventDefault(); self.pasteClipboard(); return; }
         if (e.metaKey && !e.ctrlKey && !e.shiftKey && (e.key === 'c' || e.key === 'C') && self.hasSelection()) { e.preventDefault(); self.copySelection(); return; }
-        if (e.metaKey && !e.ctrlKey && !e.shiftKey && (e.key === 'v' || e.key === 'V')) { e.preventDefault(); self.pasteClipboard(); return; }
+        // macOS Cmd+V is NOT intercepted — it falls through to keyToBytes (null), so the
+        // browser's native paste event fires on the textarea, like Ctrl+V on Win/Linux.
         var data = keyToBytes(e);
         if (data !== null) {
             e.preventDefault();
@@ -1145,23 +1147,33 @@ Terminal.prototype.copySelection = function () {
 };
 // Paste clipboard text into the pty. The native `paste` event handler (middle-click,
 // Shift+Insert) stays as a fallback when readText is blocked in the webview.
-// Programmatic paste (Ctrl+Shift+V, right-click menu). Focuses the hidden textarea
-// and runs execCommand('paste'): with javascript-can-access-clipboard enabled on the
-// webview (index.php), that fires a paste event on the textarea — caught by its paste
-// handler. Falls back to the async clipboard API (web mode / browsers). All vanilla.
+// Programmatic paste (Ctrl/Cmd+Shift+V, right-click menu) — cross-platform fallback
+// chain, since each webview blocks JS clipboard reads differently. The native paste
+// GESTURE (Ctrl+V / Cmd+V / Shift+Insert / middle-click) goes through the textarea's
+// paste event and isn't affected by any of this.
+//   1) execCommand('paste') — works on Linux WebKitGTK (javascript-can-access-clipboard
+//      is on); fires a paste event on the hidden textarea, caught by its handler.
+//   2) navigator.clipboard.readText() — works in Windows WebView2 (and web mode) in a
+//      user gesture.
+//   3) window.clipboardRead() native binding — macOS/Windows OS built-ins (pbpaste /
+//      Get-Clipboard); the guaranteed fallback for those two. All vanilla, no installs.
 Terminal.prototype.pasteClipboard = function () {
     var self = this;
     if (this.kbd) this.kbd.focus();
-    var ok = false;
-    try { ok = document.execCommand('paste'); } catch (e) {}
-    if (ok) return;
+    var write = function (t) { if (t) { try { window.termWrite(self.id, strToB64(t)); } catch (e) {} return true; } return false; };
+    var nativeRead = function () {
+        if (typeof window.clipboardRead === 'function') {
+            try { Promise.resolve(window.clipboardRead()).then(write).catch(function () {}); } catch (e) {}
+        }
+    };
+    try { if (document.execCommand('paste')) return; } catch (e) {}   // (1)
     try {
-        if (navigator.clipboard && navigator.clipboard.readText) {
-            navigator.clipboard.readText().then(function (t) {
-                if (t) { try { window.termWrite(self.id, strToB64(t)); } catch (e) {} }
-            }).catch(function () {});
+        if (navigator.clipboard && navigator.clipboard.readText) {     // (2)
+            navigator.clipboard.readText().then(function (t) { if (!write(t)) nativeRead(); }).catch(nativeRead);
+            return;
         }
     } catch (e) {}
+    nativeRead();                                                      // (3)
 };
 // Right-click menu: Copy (enabled only with a selection) + Paste. Reuses the
 // .canvas-menu styling. Buttons preventDefault on mousedown so clicking Copy

@@ -71,6 +71,24 @@ final class Bindings
     public function termKill(string $id): bool { $this->pty->delete($id); return true; }
     public function termResize(string $id, int $cols, int $rows): bool { return $this->pty->resize($id, $cols, $rows); }
     public function agentRun(string $id, string $prompt): bool { return $this->pty->agentRun($id, $prompt); }
+    // Read the OS clipboard on macOS / Windows via their BUILT-IN tools (pbpaste /
+    // Get-Clipboard — shipped with the OS, nothing to install). Used only as the
+    // programmatic-paste fallback (right-click menu, Ctrl/Cmd+Shift+V) for those two
+    // webviews, which block JS clipboard reads. Linux returns '' here — it uses the
+    // WebKitGTK javascript-can-access-clipboard path (see index.php) instead, so no
+    // Linux clipboard tool is ever required. Pure vanilla PHP, no dependency.
+    public function clipboardRead(): string
+    {
+        if (PHP_OS_FAMILY === 'Darwin') {
+            $out = @shell_exec('pbpaste 2>/dev/null');
+            return $out !== null ? (string) $out : '';
+        }
+        if (PHP_OS_FAMILY === 'Windows') {
+            $out = @shell_exec('powershell -NoProfile -Command Get-Clipboard');
+            return $out !== null ? preg_replace('/\r?\n$/', '', (string) $out) : '';  // drop Get-Clipboard's trailing newline
+        }
+        return '';   // Linux: handled by the webview flag + execCommand('paste')
+    }
 
     public function cliPath(): string { return $this->cli; }
 

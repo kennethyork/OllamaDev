@@ -48,10 +48,12 @@ $app = new Application(new ApplicationCreateInfo(
             // Enable JS clipboard access in the WebKitGTK webview so the terminal's
             // right-click Paste / Ctrl+Shift+V (document.execCommand('paste')) work —
             // the webview otherwise blocks JS clipboard reads. A local app loading our
-            // own trusted HTML, so this is safe. (On Linux, flags are WebKitGTK
-            // settings; this key is the WebKitSettings:javascript-can-access-clipboard
-            // property. Harmless on other platforms.)
-            flags: ['javascript-can-access-clipboard' => true],
+            // own trusted HTML, so this is safe. This key is a WebKitGTK-only setting
+            // (WebKitSettings:javascript-can-access-clipboard); on Linux flags map to
+            // WebKitGTK settings, so we only pass it there — WebView2 (Windows) /
+            // WKWebView (macOS) take different flag formats and don't need it (Ctrl+V /
+            // Cmd+V paste natively).
+            flags: PHP_OS_FAMILY === 'Linux' ? ['javascript-can-access-clipboard' => true] : [],
             extensions: [
                 new ScriptsExtension(),
                 new BindingsExtension(),
@@ -86,6 +88,7 @@ $app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $
     $b->bind('termWrite',     fn(string $id, string $b64): bool => $bx->termWrite($id, $b64));
     $b->bind('termKill',      fn(string $id): bool => $bx->termKill($id));
     $b->bind('agentRun',      fn(string $id, string $prompt): bool => $bx->agentRun($id, $prompt));
+    $b->bind('clipboardRead', fn(): string => $bx->clipboardRead());   // macOS/Windows paste fallback (OS built-ins)
     $b->bind('cliPath',       fn(): string => $bx->cliPath());
     $b->bind('sttEnabled',    fn(): bool => $bx->sttEnabled());
     $b->bind('sttTranscribe', fn(string $b64, string $ext = 'webm'): string => $bx->sttTranscribe($b64, $ext));
