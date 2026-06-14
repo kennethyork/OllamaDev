@@ -83,6 +83,13 @@ class Permission {
         if ($tool === 'write' || $tool === 'edit') return true;
         // mode 'ask': prompt when interactive, otherwise allow (one-shot = user-driven).
         if (!self::$interactive) return true;
+        // If the Board is attached (ADE, or --board flag on the CLI), hand the
+        // prompt to the Board queue so a click in the desktop/web UI decides
+        // it. Falls back to the plain fgets() prompt when Board isn't loaded
+        // or isn't attached — no behavior change for plain CLI.
+        if (class_exists('Board') && Board::isAttached()) {
+            return Board::askPermission($tool, $params);
+        }
         return self::prompt($tool, $params);
     }
 
@@ -102,4 +109,3 @@ class Permission {
         return false;
     }
 }
-
