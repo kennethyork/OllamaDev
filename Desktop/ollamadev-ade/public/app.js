@@ -627,6 +627,7 @@ function keyToBytes(e) {
         if (k === 'c') return '\x03';
         if (k === 'd') return '\x04';
         if (k === 'z') return '\x1a';
+        if (k === 'v' || k === 'V') return null;   // don't send ^V — let the browser's native paste event fire
         if (k.length === 1) {
             var c = k.toLowerCase().charCodeAt(0);
             if (c >= 97 && c <= 122) return String.fromCharCode(c - 96); // Ctrl-A..Z
@@ -742,12 +743,25 @@ Terminal.prototype.mount = function (host) {
         inp.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); finish(true); } else if (ev.key === 'Escape') finish(false); });
         inp.addEventListener('blur', function () { finish(false); });
     };
-    // The screen IS the terminal: forward every keystroke straight to the pty.
-    this.screen.addEventListener('keydown', function (e) {
-        // Clipboard shortcuts FIRST — before keyToBytes turns them into control
-        // bytes. Ctrl+Shift+C copies the selection, Ctrl+Shift+V pastes (the Linux
-        // terminal standard); plain Ctrl+C / Ctrl+V stay SIGINT / ^V for shell apps.
-        // macOS Cmd+C (with a selection) / Cmd+V also work.
+    // Hidden, focused textarea: it owns keyboard focus and — crucially — catches the
+    // browser's NATIVE paste event (Ctrl+V / Shift+Insert / middle-click), which a
+    // non-editable div never gets. That's the vanilla, dependency-free way to paste in
+    // a webview that blocks navigator.clipboard.readText(). pointer-events:none lets
+    // mouse clicks/drags fall through to the screen below, so selection-to-copy still
+    // works. caret-color:transparent + opacity:0 keep it invisible.
+    var kbd = document.createElement('textarea');
+    kbd.className = 'term-kbd';
+    kbd.setAttribute('autocapitalize', 'off'); kbd.setAttribute('autocomplete', 'off');
+    kbd.setAttribute('autocorrect', 'off'); kbd.spellcheck = false; kbd.tabIndex = -1;
+    kbd.style.cssText = 'position:absolute;left:0;top:0;width:1px;height:1px;opacity:0;border:0;padding:0;margin:0;resize:none;overflow:hidden;outline:none;pointer-events:none;white-space:nowrap;caret-color:transparent;z-index:0;';
+    host.appendChild(kbd);
+    this.kbd = kbd;
+    // The textarea IS the terminal's keyboard: forward every keystroke to the pty.
+    kbd.addEventListener('keydown', function (e) {
+        // Clipboard shortcuts FIRST — before keyToBytes turns them into control bytes.
+        // Ctrl+Shift+C copies the selection; Ctrl+Shift+V is a best-effort paste.
+        // macOS Cmd+C (with a selection) / Cmd+V too. Plain Ctrl+C stays SIGINT; plain
+        // Ctrl+V is NOT intercepted here so the browser's native paste event can fire.
         var mod = e.ctrlKey || e.metaKey;
         if (mod && e.shiftKey && (e.key === 'C' || e.key === 'c')) { e.preventDefault(); self.copySelection(); return; }
         if (mod && e.shiftKey && (e.key === 'V' || e.key === 'v')) { e.preventDefault(); self.pasteClipboard(); return; }
@@ -761,12 +775,28 @@ Terminal.prototype.mount = function (host) {
             if (data.indexOf('\r') !== -1) self.markBusy();
         }
     });
-    this.screen.addEventListener('paste', function (e) {
+    // Native paste — fires here for Ctrl+V, Shift+Insert, and X11 middle-click.
+    kbd.addEventListener('paste', function (e) {
         var t = (e.clipboardData || window.clipboardData).getData('text');
-        if (t) { e.preventDefault(); try { window.termWrite(self.id, strToB64(t)); } catch (err) {} }
+        e.preventDefault();   // never let it land in the (hidden) textarea
+        if (t) { try { window.termWrite(self.id, strToB64(t)); } catch (err) {} }
+        kbd.value = '';
     });
-    this.screen.onclick = function () { self.screen.focus(); if (window.App) App.lastActiveTerm = self.id; };
-    this.screen.addEventListener('focus', function () { if (window.App) App.lastActiveTerm = self.id; });
+    kbd.addEventListener('input', function () { kbd.value = ''; });   // belt-and-suspenders
+    kbd.addEventListener('focus', function () { if (window.App) App.lastActiveTerm = self.id; });
+    // Right-click → a small Copy/Paste menu. The Boson webview shows no usable
+    // native context menu, and the canvas menu deliberately skips terminal panes
+    // (so it has to live here). stopPropagation keeps the canvas menu from firing.
+    this.screen.addEventListener('contextmenu', function (e) {
+        e.preventDefault(); e.stopPropagation();
+        self.showTermMenu(e.clientX, e.clientY);
+    });
+    // Clicking the screen routes keyboard focus to the hidden textarea. After a
+    // drag-select, keep the selection (don't steal focus) so Ctrl+Shift+C can read it.
+    this.screen.onclick = function () { self.kbd.focus(); if (window.App) App.lastActiveTerm = self.id; };
+    this.screen.addEventListener('mouseup', function () {
+        setTimeout(function () { if (!(window.getSelection && String(window.getSelection()))) self.kbd.focus(); }, 0);
+    });
     this.alt = false; this.grid = null; this.gridEl = null;   // alt screen never survives a remount
     // Opt-in GPU-composited canvas renderer (App.canvasTerm). Default is the DOM
     // renderer, untouched — so this can never regress the working terminal.
@@ -779,7 +809,7 @@ Terminal.prototype.mount = function (host) {
     // so re-open it (offset was reset, so it re-streams from the top). Without this, a
     // terminal goes dead when another pane is added/removed (render() re-mounts everything).
     else if (wasStreaming) this.poll();
-    setTimeout(function () { self.screen.focus(); self.fit(); }, 0);   // size the pty once laid out
+    setTimeout(function () { (self.kbd || self.screen).focus(); self.fit(); }, 0);   // size the pty once laid out
     // Re-fit whenever the pane's actual size changes (mount settle, free-pane drag,
     // zoom, window resize) — no timing guesswork. Fixes a canvas sized off a stale
     // clientWidth. Works for the DOM renderer too (keeps the pty cols/rows correct).
@@ -817,7 +847,7 @@ Terminal.prototype._wireChatBar = function (host) {
 };
 Terminal.prototype._chatSend = function (s, noNewline) {
     try { window.termWrite(this.id, strToB64(s + (noNewline ? '' : '\n'))); } catch (e) {}
-    if (this.screen) this.screen.focus();
+    if (this.kbd || this.screen) (this.kbd || this.screen).focus();
 };
 Terminal.prototype.chatSetModel = function (m) {
     if (!m || m === this.model) return;
@@ -1113,10 +1143,16 @@ Terminal.prototype.copySelection = function () {
         if (typeof banner === 'function') banner('copied', 'ok');
     } catch (e) {}
 };
-// Paste clipboard text into the pty. The native `paste` event handler (right-click
-// menu, middle-click, Shift+Insert) stays as a fallback when readText is blocked.
+// Paste clipboard text into the pty. The native `paste` event handler (middle-click,
+// Shift+Insert) stays as a fallback when readText is blocked in the webview.
+// Best-effort programmatic paste (Ctrl+Shift+V, right-click menu). Works in web
+// mode (browser clipboard over localhost/HTTPS). In the desktop webview readText is
+// blocked, so it focuses the hidden keyboard textarea instead — the user's Ctrl+V /
+// Shift+Insert / middle-click then pastes via the browser's native paste event,
+// which needs no clipboard-read permission. All vanilla, no OS tools.
 Terminal.prototype.pasteClipboard = function () {
     var self = this;
+    if (this.kbd) this.kbd.focus();
     try {
         if (navigator.clipboard && navigator.clipboard.readText) {
             navigator.clipboard.readText().then(function (t) {
@@ -1124,6 +1160,43 @@ Terminal.prototype.pasteClipboard = function () {
             }).catch(function () {});
         }
     } catch (e) {}
+};
+// Right-click menu: Copy (enabled only with a selection) + Paste. Reuses the
+// .canvas-menu styling. Buttons preventDefault on mousedown so clicking Copy
+// doesn't clear the text selection before copySelection() reads it.
+Terminal.prototype.showTermMenu = function (x, y) {
+    var self = this;
+    var old = document.getElementById('termCtxMenu'); if (old) old.remove();
+    var hasSel = this.hasSelection();
+    var m = document.createElement('div');
+    m.id = 'termCtxMenu'; m.className = 'canvas-menu';
+    m.style.left = x + 'px'; m.style.top = y + 'px'; m.style.zIndex = '9999';
+    function remove() {
+        m.remove();
+        document.removeEventListener('mousedown', onDoc, true);
+        document.removeEventListener('keydown', onKey, true);
+    }
+    function onDoc(ev) { if (!m.contains(ev.target)) remove(); }
+    function onKey(ev) { if (ev.key === 'Escape') remove(); }
+    var mk = function (label, fn, enabled) {
+        var b = document.createElement('button'); b.type = 'button'; b.textContent = label;
+        if (!enabled) { b.disabled = true; b.style.opacity = '.45'; b.style.cursor = 'default'; }
+        else {
+            b.onmousedown = function (ev) { ev.preventDefault(); };   // keep selection + focus
+            b.onclick = function () { remove(); fn(); };
+        }
+        m.appendChild(b);
+    };
+    mk('Copy', function () { self.copySelection(); }, hasSel);
+    mk('Paste', function () { self.pasteClipboard(); }, true);
+    document.body.appendChild(m);
+    var r = m.getBoundingClientRect();
+    if (r.right > window.innerWidth) m.style.left = Math.max(4, x - r.width) + 'px';
+    if (r.bottom > window.innerHeight) m.style.top = Math.max(4, y - r.height) + 'px';
+    setTimeout(function () {
+        document.addEventListener('mousedown', onDoc, true);
+        document.addEventListener('keydown', onKey, true);
+    }, 0);
 };
 
 function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
