@@ -425,6 +425,14 @@ ollamadev -m qwen3-coder:480b-cloud    <span class="cm"># use it (also /model in
     <div class="callout">Cloud models <strong>leave the machine</strong> — prompts run on Ollama's servers (the catalog says so plainly). Local stays the default; cloud is strictly opt-in. To keep a run local, the <strong>🌐 Web</strong> toggle / <code>--no-web</code> blocks the agent's network tools.</div>
     <p class="dim">Cloud models always run at their <strong>full context window</strong> — the local <code>maxContextWindow</code> cap (which exists to fit your GPU/RAM) is bypassed for them, since they run on Ollama's hardware. E.g. a 512K-context cloud model uses all 512K.</p>
 
+    <h3 id="cloud-login" class="anchor">How the cloud login works</h3>
+    <p>Cloud access lives in <strong>Ollama</strong>, not OllamaDev — OllamaDev never sees an API key, it just relays through your local daemon. You enable cloud by running <code>ollama signin</code> (a free ollama.com account) <strong>once on the machine that runs Ollama</strong>; after that every <code>:cloud</code> model just works. There is <strong>no per-user login inside OllamaDev</strong>, which means it behaves differently per surface:</p>
+    <ul>
+      <li><strong>CLI &amp; desktop</strong> — each person signs in on their <em>own</em> machine, so cloud is genuinely per-user: their account, their usage, their billing.</li>
+      <li><strong>Self-hosted web (VPS)</strong> — there's one Ollama daemon, so <strong>every browser user shares the single account</strong> you ran <code>ollama signin</code> with on the server. Same cloud identity, same usage limits and billing for everyone — there's no per-visitor cloud auth.</li>
+    </ul>
+    <div class="callout">Quota and cost are governed by that <strong>ollama.com account</strong>, not by OllamaDev. Local models need <em>no</em> login at all — <code>ollama signin</code> only matters for the optional <code>:cloud</code> models. If you expose the web app to others and don't want them spending your cloud quota, stick to local models on that server (or keep the <code>:cloud</code> tags unpulled).</div>
+
     <h2 id="env" class="anchor">Environment variables</h2>
     <table>
       <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
@@ -451,6 +459,7 @@ ollamadev -m qwen3-coder:480b-cloud    <span class="cm"># use it (also /model in
 
     <h2 id="selfhost" class="anchor">Self-hosting on a VPS</h2>
     <p>Run OllamaDev on a server you control and reach it from anywhere — handy when you're away from your desktop. Everything still runs on <em>your</em> box (a VPS is your server, not a cloud AI provider), so it stays self-hosted.</p>
+    <p class="dim">Heads-up if more than one person will use it: there's no per-user login, and any Ollama <strong>cloud</strong> models on the server run under the <em>single</em> account you <code>ollama signin</code>'d there — everyone shares that cloud identity and its billing. See <a href="#cloud-login">How the cloud login works</a> above.</p>
 
     <h3>Two ways to use it remotely</h3>
     <p>Both run the <em>same</em> agent on the VPS — they differ only in the front-end you drive it with. You don't need both; pick what fits the moment.</p>
@@ -569,7 +578,7 @@ sudo tailscale serve --bg 41434     <span class="cm"># serves localhost:41434 as
 
 <footer class="footer">
   <div class="footer-inner">
-    <div>OllamaDev · GPL-3.0 licensed · 100% local AI coding</div>
+    <div>OllamaDev · GPL-3.0 licensed · local-first AI coding</div>
     <div class="links">
       <a href="index.html">Home</a>
       <a href="https://github.com/kennethyork/OllamaDev">GitHub</a>
