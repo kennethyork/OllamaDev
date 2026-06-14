@@ -256,7 +256,13 @@ textarea.field { min-height: 84px; resize: vertical; line-height: 1.5; }
 /* Focus = pop the terminal OUT to fill the whole code view, over the editor.
    The restore (⤡) button in the terminal head puts it back. */
 #codeView.term-zoom { position: relative; }
-#codeView.term-zoom #editorPane, #codeView.term-zoom .vsplit { display: none; }
+/* NOTE: do NOT hide #editorPane here. The editor now lives on the canvas as a
+   popped pane (its element is moved INTO #terminals when open), so a descendant
+   `#codeView.term-zoom #editorPane` rule hid the editor whenever IT was the
+   zoomed pane — blank on fullscreen. The zoom mechanism already shows only the
+   focused pane, so no hiding rule is needed. (.vsplit is a dead split-layout
+   remnant; harmless to keep listed.) */
+#codeView.term-zoom .vsplit { display: none; }
 #codeView.term-zoom #terminals { position: absolute; inset: 0; z-index: 40; flex: none; }
 .term-head { display: flex; align-items: center; gap: 8px; padding: 7px 11px; background: var(--bg2); border-bottom: 1px solid var(--border); font-size: 12px; user-select: none; }
 .term-head > .nm { font-weight: 600; color: var(--fg); }
