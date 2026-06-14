@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '0.9.26');
+define('OLLAMADEV_VERSION', '0.9.27');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -10995,7 +10995,13 @@ if ($argc >= 2 && $argv[1] === '__pty-daemon__') {
     );
     // Set a sane default window size, then cd into the project and exec bash
     // with our integration rcfile.
-    $inner = 'stty rows 32 cols 120 2>/dev/null; cd ' . escapeshellarg($startCwd)
+    // Force a color-capable TERM. A GUI-launched ADE has no TERM in its environment,
+    // so `script` falls back to TERM=dumb and bash/ls/git/grep emit NO color codes —
+    // the canvas renderer supports color, but there's nothing to render. Exported
+    // before `exec bash` so they persist into the interactive shell; xterm-256color +
+    // COLORTERM=truecolor matches what a real terminal provides.
+    $inner = 'export TERM=xterm-256color; export COLORTERM=truecolor; '
+        . 'stty rows 32 cols 120 2>/dev/null; cd ' . escapeshellarg($startCwd)
         . '; exec bash --rcfile ' . escapeshellarg($rc) . ' -i';
     // Linux util-linux `script`; allocates a real PTY for the shell.
     $cmd = 'script -qfc ' . escapeshellarg($inner) . ' /dev/null';
