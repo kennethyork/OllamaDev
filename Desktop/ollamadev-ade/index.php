@@ -44,14 +44,23 @@ $app = new Application(new ApplicationCreateInfo(
         height: 820,
         visible: true,
         resizable: true,
-        webview: new WebViewCreateInfo(extensions: [
-            new ScriptsExtension(),
-            new BindingsExtension(),
-            new DataExtension(),
-            new SecurityExtension(),
-            new SchemesExtension(),
-            new LifecycleEventsExtension(),
-        ]),
+        webview: new WebViewCreateInfo(
+            // Enable JS clipboard access in the WebKitGTK webview so the terminal's
+            // right-click Paste / Ctrl+Shift+V (document.execCommand('paste')) work —
+            // the webview otherwise blocks JS clipboard reads. A local app loading our
+            // own trusted HTML, so this is safe. (On Linux, flags are WebKitGTK
+            // settings; this key is the WebKitSettings:javascript-can-access-clipboard
+            // property. Harmless on other platforms.)
+            flags: ['javascript-can-access-clipboard' => true],
+            extensions: [
+                new ScriptsExtension(),
+                new BindingsExtension(),
+                new DataExtension(),
+                new SecurityExtension(),
+                new SchemesExtension(),
+                new LifecycleEventsExtension(),
+            ],
+        ),
     ),
 ));
 

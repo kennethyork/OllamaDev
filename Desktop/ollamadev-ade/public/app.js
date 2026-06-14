@@ -1145,14 +1145,16 @@ Terminal.prototype.copySelection = function () {
 };
 // Paste clipboard text into the pty. The native `paste` event handler (middle-click,
 // Shift+Insert) stays as a fallback when readText is blocked in the webview.
-// Best-effort programmatic paste (Ctrl+Shift+V, right-click menu). Works in web
-// mode (browser clipboard over localhost/HTTPS). In the desktop webview readText is
-// blocked, so it focuses the hidden keyboard textarea instead — the user's Ctrl+V /
-// Shift+Insert / middle-click then pastes via the browser's native paste event,
-// which needs no clipboard-read permission. All vanilla, no OS tools.
+// Programmatic paste (Ctrl+Shift+V, right-click menu). Focuses the hidden textarea
+// and runs execCommand('paste'): with javascript-can-access-clipboard enabled on the
+// webview (index.php), that fires a paste event on the textarea — caught by its paste
+// handler. Falls back to the async clipboard API (web mode / browsers). All vanilla.
 Terminal.prototype.pasteClipboard = function () {
     var self = this;
     if (this.kbd) this.kbd.focus();
+    var ok = false;
+    try { ok = document.execCommand('paste'); } catch (e) {}
+    if (ok) return;
     try {
         if (navigator.clipboard && navigator.clipboard.readText) {
             navigator.clipboard.readText().then(function (t) {
