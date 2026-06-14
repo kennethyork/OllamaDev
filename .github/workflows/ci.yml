@@ -3,6 +3,17 @@ name: ci
 # Fast, deterministic gate on every push/PR. No model required — it rebuilds the
 # single-file binary from src/, checks it's in sync, lints it, and runs the smoke
 # suite (which guards the tool-schema regression that silently broke tool-calling).
+#
+# Cross-platform matrix (ubuntu / macOS / windows):
+#   - ubuntu  : the canonical build — full suite + the binary-in-sync check.
+#   - macOS   : full behavioral suite (it's Unix, so the smoke/tool harnesses run);
+#               catches BSD-vs-GNU and macOS path/permission differences.
+#   - windows : build + lint only. The smoke/tool harnesses are Unix-only (they use
+#               rm -rf, /dev/null and shell job control), so on Windows we verify the
+#               concatenated binary builds and PARSES under Windows PHP — which is
+#               what catches platform-specific syntax/runtime-version regressions.
+# The in-sync check is ubuntu-only: the committed binary is built on Linux (LC_ALL=C
+# byte order), and Windows checkout line-ending normalization would false-fail it.
 
 on:
   push:
@@ -14,7 +25,14 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash   # build.sh + the test harnesses need bash; on Windows this is Git Bash
     steps:
       - uses: actions/checkout@v5
       - uses: shivammathur/setup-php@v2
@@ -24,12 +42,18 @@ jobs:
       - name: Rebuild the single-file binary from src/
         run: bash build.sh
       - name: Binary is in sync with src/ (did you forget to ./build.sh?)
+        if: matrix.os == 'ubuntu-latest'
         run: |
           git diff --exit-code ollamadev \
             || { echo "::error::ollamadev is stale — run ./build.sh and commit the result"; exit 1; }
       - name: Lint the built binary
         run: php -l ollamadev
       - name: Smoke tests
+        if: matrix.os != 'windows-latest'
         run: php tests/smoke.php
       - name: Tool-layer functional tests
+        if: matrix.os != 'windows-latest'
         run: bash tests/tools.sh
+      - name: Windows note (behavioral suite runs on Linux/macOS)
+        if: matrix.os == 'windows-latest'
+        run: echo "Windows job verified the binary builds + parses under Windows PHP. The Unix smoke/tool harnesses (rm -rf, /dev/null, job control) run on ubuntu + macOS."
