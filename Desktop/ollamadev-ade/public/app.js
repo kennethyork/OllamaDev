@@ -744,6 +744,15 @@ Terminal.prototype.mount = function (host) {
     };
     // The screen IS the terminal: forward every keystroke straight to the pty.
     this.screen.addEventListener('keydown', function (e) {
+        // Clipboard shortcuts FIRST — before keyToBytes turns them into control
+        // bytes. Ctrl+Shift+C copies the selection, Ctrl+Shift+V pastes (the Linux
+        // terminal standard); plain Ctrl+C / Ctrl+V stay SIGINT / ^V for shell apps.
+        // macOS Cmd+C (with a selection) / Cmd+V also work.
+        var mod = e.ctrlKey || e.metaKey;
+        if (mod && e.shiftKey && (e.key === 'C' || e.key === 'c')) { e.preventDefault(); self.copySelection(); return; }
+        if (mod && e.shiftKey && (e.key === 'V' || e.key === 'v')) { e.preventDefault(); self.pasteClipboard(); return; }
+        if (e.metaKey && !e.ctrlKey && !e.shiftKey && (e.key === 'c' || e.key === 'C') && self.hasSelection()) { e.preventDefault(); self.copySelection(); return; }
+        if (e.metaKey && !e.ctrlKey && !e.shiftKey && (e.key === 'v' || e.key === 'V')) { e.preventDefault(); self.pasteClipboard(); return; }
         var data = keyToBytes(e);
         if (data !== null) {
             e.preventDefault();
@@ -1080,6 +1089,42 @@ Terminal.prototype.close = function () { this.polling = false; this._closeStream
 // Detach the UI but KEEP the backend pty alive (used when switching workspaces),
 // so re-attaching later resumes the same running session.
 Terminal.prototype.detach = function () { this.polling = false; this._closeStream(); this._disposeCanvas(); };
+// ---- clipboard ----
+// Is there a copyable selection? Canvas renderer has its own grid selection; the
+// DOM renderer uses the native browser selection.
+Terminal.prototype.hasSelection = function () {
+    if (this.canvasR && this.canvasR.selectionText) { try { if (this.canvasR.selectionText()) return true; } catch (e) {} }
+    return !!(window.getSelection && String(window.getSelection()));
+};
+// Copy the current terminal selection to the clipboard. writeText is permitted in
+// the webview; falls back to a temp-textarea execCommand('copy') if it isn't.
+Terminal.prototype.copySelection = function () {
+    var text = '';
+    if (this.canvasR && this.canvasR.selectionText) { try { text = this.canvasR.selectionText() || ''; } catch (e) {} }
+    if (!text && window.getSelection) text = String(window.getSelection());
+    if (!text) return;
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text); }
+        else {
+            var ta = document.createElement('textarea');
+            ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+            document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+        }
+        if (typeof banner === 'function') banner('copied', 'ok');
+    } catch (e) {}
+};
+// Paste clipboard text into the pty. The native `paste` event handler (right-click
+// menu, middle-click, Shift+Insert) stays as a fallback when readText is blocked.
+Terminal.prototype.pasteClipboard = function () {
+    var self = this;
+    try {
+        if (navigator.clipboard && navigator.clipboard.readText) {
+            navigator.clipboard.readText().then(function (t) {
+                if (t) { try { window.termWrite(self.id, strToB64(t)); } catch (e) {} }
+            }).catch(function () {});
+        }
+    } catch (e) {}
+};
 
 function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 
