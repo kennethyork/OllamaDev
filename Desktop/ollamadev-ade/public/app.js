@@ -1047,8 +1047,11 @@ Terminal.prototype.poll = function () {
     }
     this._pollLoop();
 };
-// The original 80ms poll — used on the desktop (native bridge) and as the web
-// fallback when SSE streaming isn't available.
+// Adaptive poll — used on the desktop (native bridge) and as the web fallback when
+// SSE streaming isn't available. There's no stream here, so THIS poll is the
+// terminal's refresh rate: a flat 80ms made steady output land in visible 80ms
+// chunks. Instead, drain fast (12ms) while bytes are flowing so output streams
+// smoothly, then ease off (→150ms) once it goes quiet to keep idle CPU/IPC low.
 Terminal.prototype._pollLoop = function () {
     var self = this; this.polling = true;
     function tick() {
@@ -1058,8 +1061,16 @@ Terminal.prototype._pollLoop = function () {
                 var dec = b64ToStr(r.data);
                 self.write(dec); self.offset = r.offset; self.lastData = Date.now();
                 self._trackStatus(dec);   // back to idle only when the CLI reprints its prompt
+                return true;
             }
-        }).catch(function () {}).then(function () { if (self.polling) setTimeout(tick, 80); });
+            return false;
+        }).catch(function () { return false; }).then(function (got) {
+            if (!self.polling) return;
+            var since = Date.now() - (self.lastData || 0);
+            // got data → keep draining quickly; just-active → stay responsive; idle → back off.
+            var delay = got ? 12 : (since < 300 ? 24 : (since < 2000 ? 80 : 150));
+            setTimeout(tick, delay);
+        });
     }
     tick();
 };

@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '0.9.24');
+define('OLLAMADEV_VERSION', '0.9.25');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -11081,7 +11081,14 @@ if ($argc >= 2 && $argv[1] === '__pty-daemon__') {
 
         $st = proc_get_status($proc);
         if (!$st['running']) break;
-        usleep(15000); // ~66 Hz
+        // Block until the shell produces output (so it lands in pty-out the instant
+        // it's emitted — no fixed-sleep batching that makes output look chunky), or a
+        // short timeout so we still pick up keystrokes appended to pty-in. Lower
+        // latency AND lower idle CPU than a flat usleep. stream_select returns false
+        // when a signal interrupts it (SIGTERM/SIGINT) — fine, the loop re-checks
+        // $running and exits.
+        $r = [$pipes[1], $pipes[2]]; $w = null; $e = null;
+        @stream_select($r, $w, $e, 0, 15000); // ≤15 ms; wakes immediately on output
     }
     fclose($out);
     foreach ($pipes as $p) { if (is_resource($p)) fclose($p); }
