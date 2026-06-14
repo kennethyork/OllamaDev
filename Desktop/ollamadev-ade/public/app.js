@@ -1342,9 +1342,16 @@ var Tasks = {
                 var held = s.state === 'held';
                 // The Director tags each subtask with a role (coder/tester/docs/…); show it.
                 var role = (s.role && s.role !== 'coder') ? '<span class="role">' + esc(s.role) + '</span>' : '';
+                // A held branch carries a Board decision id — surface Accept (merge) /
+                // Discard (delete) right on the card. Both route through boardDecide so
+                // the kanban and the Decisions panel act on the same id.
+                var acts = (held && s.decisionId) ? '<div class="actions">' +
+                    '<button class="run accept" data-act="accept-branch" data-id="' + esc(s.decisionId) + '">✓ Accept</button>' +
+                    '<button class="del" data-act="discard-branch" data-id="' + esc(s.decisionId) + '">✕ Discard</button></div>' : '';
+                var meta = held ? ('⚠ held' + (s.reason ? ' · ' + esc(s.reason) : '')) : (s.state === 'doing' ? '● working' : esc(s.state));
                 return '<div class="card crew' + (held ? ' held' : '') + '">' +
                     '<div class="title">🤖 ' + esc(s.title) + role + '</div>' +
-                    '<div class="cmeta">' + (held ? '⚠ held' : (s.state === 'doing' ? '● working' : s.state)) + '</div></div>';
+                    '<div class="cmeta">' + meta + '</div>' + acts + '</div>';
             }).join('');
             // Suggested next-step ideas show as To-do cards you can run with one click.
             var ideaCards = c[0] !== 'todo' ? '' : ideas.map(function (idea) {
@@ -1396,6 +1403,13 @@ var Tasks = {
         board.querySelectorAll('[data-act="run-idea"]').forEach(function (btn) {
             btn.onclick = function () { App.runTaskInAgent(btn.dataset.idea); };
         });
+        // Held-branch Accept (merge) / Discard (delete) — same path as the Decisions panel.
+        board.querySelectorAll('[data-act="accept-branch"],[data-act="discard-branch"]').forEach(function (btn) {
+            btn.onclick = function (e) {
+                e.stopPropagation();
+                Decisions.decide(btn.dataset.id, btn.dataset.act === 'accept-branch' ? 'accept' : 'deny');
+            };
+        });
         board.querySelectorAll('.card').forEach(function (card) {
             var id = card.dataset.id;
             if (!id) return; // idea/crew cards have no manual id
@@ -1420,6 +1434,76 @@ var Tasks = {
                 var id = e.dataTransfer.getData('text/plain'); if (id) self.move(id, col.dataset.col);
             });
         });
+    }
+};
+
+// Unified Decisions panel + remote chip on the Board view. Reads the same
+// pending-decisions queue the CLI/desktop share (held crew branches + any
+// permission asks) and acts on them via boardDecide; the remote chip shows
+// ahead/behind vs the upstream and offers a one-click Push. All vanilla.
+var Decisions = {
+    _tick: 0, _hasPending: false, _hasRemote: false,
+    // Pull the queue every board-poll tick; remote status less often (it runs git).
+    refresh: function () {
+        var self = this;
+        if (window.boardList) Promise.resolve(window.boardList()).then(function (d) { self.render(d || {}); }).catch(function () {});
+        if ((this._tick++ % 6) === 0 && window.gitRemoteStatus)
+            Promise.resolve(window.gitRemoteStatus()).then(function (r) { self.renderRemote(r || {}); }).catch(function () {});
+    },
+    _sync: function () { var bar = $('#decisionsBar'); if (bar) bar.hidden = !(this._hasPending || this._hasRemote); },
+    render: function (d) {
+        var list = $('#decisionsList'); if (!list) return;
+        var pending = (d && Array.isArray(d.pending)) ? d.pending : [];
+        this._hasPending = pending.length > 0;
+        list.innerHTML = pending.map(function (p) {
+            var crew = p.kind === 'crew_branch';
+            var icon = crew ? '🌿' : (p.kind === 'permission' ? '🔐' : '•');
+            return '<div class="dec-card">' +
+                '<div class="dec-sum">' + icon + ' ' + esc(p.summary || p.id) + '</div>' +
+                '<div class="actions">' +
+                '<button class="run accept" data-act="dec-accept" data-id="' + esc(p.id) + '">✓ Accept</button>' +
+                '<button class="del" data-act="dec-deny" data-id="' + esc(p.id) + '">✕ ' + (crew ? 'Discard' : 'Deny') + '</button>' +
+                '</div></div>';
+        }).join('');
+        list.querySelectorAll('[data-act="dec-accept"],[data-act="dec-deny"]').forEach(function (btn) {
+            btn.onclick = function () { Decisions.decide(btn.dataset.id, btn.dataset.act === 'dec-accept' ? 'accept' : 'deny'); };
+        });
+        this._sync();
+    },
+    renderRemote: function (r) {
+        var chip = $('#remoteChip'); if (!chip) return;
+        if (!r || !r.isRepo) { this._hasRemote = false; chip.innerHTML = ''; this._sync(); return; }
+        this._hasRemote = true;
+        if (!r.hasRemote) {
+            chip.innerHTML = '<span class="rc-branch">' + esc(r.branch || '?') + '</span> <span class="rc-dim">no remote</span>';
+        } else {
+            var ab = ((r.ahead ? '↑' + r.ahead : '') + ' ' + (r.behind ? '↓' + r.behind : '')).trim();
+            chip.innerHTML = '<span class="rc-branch">' + esc(r.branch || '') + '</span>' +
+                (ab ? ' <span class="rc-ab">' + esc(ab) + '</span>' : ' <span class="rc-dim">in sync</span>') +
+                ' <button class="rc-push" data-act="push">⤴ Push</button>';
+            var btn = chip.querySelector('[data-act="push"]');
+            if (btn) btn.onclick = function () { Decisions.push(); };
+        }
+        this._sync();
+    },
+    decide: function (id, verdict) {
+        if (!id || !window.boardDecide) return;
+        banner(verdict === 'accept' ? 'merging…' : 'discarding…');
+        Promise.resolve(window.boardDecide(id, verdict)).then(function (res) {
+            if (res && res.ok) banner(verdict === 'accept' ? ('✓ merged ' + (res.merged || '')) : ('✓ discarded ' + (res.discarded || '')), 'ok');
+            else banner('⚠ ' + ((res && res.error) || 'failed') + (res && res.conflict ? ' (resolve the conflict, then retry)' : ''), 'err');
+            Decisions.refresh();
+            // Reflect the new subtask state on the kanban immediately.
+            if (window.crewBoard) Promise.resolve(crewBoard()).then(function (b) { if (b && b.subtasks) { App.crewBoard = b; if (App.popped.board) Tasks.render(); } });
+        }).catch(function () { banner('decision failed', 'err'); });
+    },
+    push: function () {
+        if (!window.crewPush) return;
+        banner('pushing…');
+        Promise.resolve(window.crewPush()).then(function (res) {
+            banner(res && res.ok ? ('✓ pushed ' + (res.branch || '')) : ('⚠ ' + ((res && res.error) || 'push failed')), (res && res.ok) ? 'ok' : 'err');
+            Decisions._tick = 0; Decisions.refresh();   // force an immediate remote re-check
+        }).catch(function () { banner('push failed', 'err'); });
     }
 };
 
@@ -3103,7 +3187,7 @@ var App = {
                 }
                 self.crewBoard = (b && b.subtasks) ? b : self.crewBoard;
                 // Refresh the board whenever it's open as a pane on the canvas.
-                if (self.popped.board) Tasks.render();
+                if (self.popped.board) { Tasks.render(); Decisions.refresh(); }
                 // CrewPanes polls the per-coder logs (→ live activity), so run it
                 // whenever the board OR the topology window is open.
                 if (self.popped.board || self.popped.topology) CrewPanes.sync(self.crewBoard);
@@ -3714,7 +3798,7 @@ var App = {
         this.popped[view] = { id: '__pop_' + view + '__', view: view, x: x, y: y, w: d.w, h: d.h, z: ++this._zTop };
         this.savePopped();
         this.render();
-        if (view === 'board') { this.startCrewPoll(); Tasks.render(); }
+        if (view === 'board') { this.startCrewPoll(); Tasks.render(); Decisions.refresh(); }
         banner(this.POP_TITLE[view] + ' added to the canvas — drag the header, resize the corner', 'ok');
     },
     // Close a view pane (its element parks back in #paneStore, keeping all its state;

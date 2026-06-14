@@ -1,4 +1,3 @@
-<?php
 // ---------------------------------------------------------------------------
 // Board — the unified pending-decisions queue.
 //
@@ -175,6 +174,10 @@ class Board {
     }
 
     // ---- public: list / read for UIs ----------------------------------------
+
+    /** Full record for one decision (incl. opts), or null. Used by crew_branch
+     *  accept/discard so the action has the branch/repo context the card carries. */
+    public static function get(string $id): ?array { return self::findRecord($id); }
 
     /** @return array{pending: array, recent: array} */
     public static function list(): array {

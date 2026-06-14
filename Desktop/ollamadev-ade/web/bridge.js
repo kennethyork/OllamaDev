@@ -16,7 +16,8 @@
     'webAccess', 'setWebAccess', 'searchEnabled', 'setSearchEnabled',
     'codeSearch', 'codeIndexStatus', 'codeIndexBuild', 'reviewDiff', 'temperature', 'setTemperature',
     'sttModel', 'setSttModel', 'sttHistory', 'sttClearHistory', 'openExternal', 'proxyFetch', 'crewModels', 'setCrewModels',
-    'crewSteer', 'skillsList', 'skillsGet', 'skillsSave', 'skillsRemove',
+    'crewSteer', 'boardList', 'boardDecide', 'crewPush', 'gitRemoteStatus',
+    'skillsList', 'skillsGet', 'skillsSave', 'skillsRemove',
     'hooksList', 'hooksAdd', 'hooksRemove', 'chatList', 'chatDelete', 'chatExport'];
 
   function rpc(name, args) {

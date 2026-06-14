@@ -1395,7 +1395,7 @@ _ollamadev() {
             return 0
             ;;
         *)
-            COMPREPLY=($(compgen -W 'chat new list load resume pull init crew terminal git lsp models eval diff verify test commit pr help --help --version --model --prompt --continue --resume --dry-run -h -v' -- "${cur}"))
+            COMPREPLY=($(compgen -W 'chat new list load resume pull init crew board terminal git lsp models eval diff verify test commit pr help --help --version --model --prompt --continue --resume --dry-run -h -v' -- "${cur}"))
             ;;
     esac
     return 0
@@ -1434,7 +1434,7 @@ ZSH;
         echo <<<'FISH'
 # OllamaDev Fish Shell Completion
 
-complete -c ollamadev -n '__fish_use_subcommand' -a 'chat new list load resume pull init crew terminal git lsp models help' -d 'Command'
+complete -c ollamadev -n '__fish_use_subcommand' -a 'chat new list load resume pull init crew board terminal git lsp models help' -d 'Command'
 complete -c ollamadev -n '__fish_seen_subcommand_from terminal' -a 'create spawn list attach start stop pause resume broadcast delete log' -d 'Terminal command'
 complete -c ollamadev -n '__fish_seen_subcommand_from git' -a 'status diff log branch commit push pull stash checkout add' -d 'Git command'
 complete -c ollamadev -s h -l help -d 'Show help'
@@ -2251,6 +2251,32 @@ if ($cmd === 'chat') {
     // Generate OLLAMADEV.md project memory from a scan + the active model.
     $agent = new Agent();
     echo ProjectInit::run($agent, $flags['cwd'] ?? getcwd(), posix_isatty(STDIN));
+} elseif ($cmd === 'board') {
+    // The unified pending-decisions queue: held crew branches (accept=merge,
+    // deny=discard) plus any permission asks. Same files the desktop Board reads.
+    //   board list [--json] | board accept <id> | board deny <id> | board decide <id> <verdict>
+    $sub = $arg1 !== '' ? $arg1 : 'list';
+    if ($sub === 'list') {
+        $data = Board::list();
+        if (in_array('--json', $argv, true)) { echo json_encode($data) . "\n"; exit(0); }
+        $pending = $data['pending'] ?? [];
+        if (!$pending) { echo "No pending decisions.\n"; exit(0); }
+        echo "Pending decisions (" . count($pending) . "):\n";
+        foreach ($pending as $p) echo "  \033[36m" . ($p['id'] ?? '?') . "\033[0m \033[2m[" . ($p['kind'] ?? '?') . "]\033[0m " . ($p['summary'] ?? '') . "\n";
+        echo "\n\033[2mAccept: ollamadev board accept <id>  ·  Discard/deny: ollamadev board deny <id>\033[0m\n";
+        exit(0);
+    }
+    if (in_array($sub, ['accept', 'deny', 'discard', 'decide'], true)) {
+        $id = (string)($positional[2] ?? '');
+        $verdict = $sub === 'decide' ? strtolower((string)($positional[3] ?? '')) : ($sub === 'accept' ? 'accept' : 'deny');
+        if ($id === '') { echo "Usage: ollamadev board {$sub} <id>" . ($sub === 'decide' ? " <accept|deny>" : '') . "\n"; exit(1); }
+        $res = Crew::decideCrewBranch($id, $verdict === 'accept' ? 'accept' : 'deny');
+        if (in_array('--json', $argv, true)) { echo json_encode($res) . "\n"; exit(empty($res['ok']) ? 1 : 0); }
+        if (!empty($res['ok'])) { echo "\033[32m✓\033[0m " . ($res['merged'] ?? $res['discarded'] ?? ('decided: ' . ($res['decided'] ?? $verdict))) . "\n"; exit(0); }
+        echo "\033[31m" . ($res['error'] ?? 'could not decide') . "\033[0m\n"; exit(1);
+    }
+    echo "Usage: ollamadev board <list | accept <id> | deny <id> | decide <id> <accept|deny>>\n";
+    exit(1);
 } elseif ($cmd === 'crew') {
     // Bench of agents: Researcher → Director → Coders (git worktrees) → Auditor → land.
     // --review gates landing: nothing auto-merges, every branch is held for review.
@@ -2368,6 +2394,38 @@ if ($cmd === 'chat') {
         $cr = Crew::clearBoard();
         if (!empty($cr['ok'])) { echo "\033[32m✓\033[0m crew board cleared\n"; exit(0); }
         echo "\033[31m" . ($cr['error'] ?? 'could not clear the board') . "\033[0m\n"; exit(1);
+    }
+    // Accept (merge) / discard (delete) a held coder branch by its number. The
+    // desktop Board buttons hit the same engine via `board accept/deny <id>`.
+    if (in_array($arg1, ['accept', 'merge'], true)) {
+        $n = (int)($positional[2] ?? 0);
+        if ($n < 1) { echo "Usage: ollamadev crew accept <coder#>\n"; exit(1); }
+        $res = Crew::acceptByN($n);
+        if (!empty($res['ok'])) { echo "\033[32m✓\033[0m merged coder #{$n}" . (($res['merged'] ?? '') !== '' ? " ({$res['merged']})" : '') . "\n"; exit(0); }
+        echo "\033[31m" . ($res['error'] ?? 'could not merge') . "\033[0m\n"; exit(1);
+    }
+    if (in_array($arg1, ['discard', 'reject'], true)) {
+        $n = (int)($positional[2] ?? 0);
+        if ($n < 1) { echo "Usage: ollamadev crew discard <coder#>\n"; exit(1); }
+        $res = Crew::discardByN($n);
+        if (!empty($res['ok'])) { echo "\033[32m✓\033[0m discarded coder #{$n}" . (($res['discarded'] ?? '') !== '' ? " ({$res['discarded']})" : '') . "\n"; exit(0); }
+        echo "\033[31m" . ($res['error'] ?? 'could not discard') . "\033[0m\n"; exit(1);
+    }
+    // Push the current branch (with any just-accepted work) to the remote.
+    if ($arg1 === 'push') {
+        $res = Crew::pushRepo();
+        if (in_array('--json', $argv, true)) { echo json_encode($res) . "\n"; exit(empty($res['ok']) ? 1 : 0); }
+        if (!empty($res['ok'])) { echo "\033[32m✓\033[0m pushed " . ($res['branch'] ?? '') . "\n" . trim((string)($res['out'] ?? '')) . "\n"; exit(0); }
+        echo "\033[31m" . ($res['error'] ?? 'push failed') . "\033[0m\n" . trim((string)($res['out'] ?? '')) . "\n"; exit(1);
+    }
+    // Remote sync status (ahead/behind vs upstream). --json for the desktop chip.
+    if ($arg1 === 'remote' || $arg1 === 'remote-status') {
+        $rs = Crew::remoteStatus();
+        if (in_array('--json', $argv, true)) { echo json_encode($rs) . "\n"; exit(0); }
+        if (empty($rs['isRepo'])) { echo "Not a git repository.\n"; exit(1); }
+        if (empty($rs['hasRemote'])) { echo "Branch " . ($rs['branch'] ?? '?') . " — no remote configured.\n"; exit(0); }
+        echo "Branch {$rs['branch']} → {$rs['upstream']}  (ahead {$rs['ahead']}, behind {$rs['behind']})" . (!empty($rs['dirty']) ? " · dirty" : '') . "\n";
+        exit(0);
     }
     // Separate Director: redirect a running coder (or "all") from another pane/terminal.
     if ($arg1 === 'steer') {

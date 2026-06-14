@@ -563,6 +563,52 @@ ok('clear_board schema marks it explicit-only with required confirm', strpos($sr
 // Interactive Director: "clear board" is handled directly (not spent on a crew run).
 ok('interactive Director clears the board directly on "clear board"',
     preg_match('/\^\(clear\|reset\|wipe\|empty\).*board\$/', $src) === 1 && strpos($src, 'Crew::clearBoard()') !== false);
+// ---- Held-branch accept/discard + the unified Board + git remote (v0.9.32) ----
+echo "\n== Board: held-branch accept/discard + remote ==\n";
+// 91-board.php must be a RAW module body (no <?php opener) — a stray one silently
+// broke the concatenated build, so the Board never shipped. Assert it's in the binary.
+ok('Board class compiled into the binary (no stray <?php opener)',
+    strpos($src, 'class Board') !== false && strpos($src, 'function decideCrewBranch') !== false);
+ok('Crew exposes held-branch + remote actions',
+    strpos($src, 'function acceptHeldBranch') !== false && strpos($src, 'function discardHeldBranch') !== false &&
+    strpos($src, 'function pushRepo') !== false && strpos($src, 'function remoteStatus') !== false);
+// CLI usage guards (no git/model needed).
+[$out] = run_bin(['crew', 'accept']);
+ok('crew accept without a number prints usage', stripos($out, 'Usage: ollamadev crew accept') !== false, trim($out));
+[$out] = run_bin(['crew', 'discard']);
+ok('crew discard without a number prints usage', stripos($out, 'Usage: ollamadev crew discard') !== false, trim($out));
+// board list reads the shared index — empty in a fresh HOME.
+$bhome = sys_get_temp_dir() . '/board_' . getmypid(); @mkdir($bhome, 0777, true);
+[$out] = run_bin(['board', 'list'], '', ['HOME' => $bhome]);
+ok('board list is empty in a fresh HOME', stripos($out, 'No pending decisions') !== false, trim($out));
+[$out] = run_bin(['board', 'list', '--json'], '', ['HOME' => $bhome]);
+$bl = json_decode(trim($out), true);
+ok('board list --json returns a pending/recent shape', is_array($bl) && array_key_exists('pending', $bl), trim($out));
+// Integration: a crafted held crew_branch decision is accepted = merged locally.
+if (trim((string) shell_exec('git --version 2>/dev/null')) !== '') {
+    $ihome = sys_get_temp_dir() . '/board_int_' . getmypid();
+    $irepo = sys_get_temp_dir() . '/board_repo_' . getmypid();
+    @mkdir($ihome . '/.ollamadev/board/locks', 0777, true);
+    @mkdir($irepo, 0777, true);
+    shell_exec('cd ' . escapeshellarg($irepo) . ' && git init -q && git config user.email t@t.t && git config user.name T && git symbolic-ref HEAD refs/heads/main && printf a > a.txt && git add -A && git commit -qm init && git checkout -q -b crew/x && printf b > b.txt && git add -A && git commit -qm "crew: b" && git checkout -q main');
+    $dec = ['id' => 'crew_smoke1', 'kind' => 'crew_branch', 'summary' => 'coder #1: b — review mode', 'detail' => 'd',
+        'opts' => ['runId' => 'crew_s', 'n' => 1, 'branch' => 'crew/x', 'repoRoot' => $irepo, 'base' => 'main'],
+        'status' => 'pending', 'verdict' => null, 'note' => null, 'created_at' => '2026-01-01T00:00:00+00:00', 'decided_at' => null];
+    file_put_contents($ihome . '/.ollamadev/board/decisions.jsonl', json_encode($dec) . "\n");
+    file_put_contents($ihome . '/.ollamadev/board/locks/crew_smoke1.lock', 'crew_smoke1');
+    [$out, , $code] = run_bin(['board', 'accept', 'crew_smoke1'], '', ['HOME' => $ihome], $irepo);
+    ok('board accept merges the held branch into the base', $code === 0 && is_file($irepo . '/b.txt'), trim($out));
+    [$out] = run_bin(['board', 'list', '--json'], '', ['HOME' => $ihome], $irepo);
+    $bl2 = json_decode(trim($out), true);
+    ok('the accepted decision leaves the pending queue', is_array($bl2) && count($bl2['pending'] ?? []) === 0, trim($out));
+    // remote-status on a repo with no remote reports hasRemote=false (not a crash).
+    [$out] = run_bin(['crew', 'remote', '--json'], '', ['HOME' => $ihome], $irepo);
+    $rs = json_decode(trim($out), true);
+    ok('crew remote --json reports no remote on a local-only repo', is_array($rs) && empty($rs['hasRemote']) && !empty($rs['isRepo']), trim($out));
+    shell_exec('rm -rf ' . escapeshellarg($ihome) . ' ' . escapeshellarg($irepo));
+}
+shell_exec('rm -rf ' . escapeshellarg($bhome));
+
 // Separate-Director steering: `crew steer <#> "..."` / desktop box → run's steer.jsonl,
 // injected into the targeted coder between iterations (works sequential + forked).
 ok('crew has a separate-Director steer channel (command + injection)',

@@ -66,6 +66,30 @@ class Crew {
         if ($dirty) echo "\033[33m  ⚠ working tree has uncommitted changes — coders branch from the last commit (HEAD), not your working copy.\033[0m\n";
 
         $c = "\033[36m"; $d = "\033[2m"; $b = "\033[1m"; $g = "\033[32m"; $y = "\033[33m"; $r = "\033[0m";
+
+        // ---- Sync with the remote before coders branch (opt-out: --no-sync) ----
+        // Fetch always; fast-forward the base ONLY when the tree is clean and we're
+        // strictly behind (never a merge/rebase — that could conflict or rewrite the
+        // user's local work). This way coders branch from the latest remote commit.
+        if (($opts['sync'] ?? true) !== false && self::sh('git remote') !== '') {
+            $up = self::sh('git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null');
+            if ($up !== '') {
+                echo "  {$d}syncing with {$up}…{$r}\n";
+                self::sh('git fetch --quiet 2>&1');
+                if (!$dirty) {
+                    $behind = (int)self::sh('git rev-list --count HEAD..@{u} 2>/dev/null');
+                    $ahead  = (int)self::sh('git rev-list --count @{u}..HEAD 2>/dev/null');
+                    if ($behind > 0 && $ahead === 0) {
+                        self::sh('git merge --ff-only @{u} 2>&1');
+                        $baseCommit = self::sh('git rev-parse HEAD');
+                        echo "  {$g}↓{$r} {$d}fast-forwarded {$base} +{$behind} from {$up} (now @" . substr($baseCommit, 0, 7) . "){$r}\n";
+                    } elseif ($behind > 0) {
+                        echo "  {$y}⚠ {$base} is {$behind} behind and {$ahead} ahead of {$up} — not auto-merging; coders branch from local HEAD.{$r}\n";
+                    }
+                }
+            }
+        }
+
         // runId may be supplied (by --panes, so the pane watcher knows it up front).
         $runId = (string)($opts['runId'] ?? '');
         if (!preg_match('/^crew_[0-9_]+$/', $runId)) $runId = 'crew_' . date('Ymd_His');
@@ -110,6 +134,9 @@ class Crew {
         $logDir = dirname($boardFile) . '/' . $runId;
         @mkdir($logDir, 0755, true);
         $board = ['task' => $task, 'runId' => $runId, 'active' => true, 'model' => $model, 'logDir' => $logDir,
+            // repoRoot + base let the desktop act on held branches (merge/discard/push)
+            // without re-loading the run plan — the board file is the single source.
+            'repoRoot' => self::sh('git rev-parse --show-toplevel 2>/dev/null'), 'base' => $base,
             // Additive (desktop topology view): per-role models + run shape. Display only.
             'models' => ['director' => $mDirector, 'researcher' => $mResearcher, 'coder' => $mCoder, 'auditor' => $mAuditor],
             'amplify' => $amplify, 'focus' => $focus, 'subtasks' => []];
@@ -262,7 +289,7 @@ class Crew {
 
         // ---- Auditor reviews each diff, then gated landing (shared with resume). ----
         self::auditAndLand($agent, $results, $opts, $base, $baseCommit, $mAuditor, $amplify, $task, $setState,
-            ['coderModel' => $mCoder, 'maxIter' => $maxIter, 'research' => $research, 'focus' => $focus, 'logDir' => $logDir], $setMeta);
+            ['coderModel' => $mCoder, 'maxIter' => $maxIter, 'research' => $research, 'focus' => $focus, 'logDir' => $logDir, 'runId' => $runId], $setMeta);
         self::offerIdeas($runId, $agent, $task, $research, $results, $mDirector, $opts, $board, $writeBoard);
         self::rememberFacts($task, $research, $results, $mDirector, $opts);
         $board['active'] = false; $writeBoard();
@@ -347,23 +374,44 @@ class Crew {
             }
         }
         echo "\n{$b}▸ Landing{$r}" . ($land === 'review' ? " {$d}(review mode — nothing auto-merges){$r}" : '') . "\n";
+        // A held branch is a real, blocking decision: post it to the unified Board so
+        // the desktop/CLI can accept (merge) or discard it with one click. The
+        // decision carries everything an accept needs (repoRoot/base/branch) so no
+        // re-loading the run plan. We stash the decision id back on the board subtask
+        // so the kanban held-card buttons and the Decisions panel act on the same id.
+        $repoRoot = self::sh('git rev-parse --show-toplevel 2>/dev/null');
+        $runId = (string)($ctx['runId'] ?? '');
+        $hold = function (array $res, string $reason) use ($setState, $setMeta, $repoRoot, $base, $runId) {
+            $setState($res['n'], 'held');
+            $id = '';
+            if (class_exists('Board')) {
+                $diff = (string)($res['diff'] ?? '');
+                $id = Board::enqueue('crew_branch',
+                    'coder #' . $res['n'] . ': ' . (string)($res['title'] ?? 'task') . ' — ' . $reason,
+                    strlen($diff) > 60000 ? substr($diff, 0, 60000) . "\n… (diff truncated)" : $diff,
+                    ['runId' => $runId, 'n' => $res['n'], 'branch' => (string)($res['branch'] ?? ''),
+                     'repoRoot' => $repoRoot, 'base' => $base, 'reason' => $reason,
+                     'files' => array_slice($res['files'] ?? [], 0, 40)]);
+            }
+            if ($setMeta) $setMeta((int)$res['n'], ['held' => true, 'reason' => $reason, 'decisionId' => $id, 'branch' => (string)($res['branch'] ?? '')]);
+        };
         $merged = []; $held = [];
         foreach ($results as $res) {
             if ($res['empty']) { $setState($res['n'], 'held'); continue; }
-            if ($land === 'review') { $held[] = $res; $setState($res['n'], 'held'); echo "  {$y}held{$r} #{$res['n']} {$res['branch']} {$d}(review mode){$r}\n"; continue; }
-            if (empty($res['audit']['clean'])) { $held[] = $res; $setState($res['n'], 'held'); echo "  {$y}held{$r} #{$res['n']} {$res['branch']} {$d}(audit flagged){$r}\n"; continue; }
+            if ($land === 'review') { $held[] = $res; $hold($res, 'review mode'); echo "  {$y}held{$r} #{$res['n']} {$res['branch']} {$d}(review mode){$r}\n"; continue; }
+            if (empty($res['audit']['clean'])) { $held[] = $res; $hold($res, 'audit flagged'); echo "  {$y}held{$r} #{$res['n']} {$res['branch']} {$d}(audit flagged){$r}\n"; continue; }
             self::sh('git merge --no-ff --no-edit ' . escapeshellarg($res['branch']) . ' 2>&1');
             if (self::sh('git status --porcelain') !== '' && self::sh('git ls-files -u') !== '') {
                 self::sh('git merge --abort 2>&1');
-                $held[] = $res; $setState($res['n'], 'held'); echo "  {$y}held{$r} #{$res['n']} {$res['branch']} {$d}(merge conflict — review manually){$r}\n";
+                $held[] = $res; $hold($res, 'merge conflict'); echo "  {$y}held{$r} #{$res['n']} {$res['branch']} {$d}(merge conflict — review manually){$r}\n";
             } else {
                 $merged[] = $res; $setState($res['n'], 'done'); echo "  {$g}merged{$r} #{$res['n']} {$res['branch']}\n";
             }
         }
         echo "\n{$b}Summary{$r}  {$g}" . count($merged) . " merged{$r} · {$y}" . count($held) . " held{$r}\n";
         if ($held) {
-            echo "  {$d}Review held branches, then merge or discard:{$r}\n";
-            foreach ($held as $res) echo "    git diff {$base}..{$res['branch']}   {$d}# then: git merge {$res['branch']}  (or: git branch -D {$res['branch']}){$r}\n";
+            echo "  {$d}Accept or discard held branches from the desktop Board (or the CLI):{$r}\n";
+            foreach ($held as $res) echo "    ollamadev crew accept {$res['n']}   {$d}# merge  ·  ollamadev crew discard {$res['n']}  # delete branch{$r}\n";
         }
     }
 
@@ -420,6 +468,7 @@ class Crew {
         $boardFile = $home . '/.ollamadev/crew/current.json'; @mkdir(dirname($boardFile), 0755, true);
         $logDir = dirname($boardFile) . '/' . $runId; @mkdir($logDir, 0755, true);
         $board = ['task' => $task, 'runId' => $runId, 'active' => true, 'model' => $model, 'logDir' => $logDir,
+            'repoRoot' => self::sh('git rev-parse --show-toplevel 2>/dev/null'), 'base' => $base,
             'models' => ['director' => $rm('directorModel'), 'researcher' => $rm('researcherModel'), 'coder' => $mCoder, 'auditor' => $mAuditor],
             'amplify' => $amplify, 'focus' => $focus, 'subtasks' => []];
         foreach ($subtasks as $st) $board['subtasks'][] = ['n' => $st['n'], 'title' => $st['title'] ?? ('task ' . $st['n']), 'role' => $st['role'] ?? 'coder', 'state' => 'todo',
@@ -459,7 +508,7 @@ class Crew {
 
         foreach ($results as $res) $setMeta((int)$res['n'], ['files' => array_slice($res['files'] ?? [], 0, 24), 'empty' => !empty($res['empty'])]);
         self::auditAndLand($agent, $results, $opts, $base, $baseCommit, $mAuditor, $amplify, $task, $setState,
-            ['coderModel' => $mCoder, 'maxIter' => $maxIter, 'research' => $research, 'focus' => $focus, 'logDir' => $logDir], $setMeta);
+            ['coderModel' => $mCoder, 'maxIter' => $maxIter, 'research' => $research, 'focus' => $focus, 'logDir' => $logDir, 'runId' => $runId], $setMeta);
         self::offerIdeas($runId, $agent, $task, $research, $results, $mCoder, $opts, $board, $writeBoard);
         self::rememberFacts($task, $research, $results, $mCoder, $opts);
         $board['active'] = false; $writeBoard();
@@ -614,7 +663,16 @@ class Crew {
         $wt = $job['wt']; $st = $job['st']; $n = $job['n'];
         self::sh('git -C ' . escapeshellarg($wt) . ' add -A -- . ' . escapeshellarg(':(exclude).ollamadev'));
         $changed = self::sh('git -C ' . escapeshellarg($wt) . ' diff --cached --name-only') !== '';
-        if ($changed) self::sh('git -C ' . escapeshellarg($wt) . ' commit -q -m ' . escapeshellarg('crew: ' . ($st['title'] ?? 'task ' . $n)) . ' 2>&1');
+        if ($changed) {
+            // A fresh repo (or CI box) often has no user.name/user.email, which makes
+            // `git commit` fail — and then the branch is empty and the work is lost.
+            // Supply a crew identity ONLY when none is configured (-c overrides, so
+            // we must not pass it when the user has a real identity set).
+            $ident = self::sh('git -C ' . escapeshellarg($wt) . ' config user.email') === ''
+                ? ' -c user.name=' . escapeshellarg('OllamaDev Crew') . ' -c user.email=' . escapeshellarg('crew@ollamadev.local')
+                : '';
+            self::sh('git -C ' . escapeshellarg($wt) . $ident . ' commit -q -m ' . escapeshellarg('crew: ' . ($st['title'] ?? 'task ' . $n)) . ' 2>&1');
+        }
         $diff = self::sh('git -C ' . escapeshellarg($wt) . ' diff ' . escapeshellarg($baseCommit) . ' HEAD');
         $files = array_values(array_filter(explode("\n", self::sh('git -C ' . escapeshellarg($wt) . ' diff --name-only ' . escapeshellarg($baseCommit) . ' HEAD'))));
         return ['n' => $n, 'title' => $st['title'] ?? 'task', 'branch' => $job['branch'], 'wt' => $wt, 'diff' => $diff, 'files' => $files, 'empty' => $diff === ''];
@@ -1042,4 +1100,132 @@ class Crew {
     }
     private static function gitWorktreeSupported(): bool { return stripos(self::sh('git worktree -h 2>&1'), 'usage') !== false || self::sh('git worktree list 2>/dev/null') !== ''; }
     private static function sh(string $cmd): string { return trim((string)@shell_exec($cmd)); }
+
+    // ---- Held-branch actions (desktop Board + CLI) --------------------------
+    // The crew runs as a subprocess and writes the live board; the desktop and the
+    // CLI act on held branches AFTER the run via these helpers. All local git — the
+    // only thing that ever touches the remote is pushRepo() (an explicit push).
+
+    // The live crew board (single source the desktop polls). [] when none.
+    public static function liveBoard(): array {
+        $home = getenv('HOME') ?: sys_get_temp_dir();
+        $d = json_decode((string)@file_get_contents($home . '/.ollamadev/crew/current.json'), true);
+        return is_array($d) ? $d : [];
+    }
+    // Resolve a coder number on the live board to its branch/repo/decision id.
+    private static function heldRef(int $n): array {
+        $bd = self::liveBoard();
+        $root = (string)($bd['repoRoot'] ?? '') ?: self::sh('git rev-parse --show-toplevel 2>/dev/null');
+        $ref = ['branch' => '', 'repoRoot' => $root, 'base' => (string)($bd['base'] ?? ''), 'n' => $n, 'decisionId' => ''];
+        foreach (($bd['subtasks'] ?? []) as $s) {
+            if ((int)($s['n'] ?? 0) === $n) { $ref['branch'] = (string)($s['branch'] ?? ''); $ref['decisionId'] = (string)($s['decisionId'] ?? ''); break; }
+        }
+        return $ref;
+    }
+    // Patch a subtask's state on the live board so the kanban reflects an
+    // accept/discard immediately (the run that wrote it has already exited).
+    private static function setBoardState(int $n, string $state): void {
+        $home = getenv('HOME') ?: sys_get_temp_dir();
+        $f = $home . '/.ollamadev/crew/current.json';
+        $bd = json_decode((string)@file_get_contents($f), true);
+        if (!is_array($bd) || empty($bd['subtasks'])) return;
+        foreach ($bd['subtasks'] as &$s) if ((int)($s['n'] ?? 0) === $n) { $s['state'] = $state; $s['held'] = false; }
+        unset($s);
+        $bd['ts'] = time();
+        atomicWrite($f, json_encode($bd));
+    }
+
+    // Merge a held coder branch into the repo's current branch — LOCAL ONLY.
+    // Requires a clean tree on a real branch; aborts cleanly on conflict.
+    public static function acceptHeldBranch(array $opts): array {
+        $root = (string)($opts['repoRoot'] ?? '');
+        $branch = (string)($opts['branch'] ?? '');
+        if ($root === '' || !is_dir($root)) return ['ok' => false, 'error' => 'repo not found'];
+        if ($branch === '') return ['ok' => false, 'error' => 'no branch on this decision'];
+        $g = 'git -C ' . escapeshellarg($root) . ' ';
+        if (self::sh($g . 'rev-parse --verify ' . escapeshellarg($branch) . ' 2>/dev/null') === '')
+            return ['ok' => false, 'error' => 'branch no longer exists: ' . $branch];
+        if (self::sh($g . 'rev-parse --abbrev-ref HEAD 2>/dev/null') === 'HEAD')
+            return ['ok' => false, 'error' => 'detached HEAD — check out a branch first'];
+        if (self::sh($g . 'status --porcelain --untracked-files=no') !== '')
+            return ['ok' => false, 'error' => 'uncommitted changes — commit or stash before merging'];
+        $out = self::sh($g . 'merge --no-ff --no-edit ' . escapeshellarg($branch) . ' 2>&1');
+        if (self::sh($g . 'ls-files -u') !== '') {
+            self::sh($g . 'merge --abort 2>&1');
+            return ['ok' => false, 'conflict' => true, 'error' => 'merge conflict — resolve ' . $branch . ' manually', 'out' => $out];
+        }
+        if (isset($opts['n'])) self::setBoardState((int)$opts['n'], 'done');
+        return ['ok' => true, 'merged' => $branch, 'out' => $out];
+    }
+    // Discard (delete) a held coder branch. Recoverable via reflog until gc.
+    public static function discardHeldBranch(array $opts): array {
+        $root = (string)($opts['repoRoot'] ?? '');
+        $branch = (string)($opts['branch'] ?? '');
+        if ($root === '' || !is_dir($root)) return ['ok' => false, 'error' => 'repo not found'];
+        if ($branch === '') return ['ok' => false, 'error' => 'no branch on this decision'];
+        $out = self::sh('git -C ' . escapeshellarg($root) . ' branch -D ' . escapeshellarg($branch) . ' 2>&1');
+        if (isset($opts['n'])) self::setBoardState((int)$opts['n'], 'discarded');
+        return ['ok' => true, 'discarded' => $branch, 'out' => $out];
+    }
+    // Apply a Board verdict to a decision: for crew_branch, accept=merge / deny=discard
+    // (the git op runs first; the Board is only marked decided if it succeeded so a
+    // conflict leaves the card pending to retry). Other kinds just record the verdict.
+    public static function decideCrewBranch(string $id, string $verdict): array {
+        if (!class_exists('Board')) return ['ok' => false, 'error' => 'board unavailable'];
+        $rec = Board::get($id);
+        if (!$rec) return ['ok' => false, 'error' => 'no such decision: ' . $id];
+        $accept = in_array($verdict, ['accept', 'always'], true);
+        if (($rec['kind'] ?? '') !== 'crew_branch') {
+            Board::decide($id, $accept ? 'accept' : 'deny');
+            return ['ok' => true, 'decided' => $accept ? 'accept' : 'deny'];
+        }
+        $opts = is_array($rec['opts'] ?? null) ? $rec['opts'] : [];
+        $res = $accept ? self::acceptHeldBranch($opts) : self::discardHeldBranch($opts);
+        if (!empty($res['ok'])) Board::decide($id, $accept ? 'accept' : 'deny');
+        $res['verdict'] = $accept ? 'accept' : 'deny';
+        return $res;
+    }
+    // Accept/discard by coder number on the live board (CLI convenience). Routes
+    // through the Board decision when one exists so CLI + desktop stay in sync.
+    public static function acceptByN(int $n): array {
+        $ref = self::heldRef($n);
+        return ($ref['decisionId'] ?? '') !== '' ? self::decideCrewBranch($ref['decisionId'], 'accept') : self::acceptHeldBranch($ref);
+    }
+    public static function discardByN(int $n): array {
+        $ref = self::heldRef($n);
+        return ($ref['decisionId'] ?? '') !== '' ? self::decideCrewBranch($ref['decisionId'], 'deny') : self::discardHeldBranch($ref);
+    }
+
+    // Push the repo's current branch to its remote (sets upstream on first push).
+    public static function pushRepo(string $root = ''): array {
+        if ($root === '') $root = self::sh('git rev-parse --show-toplevel 2>/dev/null');
+        if ($root === '' || !is_dir($root)) return ['ok' => false, 'error' => 'repo not found'];
+        $g = 'git -C ' . escapeshellarg($root) . ' ';
+        if (self::sh($g . 'remote') === '') return ['ok' => false, 'error' => 'no remote configured — add one: git remote add origin <url>'];
+        $branch = self::sh($g . 'rev-parse --abbrev-ref HEAD 2>/dev/null');
+        if ($branch === '' || $branch === 'HEAD') return ['ok' => false, 'error' => 'not on a branch'];
+        $hasUp = self::sh($g . 'rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null') !== '';
+        $out = self::sh($hasUp ? $g . 'push 2>&1' : $g . 'push -u origin ' . escapeshellarg($branch) . ' 2>&1');
+        $low = strtolower($out);
+        $ok = strpos($low, 'fatal') === false && strpos($low, 'error:') === false && strpos($low, 'rejected') === false;
+        return ['ok' => $ok, 'branch' => $branch, 'out' => $out];
+    }
+    // Remote sync status for the desktop chip: ahead/behind vs the upstream.
+    public static function remoteStatus(string $root = ''): array {
+        if ($root === '') $root = self::sh('git rev-parse --show-toplevel 2>/dev/null');
+        if ($root === '' || !is_dir($root)) return ['isRepo' => false, 'hasRemote' => false];
+        $g = 'git -C ' . escapeshellarg($root) . ' ';
+        $branch = self::sh($g . 'rev-parse --abbrev-ref HEAD 2>/dev/null');
+        $remote = self::sh($g . 'remote');
+        if ($remote === '') return ['isRepo' => true, 'hasRemote' => false, 'branch' => $branch];
+        $up = self::sh($g . 'rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null');
+        $ahead = 0; $behind = 0;
+        if ($up !== '') {
+            $lr = self::sh($g . 'rev-list --left-right --count @{u}...HEAD 2>/dev/null');
+            if (preg_match('/(\d+)\s+(\d+)/', $lr, $m)) { $behind = (int)$m[1]; $ahead = (int)$m[2]; }
+        }
+        return ['isRepo' => true, 'hasRemote' => true, 'remote' => explode("\n", $remote)[0],
+            'branch' => $branch, 'upstream' => $up, 'ahead' => $ahead, 'behind' => $behind,
+            'dirty' => self::sh($g . 'status --porcelain') !== ''];
+    }
 }

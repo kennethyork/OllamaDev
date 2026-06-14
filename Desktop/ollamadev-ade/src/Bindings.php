@@ -29,6 +29,7 @@ final class Bindings
         'reviewDiff', 'temperature', 'setTemperature',
         'sttModel', 'setSttModel', 'sttHistory', 'sttClearHistory',
         'openExternal', 'proxyFetch', 'crewModels', 'setCrewModels', 'crewSteer',
+        'boardList', 'boardDecide', 'crewPush', 'gitRemoteStatus',
         'skillsList', 'skillsGet', 'skillsSave', 'skillsRemove',
         'hooksList', 'hooksAdd', 'hooksRemove',
         'chatList', 'chatDelete', 'chatExport',
@@ -133,6 +134,56 @@ final class Bindings
         $entry = ['target' => $coder, 'msg' => $msg, 'ts' => microtime(true)];
         $ok = @file_put_contents($steerFile, json_encode($entry) . "\n", FILE_APPEND | LOCK_EX) !== false;
         return $ok ? ['ok' => true] : ['error' => 'could not write to the steer inbox'];
+    }
+
+    // The repo the crew worked on (so push/remote-status act on the right tree even
+    // though this process's cwd is the ADE dir). Falls back to the workspace root.
+    private function projectRoot(): string
+    {
+        $home = getenv('HOME') ?: sys_get_temp_dir();
+        $bd = json_decode((string) @file_get_contents($home . '/.ollamadev/crew/current.json'), true);
+        $root = is_array($bd) ? (string) ($bd['repoRoot'] ?? '') : '';
+        if ($root === '' || !is_dir($root)) $root = $this->files->getRoot();
+        return ($root !== '' && is_dir($root)) ? $root : (string) getcwd();
+    }
+
+    // The unified pending-decisions queue (held crew branches + permission asks).
+    public function boardList(): array
+    {
+        $out = shell_exec('php ' . escapeshellarg($this->cli) . ' board list --json 2>/dev/null');
+        $d = json_decode((string) $out, true);
+        return is_array($d) ? $d : ['pending' => [], 'recent' => []];
+    }
+
+    // Accept (merge) or discard (delete) a held branch — or record any other
+    // decision. verdict is 'accept' or 'deny'. The merge runs in the decision's own
+    // repoRoot (carried on the card), so cwd doesn't matter here.
+    public function boardDecide(string $id, string $verdict = 'accept'): array
+    {
+        $id = trim($id);
+        if ($id === '') return ['ok' => false, 'error' => 'no decision id'];
+        $v = $verdict === 'accept' ? 'accept' : 'deny';
+        $out = shell_exec('php ' . escapeshellarg($this->cli) . ' board decide ' . escapeshellarg($id) . ' ' . escapeshellarg($v) . ' --json 2>/dev/null');
+        $d = json_decode((string) $out, true);
+        return is_array($d) ? $d : ['ok' => false, 'error' => 'could not reach the board'];
+    }
+
+    // Push the project's current branch (with any just-accepted work) to its remote.
+    public function crewPush(): array
+    {
+        $root = $this->projectRoot();
+        $out = shell_exec('cd ' . escapeshellarg($root) . ' && php ' . escapeshellarg($this->cli) . ' crew push --json 2>/dev/null');
+        $d = json_decode((string) $out, true);
+        return is_array($d) ? $d : ['ok' => false, 'error' => 'push failed'];
+    }
+
+    // Ahead/behind vs the upstream, for the Board's remote chip.
+    public function gitRemoteStatus(): array
+    {
+        $root = $this->projectRoot();
+        $out = shell_exec('cd ' . escapeshellarg($root) . ' && php ' . escapeshellarg($this->cli) . ' crew remote --json 2>/dev/null');
+        $d = json_decode((string) $out, true);
+        return is_array($d) ? $d : ['isRepo' => false, 'hasRemote' => false];
     }
 
     // ---- Skills manager: list / view / create-or-edit / remove. Shells out to the
