@@ -2040,24 +2040,22 @@ ok('tool schema properties cast to object (empty -> {} not [])', strpos($toolsDe
 // Eval --model override must reach the Agent (which reads static Config, not the array).
 ok('eval --model override applied via Config::set', strpos($mainSrc, "Config::set('ollama.defaultModel'") !== false);
 
-// Text-protocol tool-calling: own the protocol instead of relying on Ollama native.
-ok('tools.mode text path short-circuits native in chatTurn', strpos($agentSrc, "Config::get('tools.mode'") !== false &&
-    strpos($agentSrc, "\$toolMode === 'text'") !== false);
-ok('text mode injects a tool catalog + explicit JSON format', strpos($agentSrc, 'Tools::textCatalog()') !== false &&
-    strpos($agentSrc, 'TOOL PROTOCOL') !== false);
-// Structured mode: schema-constrained decoding for reliable tool calls.
+// Tool-calling is Ollama-native ONLY: the agent turn relies entirely on Ollama's
+// server-side tool_calls parsing and never re-scans the model's text with our own
+// heuristics. effectiveToolMode resolves to native whenever the backend can do it.
+ok('effectiveToolMode resolves to native when the backend supports it', strpos($agentSrc, 'function effectiveToolMode(') !== false &&
+    strpos($agentSrc, "method_exists(\$this->client, 'chatWithTools') ? 'native' : 'text'") !== false);
+ok('native-ok path returns ONLY Ollama-parsed tool_calls (no content re-parse)',
+    strpos($agentSrc, "'calls' => \$res['calls'], 'streamed'") !== false &&
+    strpos($agentSrc, "if (empty(\$calls)) \$calls = \$this->parseToolCalls(\$res['content'])") === false);
+ok('unsupported model switches to a tool-capable model (not text parsing)',
+    strpos($agentSrc, 'Models::toolFallback(') !== false &&
+    strpos($agentSrc, "can't use native tools") !== false);
+ok('text parsing is the documented last resort only (no native backend)',
+    strpos($agentSrc, 'Last resort') !== false && strpos($agentSrc, "\$toolMode !== 'native'") !== false);
 $ollClient = (string)@file_get_contents($repoRoot . '/src/50-ollama-client.php');
-ok('structured mode uses schema-constrained decoding in chatTurn', strpos($agentSrc, "\$toolMode === 'structured'") !== false &&
-    strpos($agentSrc, 'chatStructured(') !== false && strpos($agentSrc, 'toolCallSchema()') !== false);
-ok('toolCallSchema constrains tool names to real tools (enum)', strpos($agentSrc, 'function toolCallSchema(') !== false &&
-    strpos($agentSrc, "'enum'") !== false && strpos($agentSrc, "'tool_calls'") !== false);
-ok('Ollama client supports chatStructured (schema-constrained format)',
-    strpos($ollClient, 'function chatStructured(') !== false && strpos($ollClient, "'format' => \$schema") !== false);
-ok('auto resolves to structured when the backend supports it (native is opt-in)',
-    strpos($agentSrc, 'function effectiveToolMode(') !== false &&
-    strpos($agentSrc, "method_exists(\$this->client, 'chatStructured') ? 'structured' : 'text'") !== false);
-ok('structured has a self-consistent envelope fallback', strpos($agentSrc, 'function interpretStructuredText(') !== false &&
-    strpos($agentSrc, 'function mapStructured(') !== false && strpos($agentSrc, 'structuredCap') !== false);
+ok('Ollama client drives native tool-calling via chatWithTools',
+    strpos($ollClient, 'function chatWithTools(') !== false);
 ok('parser accepts both name and tool keys', strpos($agentSrc, "\$json['tool']") !== false);
 // Reliability: strip stray markdown fences from written files; nudge the model to act via tools.
 ok('write/notebook strip a stray enclosing code fence (unfence)', strpos((string)@file_get_contents($repoRoot . '/src/00-header.php'), 'function unfence(') !== false &&

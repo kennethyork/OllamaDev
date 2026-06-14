@@ -267,56 +267,42 @@ User: run the tests
 
         $toolMode = $this->effectiveToolMode();
 
-        // Structured mode: schema-constrained decoding. The backend forces the
-        // reply to match a {message, tool_calls[]} schema, so the model CANNOT
-        // emit malformed tool JSON or hallucinate a tool. Most reliable local
-        // tool-calling. If the backend can't constrain output, we still asked
-        // for the envelope in the prompt, so we parse it from free text.
-        if ($toolMode === 'structured') {
-            $key = get_class($this->client);
-            if (($GLOBALS['structuredCap'][$key] ?? null) !== false && method_exists($this->client, 'chatStructured')) {
-                $res = $this->client->chatStructured($this->model, $allMessages, self::toolCallSchema());
-                if (is_array($res)) { $GLOBALS['structuredCap'][$key] = true; return $this->mapStructured($res); }
-                $GLOBALS['structuredCap'][$key] = false; // backend can't constrain — stop trying
-            }
-            return $this->interpretStructuredText($this->run($messages));
-        }
-
-        // Text-protocol mode: we own the protocol — prompt for JSON tool calls
-        // and parse them ourselves. Portable across all models/backends.
-        if ($toolMode === 'text') {
+        // No native function-calling on this backend at all (e.g. a very old Ollama
+        // with no per-model tool template). There is no Ollama parser to lean on, so
+        // this is the one case we still own the protocol and parse it ourselves.
+        if ($toolMode !== 'native') {
             $response = $this->run($messages);
             return ['content' => $response, 'calls' => $this->parseToolCalls($response)];
         }
 
-        // Native function-calling (the 'auto' default, and explicit tools.mode=native).
-        // Try native tools unless we already learned this model lacks support.
+        // Native function-calling — Ollama's server-side parser is the ONLY source
+        // of tool calls. We hand Ollama the tool schemas; it applies the model's own
+        // chat template and returns structured tool_calls parsed from whatever format
+        // that model speaks. We never re-scan the model's text with our own regexes,
+        // so a model whose emission format we don't recognise (e.g. a cloud model's
+        // XML <invoke> blocks) can't "call a tool" that silently never runs.
         if (($GLOBALS['nativeTools'][$this->model] ?? null) !== false) {
             $res = $this->client->chatWithTools($this->model, $allMessages, Tools::schemas(), $stream);
             if (!empty($res['ok'])) {
                 $GLOBALS['nativeTools'][$this->model] = true;
-                $calls = $res['calls'];
-                // Some models emit text-format calls even in native mode; catch them.
-                if (empty($calls)) $calls = $this->parseToolCalls($res['content']);
-                return ['content' => $res['content'], 'calls' => $calls, 'streamed' => $stream !== null];
+                return ['content' => $res['content'], 'calls' => $res['calls'], 'streamed' => $stream !== null];
             }
             if (!empty($res['unsupported'])) {
                 $GLOBALS['nativeTools'][$this->model] = false; // remember and stop retrying
-                // Graceful degradation: if a tool-capable model is installed, switch
-                // to it for the rest of the session (once) rather than dropping to the
-                // brittle text-format path. Honors the configured model.fallback chain.
+                // This model can't do native tools. Switch to an installed tool-capable
+                // model (once) rather than guessing tool calls from text — Ollama parses
+                // that model natively too. Honors the configured model.fallback chain.
                 if (!$this->triedFallback && (bool)Config::get('model.autoFallback', true)) {
                     $this->triedFallback = true;
                     $alt = Models::toolFallback($this->client->listModels(), $this->model);
                     if ($alt !== '' && $alt !== $this->model) {
-                        fwrite(STDERR, "\n\033[2m  ⓘ {$this->model} can't use native tools — falling back to $alt for tool calls.\033[0m\n");
+                        fwrite(STDERR, "\n\033[2m  ⓘ {$this->model} can't use native tools — switching to $alt for tool calls.\033[0m\n");
                         $this->setModel($alt);
                         $retry = array_merge([$this->systemPrompt], $this->wire($messages));
                         $res2 = $this->client->chatWithTools($this->model, $retry, Tools::schemas());
                         if (!empty($res2['ok'])) {
                             $GLOBALS['nativeTools'][$this->model] = true;
-                            $calls = $res2['calls'] ?: $this->parseToolCalls($res2['content']);
-                            return ['content' => $res2['content'], 'calls' => $calls];
+                            return ['content' => $res2['content'], 'calls' => $res2['calls']];
                         }
                     }
                 }
@@ -325,43 +311,33 @@ User: run the tests
                 // malformed tool-call JSON that Ollama's server-side template parser
                 // rejects with a 500 ("Value looks like object, but can't find closing
                 // '}' symbol"); gemma is prone to this on multi-line/nested arguments.
-                // Do NOT surface Ollama's raw Go error as the answer, and do NOT
-                // dead-end the turn. Retry native once (the bad JSON is usually
-                // stochastic), then fall through to the text-format path below, whose
-                // tolerant parser + repairJson can recover the call.
+                // Retry native once (the bad output is usually stochastic) and never
+                // surface Ollama's raw Go error as the answer.
                 $res2 = $this->client->chatWithTools($this->model, $allMessages, Tools::schemas());
                 if (!empty($res2['ok'])) {
-                    $calls = $res2['calls'] ?: $this->parseToolCalls($res2['content']);
-                    return ['content' => $res2['content'], 'calls' => $calls];
+                    $GLOBALS['nativeTools'][$this->model] = true;
+                    return ['content' => $res2['content'], 'calls' => $res2['calls']];
                 }
-                // still failing → text-format fallback (do not return the raw error)
             }
         }
 
-        // Text-format fallback.
+        // Last resort: this model has no native tool parser to lean on (Ollama
+        // reported it unsupported and there's no tool-capable model installed to
+        // switch to). Only here do we own the protocol and parse the text ourselves.
         $response = $this->run($messages);
         return ['content' => $response, 'calls' => $this->parseToolCalls($response)];
     }
 
-    // Resolve the configured tools.mode, turning 'auto' into the best available
-    // mechanism. We PREFER Ollama's native function-calling: modern Ollama ships a
-    // per-model tool template, so it reliably emits structured tool_calls for any
-    // tool-capable model (gemma, llama, qwen, mistral, …). The old text / schema
-    // parsing is brittle — many perfectly capable models describe the action in
-    // prose and emit nothing parseable, so the agent "calls a tool" that never runs
-    // and the turn dead-ends. Native carries its own graceful fallback (a model
-    // Ollama reports as tool-unsupported drops to a fallback model, then to the text
-    // protocol), so preferring it never dead-ends.
+    // The agent turn uses Ollama's native function-calling EXCLUSIVELY: modern
+    // Ollama ships a per-model tool template and parses each model's tool syntax
+    // server-side into structured tool_calls — so we never second-guess the model's
+    // text with our own regex heuristics (those were brittle: a model that emits a
+    // format we don't recognise — e.g. cloud models' XML <invoke> blocks — would
+    // "call a tool" that silently never ran). When the active model can't do native
+    // tools, we switch to an installed tool-capable model (see chatTurn) rather than
+    // dropping to text parsing. Returns 'native' whenever the backend can do it.
     private function effectiveToolMode(): string {
-        $m = Config::get('tools.mode', 'auto');
-        if ($m !== 'auto') return $m; // native | text | structured (explicit override)
-        // Native first, until we've learned THIS model can't do it.
-        if (($GLOBALS['nativeTools'][$this->model] ?? null) !== false && method_exists($this->client, 'chatWithTools')) {
-            return 'native';
-        }
-        $key = get_class($this->client);
-        if (($GLOBALS['structuredCap'][$key] ?? null) === false) return 'text';
-        return method_exists($this->client, 'chatStructured') ? 'structured' : 'text';
+        return method_exists($this->client, 'chatWithTools') ? 'native' : 'text';
     }
 
     // Map a {message, tool_calls:[{tool,arguments}]} envelope to a turn result.
