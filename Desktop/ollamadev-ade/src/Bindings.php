@@ -57,6 +57,10 @@ final class Bindings
             $h = getenv('HOME') ?: '';
             if ($h !== '') $cwd = $h . substr($cwd, 1);
         }
+        // Blank cwd → open in the folder the ADE currently has open (the file-browser
+        // root), not the ADE process's launch dir, so a new shell lands in your
+        // project by default.
+        if ($cwd === '') { $root = $this->files->getRoot(); if ($root !== '' && is_dir($root)) $cwd = $root; }
         $dir = ($cwd !== '' && is_dir($cwd)) ? $cwd : null;
         $this->pty->create($id, $model, $dir);
         $this->pty->start($id);

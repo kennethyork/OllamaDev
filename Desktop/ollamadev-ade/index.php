@@ -72,7 +72,7 @@ $app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $
     // browser server mode (server.php /api/<name>) — see src/Bindings.php.
     $bx = new Bindings($pty, $files, $cli);
     $b->bind('listModels',    fn(): array => $bx->listModels());
-    $b->bind('termCreate',    fn(string $id, string $model): bool => $bx->termCreate($id, $model));
+    $b->bind('termCreate',    fn(string $id, string $model, string $cwd = ''): bool => $bx->termCreate($id, $model, $cwd));
     $b->bind('termRead',      fn(string $id, int $offset = 0): array => $bx->termRead($id, $offset));
     $b->bind('termWrite',     fn(string $id, string $b64): bool => $bx->termWrite($id, $b64));
     $b->bind('termKill',      fn(string $id): bool => $bx->termKill($id));
