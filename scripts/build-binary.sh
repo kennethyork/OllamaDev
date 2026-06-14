@@ -49,7 +49,7 @@ echo "▸ building ollamadev (concatenation)…"
 ./build.sh >/dev/null
 ENTRY="$ROOT/.build/ollamadev.entry.php"
 mkdir -p "$ROOT/.build"
-tail -n +2 "$ROOT/ollamadev" > "$ENTRY"
+cp "$ROOT/ollamadev" "$ENTRY"
 
 # 2. Fetch phpacker into an isolated build project (keeps the repo deps-free).
 if [ ! -x "$BUILD_DIR/vendor/bin/phpacker" ]; then
