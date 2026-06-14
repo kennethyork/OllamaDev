@@ -1678,7 +1678,10 @@ ok('workspace add reports the entry', strpos($o1, 'smoke-ws') !== false && strpo
 [$o2] = run_bin(['workspace', 'list'], '', $wsEnv);
 ok('workspace list shows it active', strpos($o2, 'smoke-ws') !== false && strpos($o2, '* ') !== false, trim($o2));
 [$o3] = run_bin(['workspace', 'open', 'smoke-ws'], '', $wsEnv);
-ok('workspace open prints the path (for cd $(...))', trim($o3) === '/tmp', trim($o3));
+// macOS resolves /tmp → /private/tmp (it's a symlink), so accept either the raw or
+// the realpath-resolved form — both are valid targets for `cd $(...)`.
+$wsReal = realpath('/tmp') ?: '/tmp';
+ok('workspace open prints the path (for cd $(...))', in_array(trim($o3), ['/tmp', $wsReal], true), trim($o3));
 [$o4] = run_bin(['ws', 'remove', 'smoke-ws'], '', $wsEnv);   // `ws` alias
 ok('ws remove (alias) works', strpos($o4, 'Removed') !== false, trim($o4));
 [$o5] = run_bin(['workspace', 'list'], '', $wsEnv);
