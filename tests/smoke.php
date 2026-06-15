@@ -1196,7 +1196,7 @@ ok('Chat per-window actions: model switch (/model), image, persona, export',
     strpos($ade, 'chatSetModel = function') !== false && strpos($ade, 'chatImage = function') !== false &&
     strpos($ade, 'chatPersona = function') !== false && strpos($ade, 'chatExport = function') !== false);
 ok('Chat windows resume their session on reopen (kind chat + saved session)',
-    strpos($ade, "ti.kind === 'chat') self.spawnChatWindow(ti.model, ti.session)") !== false &&
+    strpos($ade, "ti.kind === 'chat') self.spawnChatWindow(ti.model, ti.session") !== false &&
     strpos($ade, 'session: t.chatSession') !== false);
 ok('the ollamadev agent terminals are untouched (still launchCli)',
     strpos($ade, 'launchCli: function') !== false && strpos($ade, 'if (!isShell) self.launchCli') !== false);
@@ -1747,6 +1747,13 @@ ok('dirty editor buffers persist + restore across reload',
     strpos($appjs, 'snapshot: function') !== false && strpos($appjs, 'editorTabs: Editor.snapshot()') !== false &&
     strpos($appjs, 'openWith: function') !== false && strpos($appjs, 'Editor.openWith(t.path, t.name, t.content') !== false &&
     strpos($appjs, '!self.terminals.length && !Editor.tabs.length') !== false);
+// Terminal scrollback survives a full restart as a read-only replay block: captureState
+// snapshots each terminal's output, and respawned terminals pin it (Terminal._injectReplay).
+ok('terminal scrollback persists as a read-only replay on restart',
+    strpos($appjs, 'Terminal.prototype.snapshot') !== false && strpos($appjs, 'replay: t.snapshot()') !== false &&
+    strpos($appjs, '_injectReplay') !== false && strpos($appjs, 'CanvasRenderer.prototype.dumpText') !== false &&
+    strpos($appjs, 'if (replay) t.replaySnap = replay') !== false &&
+    strpos((string)@file_get_contents($repoRoot . '/Desktop/ollamadev-ade/public/app.css'), '.term-replay') !== false);
 ok('terminals detach (pty kept alive) for re-attach on switch', strpos($appjs, 'Terminal.prototype.detach') !== false && strpos($appjs, 'attachTerminal:') !== false);
 $idxhtml = (string)@file_get_contents($repoRoot . '/Desktop/ollamadev-ade/public/index.html');
 ok('project tab list present in the UI', strpos($idxhtml, 'id="wsBar"') !== false && strpos($idxhtml, 'id="wsStrip"') !== false);

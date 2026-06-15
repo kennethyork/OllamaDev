@@ -601,6 +601,17 @@ CanvasRenderer.prototype.selectionText = function () {
     }
     return out.join('\n');
 };
+// Serialize the scrollback buffer to plain text (last `maxLines` rows) — used to
+// snapshot a terminal's output so it can be redisplayed read-only after a restart.
+CanvasRenderer.prototype.dumpText = function (maxLines) {
+    var src = this.lines || [], out = [], start = Math.max(0, src.length - (maxLines || 400));
+    for (var r = start; r < src.length; r++) {
+        var row = src[r] || [], line = '';
+        for (var c = 0; c < row.length; c++) line += (row[c] ? row[c].ch : ' ');
+        out.push(line.replace(/\s+$/, ''));
+    }
+    return out.join('\n').replace(/\n+$/, '');
+};
 CanvasRenderer.prototype._xyToCell = function (e) {
     var rect = this.canvas.getBoundingClientRect();
     return { r: Math.max(0, Math.min(this.rows - 1, Math.floor((e.clientY - rect.top) / this.chh))), c: Math.max(0, Math.min(this.cols - 1, Math.floor((e.clientX - rect.left) / this.cw))) };
@@ -703,6 +714,9 @@ Terminal.prototype.mount = function (host) {
           '<div class="term-line"><input class="term-input" enterkeyhint="send" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="type a command — Enter to send"><button class="term-send">Send</button></div>' +
         '</div>';
     this.screen = host.querySelector('.term-screen');
+    // Read-only scrollback from a previous session (after a full restart). DOM mode
+    // only — keeps it clear of the canvas renderer's layout.
+    if (this.replaySnap && !(window.App && App.canvasTerm)) this._injectReplay();
     // Wire the touch input: send the typed line (+newline) and the control keys.
     var sendRaw = function (s) { try { window.termWrite(self.id, strToB64(s)); } catch (e) {} };
     var tin = host.querySelector('.term-input');
@@ -912,6 +926,41 @@ Terminal.prototype._trackStatus = function (text) {
     if (/\n❯[ \t]*$/.test(this._tail)) { if (this.status !== 'idle') this.setStatus('idle'); }
 };
 Terminal.prototype.newLine = function () { this.line = document.createElement('div'); this.line.className = 'term-line'; this.screen.appendChild(this.line); };
+// Plain-text snapshot of the scrollback (last 400 lines, ≤80 KB) — persisted in the
+// workspace state so a terminal's output can be shown read-only after a full restart
+// (a killed pty can't be revived; the respawned terminal is fresh). Reads the canvas
+// buffer or the DOM .term-line scrollback. Falls back to the current replay so a
+// just-respawned terminal that hasn't printed yet doesn't lose its history.
+Terminal.prototype.snapshot = function () {
+    var txt = '';
+    try {
+        if (this.canvasR && this.canvasR.dumpText) txt = this.canvasR.dumpText(400);
+        else if (this.screen) {
+            var els = this.screen.querySelectorAll('.term-line'), out = [];
+            for (var i = Math.max(0, els.length - 400); i < els.length; i++) out.push(els[i].textContent || '');
+            txt = out.join('\n');
+        }
+    } catch (e) { txt = ''; }
+    txt = String(txt).replace(/\s+$/, '');
+    if (!txt && this.replaySnap) txt = this.replaySnap;   // preserve prior history until new output arrives
+    if (txt.length > 80000) txt = txt.slice(-80000);
+    return txt;
+};
+// Pin a dimmed, read-only copy of the previous session's output at the top of the
+// screen; the fresh terminal's live output appends below it.
+Terminal.prototype._injectReplay = function () {
+    if (!this.screen || !this.replaySnap) return;
+    var box = document.createElement('div');
+    box.className = 'term-replay';
+    var head = document.createElement('div');
+    head.className = 'tr-head';
+    head.textContent = '▲ previous session (read-only) — fresh terminal below';
+    var body = document.createElement('div');
+    body.className = 'tr-body';
+    body.textContent = this.replaySnap;
+    box.appendChild(head); box.appendChild(body);
+    this.screen.appendChild(box);   // first child of the empty screen → live output appends after
+};
 // Remove the last character of the current line (handles the pty's \b \b erase).
 Terminal.prototype.backspace = function () {
     if (!this.line) return;
@@ -3166,10 +3215,11 @@ var App = {
     // Spawn a terminal in `folder` that runs a specific command. Used to RESTORE crew
     // and director terminals to their real command (e.g. `crew director`) instead of a
     // bare `-m <label>`, which is why they didn't come back after a restart.
-    spawnCmd: function (model, kind, folder, cmd) {
+    spawnCmd: function (model, kind, folder, cmd, replay) {
         if (this.terminals.length >= this.MAX_TERMINALS) return;
         var dir = this.expandHome(folder) || (this.cwd && this.cwd !== '.' ? this.cwd : '');
         var id = rid(); var t = new Terminal(id, model, dir); if (kind) t.kind = kind;
+        if (replay) t.replaySnap = replay;   // read-only history from a previous session
         var self = this;
         Promise.resolve(window.termCreate(id, model, dir)).then(function () {
             self.live[id] = true; self.terminals.push(t); self.render();
@@ -3347,13 +3397,14 @@ var App = {
     },
     newTerminal: function () { return this.spawnTerminal(); },
     // Spawn a brand-new pty + launch the CLI in it.
-    spawnTerminal: function (model, folder) {
+    spawnTerminal: function (model, folder, replay) {
         if (this.terminals.length >= this.MAX_TERMINALS) { banner('maximum of ' + this.MAX_TERMINALS + ' terminals', 'err'); return; }
         model = model || $('#modelSelect').value || 'llama3.2:latest';
         var dir = this.expandHome(folder) || (this.cwd && this.cwd !== '.' ? this.cwd : '');
         var id = rid();
         var isShell = (model === 'shell');   // the "shell" entry at the top of the model list
         var t = new Terminal(id, model, dir); if (isShell) t.kind = 'shell';
+        if (replay) t.replaySnap = replay;   // read-only history from a previous session
         // Right-click "Terminal" drops the pane at the cursor (canvas-world coords).
         if (this._spawnGeom) { t.x = this._spawnGeom.x; t.y = this._spawnGeom.y; t.w = 540; t.h = 340; t.z = ++this._zTop; this._spawnGeom = null; }
         var self = this;
@@ -3367,7 +3418,7 @@ var App = {
     // Open a 💬 Chat window — its OWN pane (a 'chat' terminal) running `ollamadev chat
     // --session <id>`. Plain, tool-free chat with a model picker + 📎/🧠/⬇ in the header.
     // Multiple are independent, like terminals. Resuming a saved session replays it.
-    spawnChatWindow: function (model, session) {
+    spawnChatWindow: function (model, session, replay) {
         if (this.terminals.length >= this.MAX_TERMINALS) { banner('maximum of ' + this.MAX_TERMINALS + ' windows', 'err'); return; }
         model = model || this.realModel();
         if (!model || model === 'shell' || model === 'chat') { banner('pull a model first — ollamadev models pull <name>', 'err'); return; }
@@ -3376,6 +3427,7 @@ var App = {
         var dir = (this.cwd && this.cwd !== '.') ? this.cwd : '';
         var id = rid();
         var t = new Terminal(id, model, dir); t.kind = 'chat'; t.chatSession = session;
+        if (replay) t.replaySnap = replay;   // read-only history from a previous session
         if (this._spawnGeom) { t.x = this._spawnGeom.x; t.y = this._spawnGeom.y; t.w = 560; t.h = 460; t.z = ++this._zTop; this._spawnGeom = null; }
         var self = this, cli = this.cli || 'ollamadev';
         Promise.resolve(window.termCreate(id, model, dir)).then(function () {
@@ -3442,7 +3494,7 @@ var App = {
         var self = this, panes = {};
         this.POP_VIEWS.forEach(function (v) { var b = self.popped[v]; if (b) panes[v] = { x: b.x, y: b.y, w: b.w, h: b.h }; });
         return {
-            terminals: this.terminals.map(function (t) { return { id: t.id, model: t.model, kind: t.kind || '', cwd: t.cwd || '', session: t.chatSession || '', x: t.x, y: t.y, w: t.w, h: t.h, z: t.z }; }),
+            terminals: this.terminals.map(function (t) { return { id: t.id, model: t.model, kind: t.kind || '', cwd: t.cwd || '', session: t.chatSession || '', replay: t.snapshot(), x: t.x, y: t.y, w: t.w, h: t.h, z: t.z }; }),
             editorTabs: Editor.snapshot(),   // dirty tabs carry their unsaved buffer
             // The canvas layout is now per-project: which view panes are open (+ geometry)
             // and the pan offset travel with the workspace, like the terminals do.
@@ -3499,10 +3551,10 @@ var App = {
         var cli = self.cli || 'ollamadev';
         terms.forEach(function (ti) {
             if (self.live[ti.id]) return;
-            if (ti.kind === 'director') self.spawnCmd('Director', 'director', ti.cwd, cli + ' crew director');
-            else if (ti.kind === 'crew') self.spawnCmd(ti.model, 'crew', ti.cwd, cli + ' crew');
-            else if (ti.kind === 'chat') self.spawnChatWindow(ti.model, ti.session);   // resumes the saved chat session
-            else self.spawnTerminal(ti.model, ti.cwd);
+            if (ti.kind === 'director') self.spawnCmd('Director', 'director', ti.cwd, cli + ' crew director', ti.replay);
+            else if (ti.kind === 'crew') self.spawnCmd(ti.model, 'crew', ti.cwd, cli + ' crew', ti.replay);
+            else if (ti.kind === 'chat') self.spawnChatWindow(ti.model, ti.session, ti.replay);   // resumes the saved chat session
+            else self.spawnTerminal(ti.model, ti.cwd, ti.replay);
         });
         if (!terms.length && !this.terminals.length) this.spawnTerminal();
         if (state.layout) this.setLayout(state.layout);
