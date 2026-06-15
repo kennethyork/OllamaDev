@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '0.9.33');
+define('OLLAMADEV_VERSION', '0.9.34');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -134,21 +134,47 @@ class Config {
             'data' => ['directory' => '.ollamadev']
         ];
         $home = getenv('HOME') ?: '/tmp';
+        // Shared desktop/CLI prefs overlay. The ADE writes UI-changed engine settings
+        // (temperature, web/search toggles, voice model, crew models) HERE instead of
+        // config.json, so config.json holds only MCP servers — yet every interface
+        // (terminal, desktop, web) still honors them. Stored as flat dotted keys
+        // (e.g. "web.enabled": false) so they map cleanly onto the nested config.
+        $prefsOverlay = self::adePrefsOverlay($home);
+        $fileCfg = [];
         $paths = [$home.'/.ollamadev/config.json', $home.'/.config/ollamadev/config.json', '.ollamadev.json'];
         foreach ($paths as $path) {
             if (file_exists($path)) {
                 $json = json_decode(file_get_contents($path), true);
-                if ($json) {
-                    // Precedence: defaults < config file < environment. Env vars are
-                    // documented as overrides, so they must win over a config file
-                    // that hardcodes the same key (e.g. ollama.host).
-                    self::$config = array_replace_recursive($defaults, $json, $envOverrides);
-                    return self::$config;
-                }
+                if ($json) { $fileCfg = $json; break; }
             }
         }
-        self::$config = $defaults;
+        // Precedence: defaults < config.json < shared prefs < environment. Env vars are
+        // documented overrides (must win over a hardcoded config key); the shared prefs
+        // win over config.json so the ADE's toggles take effect without touching it.
+        self::$config = array_replace_recursive($defaults, $fileCfg, $prefsOverlay, $envOverrides);
         return self::$config;
+    }
+
+    // Build a nested config overlay from the flat dotted keys in ade-prefs.json
+    // (the desktop/CLI shared prefs file). Returns [] when absent/empty.
+    private static function adePrefsOverlay(string $home): array {
+        $f = $home . '/.ollamadev/ade-prefs.json';
+        if (!is_file($f)) return [];
+        $flat = json_decode((string) @file_get_contents($f), true);
+        if (!is_array($flat)) return [];
+        $overlay = [];
+        foreach ($flat as $dotted => $val) {
+            $keys = explode('.', (string) $dotted);
+            $ref = &$overlay;
+            while (count($keys) > 1) {
+                $k = array_shift($keys);
+                if (!isset($ref[$k]) || !is_array($ref[$k])) $ref[$k] = [];
+                $ref = &$ref[$k];
+            }
+            $ref[$keys[0]] = $val;
+            unset($ref);
+        }
+        return $overlay;
     }
 
     public static function get(string $key, $default = null) {
@@ -8244,8 +8270,8 @@ class Crew {
 
     // ---- Held-branch actions (desktop Board + CLI) --------------------------
     // The crew runs as a subprocess and writes the live board; the desktop and the
-    // CLI act on held branches AFTER the run via these helpers. All local git — the
-    // only thing that ever touches the remote is pushRepo() (an explicit push).
+    // CLI act on held branches AFTER the run via these helpers. All LOCAL git —
+    // accepting a branch merges it into your current branch and never touches a remote.
 
     // The live crew board (single source the desktop polls). [] when none.
     public static function liveBoard(): array {
@@ -8335,39 +8361,6 @@ class Crew {
     public static function discardByN(int $n): array {
         $ref = self::heldRef($n);
         return ($ref['decisionId'] ?? '') !== '' ? self::decideCrewBranch($ref['decisionId'], 'deny') : self::discardHeldBranch($ref);
-    }
-
-    // Push the repo's current branch to its remote (sets upstream on first push).
-    public static function pushRepo(string $root = ''): array {
-        if ($root === '') $root = self::sh('git rev-parse --show-toplevel 2>/dev/null');
-        if ($root === '' || !is_dir($root)) return ['ok' => false, 'error' => 'repo not found'];
-        $g = 'git -C ' . escapeshellarg($root) . ' ';
-        if (self::sh($g . 'remote') === '') return ['ok' => false, 'error' => 'no remote configured — add one: git remote add origin <url>'];
-        $branch = self::sh($g . 'rev-parse --abbrev-ref HEAD 2>/dev/null');
-        if ($branch === '' || $branch === 'HEAD') return ['ok' => false, 'error' => 'not on a branch'];
-        $hasUp = self::sh($g . 'rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null') !== '';
-        $out = self::sh($hasUp ? $g . 'push 2>&1' : $g . 'push -u origin ' . escapeshellarg($branch) . ' 2>&1');
-        $low = strtolower($out);
-        $ok = strpos($low, 'fatal') === false && strpos($low, 'error:') === false && strpos($low, 'rejected') === false;
-        return ['ok' => $ok, 'branch' => $branch, 'out' => $out];
-    }
-    // Remote sync status for the desktop chip: ahead/behind vs the upstream.
-    public static function remoteStatus(string $root = ''): array {
-        if ($root === '') $root = self::sh('git rev-parse --show-toplevel 2>/dev/null');
-        if ($root === '' || !is_dir($root)) return ['isRepo' => false, 'hasRemote' => false];
-        $g = 'git -C ' . escapeshellarg($root) . ' ';
-        $branch = self::sh($g . 'rev-parse --abbrev-ref HEAD 2>/dev/null');
-        $remote = self::sh($g . 'remote');
-        if ($remote === '') return ['isRepo' => true, 'hasRemote' => false, 'branch' => $branch];
-        $up = self::sh($g . 'rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null');
-        $ahead = 0; $behind = 0;
-        if ($up !== '') {
-            $lr = self::sh($g . 'rev-list --left-right --count @{u}...HEAD 2>/dev/null');
-            if (preg_match('/(\d+)\s+(\d+)/', $lr, $m)) { $behind = (int)$m[1]; $ahead = (int)$m[2]; }
-        }
-        return ['isRepo' => true, 'hasRemote' => true, 'remote' => explode("\n", $remote)[0],
-            'branch' => $branch, 'upstream' => $up, 'ahead' => $ahead, 'behind' => $behind,
-            'dirty' => self::sh($g . 'status --porcelain') !== ''];
     }
 }
 // CREW ROLES — a catalog of agent personas the Director assigns per subtask.
@@ -13832,22 +13825,6 @@ if ($cmd === 'chat') {
         $res = Crew::discardByN($n);
         if (!empty($res['ok'])) { echo "\033[32m✓\033[0m discarded coder #{$n}" . (($res['discarded'] ?? '') !== '' ? " ({$res['discarded']})" : '') . "\n"; exit(0); }
         echo "\033[31m" . ($res['error'] ?? 'could not discard') . "\033[0m\n"; exit(1);
-    }
-    // Push the current branch (with any just-accepted work) to the remote.
-    if ($arg1 === 'push') {
-        $res = Crew::pushRepo();
-        if (in_array('--json', $argv, true)) { echo json_encode($res) . "\n"; exit(empty($res['ok']) ? 1 : 0); }
-        if (!empty($res['ok'])) { echo "\033[32m✓\033[0m pushed " . ($res['branch'] ?? '') . "\n" . trim((string)($res['out'] ?? '')) . "\n"; exit(0); }
-        echo "\033[31m" . ($res['error'] ?? 'push failed') . "\033[0m\n" . trim((string)($res['out'] ?? '')) . "\n"; exit(1);
-    }
-    // Remote sync status (ahead/behind vs upstream). --json for the desktop chip.
-    if ($arg1 === 'remote' || $arg1 === 'remote-status') {
-        $rs = Crew::remoteStatus();
-        if (in_array('--json', $argv, true)) { echo json_encode($rs) . "\n"; exit(0); }
-        if (empty($rs['isRepo'])) { echo "Not a git repository.\n"; exit(1); }
-        if (empty($rs['hasRemote'])) { echo "Branch " . ($rs['branch'] ?? '?') . " — no remote configured.\n"; exit(0); }
-        echo "Branch {$rs['branch']} → {$rs['upstream']}  (ahead {$rs['ahead']}, behind {$rs['behind']})" . (!empty($rs['dirty']) ? " · dirty" : '') . "\n";
-        exit(0);
     }
     // Separate Director: redirect a running coder (or "all") from another pane/terminal.
     if ($arg1 === 'steer') {

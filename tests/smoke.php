@@ -291,11 +291,11 @@ if (preg_match('/class Config \{.*?\n\}/s', $src, $cfg) && preg_match('/class Ol
     ok('chatOptions extractable', false, 'Config or OllamaClient not found');
 }
 
-// Env vars are documented overrides — a config file must NOT silently win over
-// OLLAMA_HOST/OLLAMA_MODEL. Guard the merge order so the latent "built but never
-// applied" $envOverrides bug can't come back.
-ok('Config applies env overrides over the config file',
-   preg_match('/array_replace_recursive\(\s*\$defaults\s*,\s*\$json\s*,\s*\$envOverrides\s*\)/', $src) === 1,
+// Env vars are documented overrides — neither config.json nor the ade-prefs overlay
+// may silently win over OLLAMA_HOST/OLLAMA_MODEL. Guard the merge order (env LAST) so
+// the latent "built but never applied" $envOverrides bug can't come back.
+ok('Config applies env overrides last (over config file + shared prefs)',
+   preg_match('/array_replace_recursive\(\s*\$defaults\s*,\s*\$fileCfg\s*,\s*\$prefsOverlay\s*,\s*\$envOverrides\s*\)/', $src) === 1,
    'env overrides not merged last in Config::load');
 
 // Onboarding (preflight) needs a host() getter on the client and on the Agent
@@ -563,15 +563,17 @@ ok('clear_board schema marks it explicit-only with required confirm', strpos($sr
 // Interactive Director: "clear board" is handled directly (not spent on a crew run).
 ok('interactive Director clears the board directly on "clear board"',
     preg_match('/\^\(clear\|reset\|wipe\|empty\).*board\$/', $src) === 1 && strpos($src, 'Crew::clearBoard()') !== false);
-// ---- Held-branch accept/discard + the unified Board + git remote (v0.9.32) ----
-echo "\n== Board: held-branch accept/discard + remote ==\n";
+// ---- Held-branch accept/discard + the unified Board (local merge only) ----
+echo "\n== Board: held-branch accept/discard ==\n";
 // 91-board.php must be a RAW module body (no <?php opener) — a stray one silently
 // broke the concatenated build, so the Board never shipped. Assert it's in the binary.
 ok('Board class compiled into the binary (no stray <?php opener)',
     strpos($src, 'class Board') !== false && strpos($src, 'function decideCrewBranch') !== false);
-ok('Crew exposes held-branch + remote actions',
-    strpos($src, 'function acceptHeldBranch') !== false && strpos($src, 'function discardHeldBranch') !== false &&
-    strpos($src, 'function pushRepo') !== false && strpos($src, 'function remoteStatus') !== false);
+ok('Crew exposes held-branch accept/discard actions',
+    strpos($src, 'function acceptHeldBranch') !== false && strpos($src, 'function discardHeldBranch') !== false);
+// The git-push / remote-status feature was removed — assert it's gone (board accept is local-only).
+ok('no git push / remote-status surface remains',
+    strpos($src, 'function pushRepo') === false && strpos($src, 'function remoteStatus') === false);
 // CLI usage guards (no git/model needed).
 [$out] = run_bin(['crew', 'accept']);
 ok('crew accept without a number prints usage', stripos($out, 'Usage: ollamadev crew accept') !== false, trim($out));
@@ -601,10 +603,6 @@ if (trim((string) shell_exec('git --version 2>/dev/null')) !== '') {
     [$out] = run_bin(['board', 'list', '--json'], '', ['HOME' => $ihome], $irepo);
     $bl2 = json_decode(trim($out), true);
     ok('the accepted decision leaves the pending queue', is_array($bl2) && count($bl2['pending'] ?? []) === 0, trim($out));
-    // remote-status on a repo with no remote reports hasRemote=false (not a crash).
-    [$out] = run_bin(['crew', 'remote', '--json'], '', ['HOME' => $ihome], $irepo);
-    $rs = json_decode(trim($out), true);
-    ok('crew remote --json reports no remote on a local-only repo', is_array($rs) && empty($rs['hasRemote']) && !empty($rs['isRepo']), trim($out));
     shell_exec('rm -rf ' . escapeshellarg($ihome) . ' ' . escapeshellarg($irepo));
 }
 shell_exec('rm -rf ' . escapeshellarg($bhome));
@@ -1743,6 +1741,12 @@ ok('web bridge exposes ws* over HTTP', strpos((string)@file_get_contents($repoRo
 $appjs = (string)@file_get_contents($repoRoot . '/Desktop/ollamadev-ade/public/app.js');
 ok('app.js has a Workspaces tabs module', strpos($appjs, 'var Workspaces = {') !== false && strpos($appjs, 'switchTo:') !== false);
 ok('app.js captures + restores window state', strpos($appjs, 'captureState:') !== false && strpos($appjs, 'restoreState:') !== false);
+// Unsaved editor edits survive a reload: dirty tabs persist their buffer (Editor.snapshot)
+// and restore it verbatim (Editor.openWith), and an editor-only session still autosaves.
+ok('dirty editor buffers persist + restore across reload',
+    strpos($appjs, 'snapshot: function') !== false && strpos($appjs, 'editorTabs: Editor.snapshot()') !== false &&
+    strpos($appjs, 'openWith: function') !== false && strpos($appjs, 'Editor.openWith(t.path, t.name, t.content') !== false &&
+    strpos($appjs, '!self.terminals.length && !Editor.tabs.length') !== false);
 ok('terminals detach (pty kept alive) for re-attach on switch', strpos($appjs, 'Terminal.prototype.detach') !== false && strpos($appjs, 'attachTerminal:') !== false);
 $idxhtml = (string)@file_get_contents($repoRoot . '/Desktop/ollamadev-ade/public/index.html');
 ok('project tab list present in the UI', strpos($idxhtml, 'id="wsBar"') !== false && strpos($idxhtml, 'id="wsStrip"') !== false);
@@ -1855,8 +1859,8 @@ ok('CLI has a `config get/set` command', strpos($mainSrc, "\$argv[1] === 'config
     strpos($mainSrc, 'Config::persist(') !== false);
 ok('Config::persist writes the user config file', strpos($cfgSrc, 'public static function persist(') !== false &&
     strpos($cfgSrc, '/.ollamadev/config.json') !== false && strpos($cfgSrc, 'JSON_PRETTY_PRINT') !== false);
-ok('desktop exposes the web-access toggle (bindings + UI), governing web.enabled',
-    strpos($bindFull, 'function webAccess(') !== false && strpos($bindFull, 'config set web.enabled') !== false &&
+ok('desktop exposes the web-access toggle (bindings + UI), governing web.enabled via shared prefs',
+    strpos($bindFull, 'function webAccess(') !== false && strpos($bindFull, "adePrefsSet('web.enabled'") !== false &&
     strpos($idxPhp, "\$b->bind('webAccess'") !== false && strpos($bridgeJs, "'webAccess', 'setWebAccess'") !== false &&
     strpos($idxHtml2, 'id="webToggle"') !== false && strpos($appjs, 'window.setWebAccess') !== false);
 ok('web-access toggle carries no "air-gap"/"offline" wording', stripos($appjs, 'air-gap') === false &&
@@ -1883,12 +1887,30 @@ if (isset($bin) && is_file($bin)) {
     ok('config set/get round-trips through the config file', $got === 'brave');
     @shell_exec('rm -rf ' . escapeshellarg($hh));
 }
+// Shared desktop/CLI prefs overlay: ade-prefs.json (flat dotted keys) is layered OVER
+// config.json so the ADE's engine toggles reach the CLI WITHOUT polluting config.json.
+ok('Config layers in ade-prefs.json over config.json', strpos($cfgSrc, 'ade-prefs.json') !== false &&
+    strpos($cfgSrc, 'function adePrefsOverlay') !== false && strpos($cfgSrc, '$prefsOverlay') !== false);
+ok('desktop setters write ade-prefs.json, not config.json', strpos($bindFull, 'function adePrefsSet') !== false &&
+    strpos($bindFull, '/.ollamadev/ade-prefs.json') !== false &&
+    strpos($bindFull, "adePrefsSet('ollama.temperature'") !== false && strpos($bindFull, "adePrefsSet('crew.") !== false);
+if (isset($bin) && is_file($bin)) {
+    $ph = sys_get_temp_dir() . '/odv-prefs-' . getmypid();
+    @mkdir($ph . '/.ollamadev', 0755, true);
+    file_put_contents($ph . '/.ollamadev/ade-prefs.json', json_encode(['web.enabled' => false, 'ollama.temperature' => 0.9]));
+    $env = 'HOME=' . escapeshellarg($ph) . ' ';
+    $w = trim((string)@shell_exec($env . 'php ' . escapeshellarg($bin) . ' config get web.enabled 2>/dev/null'), " \n\"");
+    $t = trim((string)@shell_exec($env . 'php ' . escapeshellarg($bin) . ' config get ollama.temperature 2>/dev/null'), " \n\"");
+    ok('CLI honors ade-prefs overlay (web.enabled + temperature)', $w === 'false' && (float)$t === 0.9, "web=$w temp=$t");
+    ok('the overlay never creates config.json', !is_file($ph . '/.ollamadev/config.json'));
+    @shell_exec('rm -rf ' . escapeshellarg($ph));
+}
 
 // ---- web-search kill switch (search.enabled). ----
 ok('search tool honors search.enabled', strpos($toolsSrc, "Config::get('search.enabled', true)") !== false);
 ok('CLI search command checks search.enabled', strpos($mainSrc, "!Config::get('search.enabled', true)") !== false);
 ok('Bindings expose searchEnabled/setSearchEnabled', strpos($bindFull, "'searchEnabled', 'setSearchEnabled'") !== false &&
-    strpos($bindFull, 'function searchEnabled(') !== false && strpos($bindFull, 'config set search.enabled') !== false);
+    strpos($bindFull, 'function searchEnabled(') !== false && strpos($bindFull, "adePrefsSet('search.enabled'") !== false);
 ok('Boson + web bridge expose the search switch', strpos($idxPhp, "\$b->bind('searchEnabled'") !== false &&
     strpos($bridgeJs, "'searchEnabled', 'setSearchEnabled'") !== false);
 ok('search toggle button + handler in the UI', strpos($idxHtml2, 'id="searchToggle"') !== false &&

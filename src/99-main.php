@@ -2411,22 +2411,6 @@ if ($cmd === 'chat') {
         if (!empty($res['ok'])) { echo "\033[32m✓\033[0m discarded coder #{$n}" . (($res['discarded'] ?? '') !== '' ? " ({$res['discarded']})" : '') . "\n"; exit(0); }
         echo "\033[31m" . ($res['error'] ?? 'could not discard') . "\033[0m\n"; exit(1);
     }
-    // Push the current branch (with any just-accepted work) to the remote.
-    if ($arg1 === 'push') {
-        $res = Crew::pushRepo();
-        if (in_array('--json', $argv, true)) { echo json_encode($res) . "\n"; exit(empty($res['ok']) ? 1 : 0); }
-        if (!empty($res['ok'])) { echo "\033[32m✓\033[0m pushed " . ($res['branch'] ?? '') . "\n" . trim((string)($res['out'] ?? '')) . "\n"; exit(0); }
-        echo "\033[31m" . ($res['error'] ?? 'push failed') . "\033[0m\n" . trim((string)($res['out'] ?? '')) . "\n"; exit(1);
-    }
-    // Remote sync status (ahead/behind vs upstream). --json for the desktop chip.
-    if ($arg1 === 'remote' || $arg1 === 'remote-status') {
-        $rs = Crew::remoteStatus();
-        if (in_array('--json', $argv, true)) { echo json_encode($rs) . "\n"; exit(0); }
-        if (empty($rs['isRepo'])) { echo "Not a git repository.\n"; exit(1); }
-        if (empty($rs['hasRemote'])) { echo "Branch " . ($rs['branch'] ?? '?') . " — no remote configured.\n"; exit(0); }
-        echo "Branch {$rs['branch']} → {$rs['upstream']}  (ahead {$rs['ahead']}, behind {$rs['behind']})" . (!empty($rs['dirty']) ? " · dirty" : '') . "\n";
-        exit(0);
-    }
     // Separate Director: redirect a running coder (or "all") from another pane/terminal.
     if ($arg1 === 'steer') {
         $tok = strtolower((string)($positional[2] ?? ''));

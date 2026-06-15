@@ -29,7 +29,7 @@ final class Bindings
         'reviewDiff', 'temperature', 'setTemperature',
         'sttModel', 'setSttModel', 'sttHistory', 'sttClearHistory',
         'openExternal', 'proxyFetch', 'crewModels', 'setCrewModels', 'crewSteer',
-        'boardList', 'boardDecide', 'crewPush', 'gitRemoteStatus',
+        'boardList', 'boardDecide',
         'skillsList', 'skillsGet', 'skillsSave', 'skillsRemove',
         'hooksList', 'hooksAdd', 'hooksRemove',
         'chatList', 'chatDelete', 'chatExport',
@@ -136,17 +136,6 @@ final class Bindings
         return $ok ? ['ok' => true] : ['error' => 'could not write to the steer inbox'];
     }
 
-    // The repo the crew worked on (so push/remote-status act on the right tree even
-    // though this process's cwd is the ADE dir). Falls back to the workspace root.
-    private function projectRoot(): string
-    {
-        $home = getenv('HOME') ?: sys_get_temp_dir();
-        $bd = json_decode((string) @file_get_contents($home . '/.ollamadev/crew/current.json'), true);
-        $root = is_array($bd) ? (string) ($bd['repoRoot'] ?? '') : '';
-        if ($root === '' || !is_dir($root)) $root = $this->files->getRoot();
-        return ($root !== '' && is_dir($root)) ? $root : (string) getcwd();
-    }
-
     // The unified pending-decisions queue (held crew branches + permission asks).
     public function boardList(): array
     {
@@ -166,24 +155,6 @@ final class Bindings
         $out = shell_exec('php ' . escapeshellarg($this->cli) . ' board decide ' . escapeshellarg($id) . ' ' . escapeshellarg($v) . ' --json 2>/dev/null');
         $d = json_decode((string) $out, true);
         return is_array($d) ? $d : ['ok' => false, 'error' => 'could not reach the board'];
-    }
-
-    // Push the project's current branch (with any just-accepted work) to its remote.
-    public function crewPush(): array
-    {
-        $root = $this->projectRoot();
-        $out = shell_exec('cd ' . escapeshellarg($root) . ' && php ' . escapeshellarg($this->cli) . ' crew push --json 2>/dev/null');
-        $d = json_decode((string) $out, true);
-        return is_array($d) ? $d : ['ok' => false, 'error' => 'push failed'];
-    }
-
-    // Ahead/behind vs the upstream, for the Board's remote chip.
-    public function gitRemoteStatus(): array
-    {
-        $root = $this->projectRoot();
-        $out = shell_exec('cd ' . escapeshellarg($root) . ' && php ' . escapeshellarg($this->cli) . ' crew remote --json 2>/dev/null');
-        $d = json_decode((string) $out, true);
-        return is_array($d) ? $d : ['isRepo' => false, 'hasRemote' => false];
     }
 
     // ---- Skills manager: list / view / create-or-edit / remove. Shells out to the
@@ -244,39 +215,36 @@ final class Bindings
         return $this->hooksList();
     }
 
-    // Configured per-role crew models, so the desktop Crew modal can default to them
-    // (instead of a hardcoded list) — change crew.coderModel in config and it sticks.
+    // Configured per-role crew models, so the desktop Crew modal can default to them.
+    // Read from the shared prefs file (crew.*Model), falling back to any legacy
+    // crew.* in config.json, then the base default model. The crew engine reads the
+    // same keys via Config (which overlays ade-prefs), so all interfaces agree.
     public function crewModels(): array
     {
         $home = getenv('HOME') ?: sys_get_temp_dir();
+        $prefs = json_decode((string) @file_get_contents($home . '/.ollamadev/ade-prefs.json'), true);
+        $prefs = is_array($prefs) ? $prefs : [];
         $c = json_decode((string) @file_get_contents($home . '/.ollamadev/config.json'), true);
-        $crew = (is_array($c) && is_array($c['crew'] ?? null)) ? $c['crew'] : [];
+        $crew = (is_array($c) && is_array($c['crew'] ?? null)) ? $c['crew'] : [];   // legacy config.json crew.* still honored
         $base = (is_array($c) && is_array($c['ollama'] ?? null)) ? (string)($c['ollama']['defaultModel'] ?? '') : '';
+        $pick = fn(string $k): string => (string)($prefs['crew.' . $k] ?? $crew[$k] ?? $base);
         return [
-            'directorModel'   => (string)($crew['directorModel'] ?? $base),
-            'coderModel'      => (string)($crew['coderModel'] ?? $base),
-            'auditorModel'    => (string)($crew['auditorModel'] ?? $base),
-            'researcherModel' => (string)($crew['researcherModel'] ?? $base),
+            'directorModel'   => $pick('directorModel'),
+            'coderModel'      => $pick('coderModel'),
+            'auditorModel'    => $pick('auditorModel'),
+            'researcherModel' => $pick('researcherModel'),
         ];
     }
 
-    // Persist the per-role crew models as the new defaults (crew.*Model in
-    // config.json) so the Crew modal's "Save as default" sticks. Additive — the
-    // crew engine already reads these keys (crew.coderModel etc.); this only writes
-    // them. Read-modify-write preserves every other config key. Returns the set.
+    // Persist the per-role crew models as the new defaults — into the shared prefs
+    // file (crew.*Model), NOT config.json, which stays MCP-only. The crew engine reads
+    // these keys via Config's ade-prefs overlay. Additive: empty picks are skipped.
     public function setCrewModels(array $models): array
     {
-        $home = getenv('HOME') ?: sys_get_temp_dir();
-        $f = $home . '/.ollamadev/config.json';
-        $c = json_decode((string) @file_get_contents($f), true);
-        if (!is_array($c)) $c = [];
-        if (!is_array($c['crew'] ?? null)) $c['crew'] = [];
         foreach (['directorModel', 'coderModel', 'auditorModel', 'researcherModel'] as $k) {
             $v = trim((string) ($models[$k] ?? ''));
-            if ($v !== '') $c['crew'][$k] = $v;
+            if ($v !== '') $this->adePrefsSet('crew.' . $k, $v);
         }
-        @mkdir(dirname($f), 0755, true);
-        @file_put_contents($f, json_encode($c, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
         return $this->crewModels();
     }
 
@@ -465,6 +433,20 @@ final class Bindings
     // remote git) through the CLI's `web.enabled` config, so the same setting
     // applies in the terminal, desktop, and web. ON = allowed; OFF = blocked.
     // Applies to new agent runs. ---------------------------------------------
+    // The shared desktop/CLI prefs file — engine settings the UI changes that must
+    // reach the CLI WITHOUT polluting config.json (which stays MCP-only). Flat dotted
+    // keys; the CLI's Config layers this over config.json (under env). null deletes.
+    private function adePrefsSet(string $key, $value): bool
+    {
+        $home = getenv('HOME') ?: sys_get_temp_dir();
+        $f = $home . '/.ollamadev/ade-prefs.json';
+        $d = json_decode((string) @file_get_contents($f), true);
+        if (!is_array($d)) $d = [];
+        if ($value === null) unset($d[$key]); else $d[$key] = $value;
+        @mkdir(dirname($f), 0755, true);
+        return @file_put_contents($f, json_encode($d, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)) !== false;
+    }
+
     public function webAccess(): bool
     {
         $v = trim((string) @shell_exec('php ' . escapeshellarg($this->cli) . ' config get web.enabled 2>/dev/null'));
@@ -472,7 +454,7 @@ final class Bindings
     }
     public function setWebAccess(bool $on): bool
     {
-        @shell_exec('php ' . escapeshellarg($this->cli) . ' config set web.enabled ' . ($on ? 'true' : 'false') . ' 2>/dev/null');
+        $this->adePrefsSet('web.enabled', $on);
         return $this->webAccess();
     }
 
@@ -485,7 +467,7 @@ final class Bindings
     }
     public function setSearchEnabled(bool $on): bool
     {
-        @shell_exec('php ' . escapeshellarg($this->cli) . ' config set search.enabled ' . ($on ? 'true' : 'false') . ' 2>/dev/null');
+        $this->adePrefsSet('search.enabled', $on);
         return $this->searchEnabled();
     }
     // Sampling temperature (lower = more deterministic tool-calling).
@@ -499,7 +481,7 @@ final class Bindings
     {
         $f = (float) $value;
         if ($f < 0) $f = 0; if ($f > 2) $f = 2;   // clamp to a sane range
-        @shell_exec('php ' . escapeshellarg($this->cli) . ' config set ollama.temperature ' . escapeshellarg((string) $f) . ' 2>/dev/null');
+        $this->adePrefsSet('ollama.temperature', $f);
         return $this->temperature();
     }
 
@@ -513,7 +495,7 @@ final class Bindings
     public function setSttModel(string $size): string
     {
         $size = preg_replace('/[^a-z0-9.\-]/i', '', $size); // tiny|base|small|medium|large-v3|turbo|.en
-        @shell_exec('php ' . escapeshellarg($this->cli) . ' voice model ' . escapeshellarg($size) . ' 2>/dev/null');
+        $this->adePrefsSet('stt.model', $size);
         return $this->sttModel();
     }
     public function sttHistory(int $limit = 20): array

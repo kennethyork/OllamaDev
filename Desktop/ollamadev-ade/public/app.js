@@ -1232,6 +1232,29 @@ var Editor = {
             App.markActiveFile(path);
         }).catch(function (e) { banner('open error: ' + e, 'err'); });
     },
+    // Reopen a tab with an EXPLICIT in-memory buffer (no disk read) — used to restore
+    // unsaved edits on reload. dirty=true keeps the • marker; the buffer is the user's
+    // unsaved content, not what's on disk.
+    openWith: function (path, name, content, dirty) {
+        if (window.App && App.ensurePane) App.ensurePane('editor');
+        var i = this.tabs.findIndex(function (t) { return t.path === path; });
+        if (i >= 0) { this.tabs[i].content = String(content == null ? '' : content); this.tabs[i].dirty = !!dirty; this.active = i; this.mounted = null; this.render(); App.markActiveFile(path); return; }
+        this.tabs.push({ path: path, name: name || path.split('/').pop(), content: String(content == null ? '' : content), dirty: !!dirty });
+        this.active = this.tabs.length - 1;
+        this.render();
+        App.markActiveFile(path);
+    },
+    // Tab list for workspace state. Clean tabs persist as path+name (they reload from
+    // disk); DIRTY tabs also carry their unsaved buffer so edits survive a reload.
+    snapshot: function () {
+        var t = this.cur(), ta = document.querySelector('#editorBody .ed-text');
+        if (t && ta) t.content = ta.value;   // grab the freshest keystrokes from the live textarea
+        return this.tabs.map(function (x) {
+            var o = { path: x.path, name: x.name };
+            if (x.dirty) { o.dirty = true; o.content = x.content; }
+            return o;
+        });
+    },
     save: function () {
         var t = this.cur(); if (!t) return;
         var ta = document.querySelector('#editorBody .ed-text'); if (ta) t.content = ta.value;
@@ -1437,20 +1460,17 @@ var Tasks = {
     }
 };
 
-// Unified Decisions panel + remote chip on the Board view. Reads the same
-// pending-decisions queue the CLI/desktop share (held crew branches + any
-// permission asks) and acts on them via boardDecide; the remote chip shows
-// ahead/behind vs the upstream and offers a one-click Push. All vanilla.
+// Unified Decisions panel on the Board view. Reads the same pending-decisions
+// queue the CLI/desktop share (held crew branches + any permission asks) and
+// acts on them via boardDecide (accept = merge locally, deny = discard). All vanilla.
 var Decisions = {
-    _tick: 0, _hasPending: false, _hasRemote: false,
-    // Pull the queue every board-poll tick; remote status less often (it runs git).
+    _hasPending: false,
+    // Pull the queue every board-poll tick.
     refresh: function () {
         var self = this;
         if (window.boardList) Promise.resolve(window.boardList()).then(function (d) { self.render(d || {}); }).catch(function () {});
-        if ((this._tick++ % 6) === 0 && window.gitRemoteStatus)
-            Promise.resolve(window.gitRemoteStatus()).then(function (r) { self.renderRemote(r || {}); }).catch(function () {});
     },
-    _sync: function () { var bar = $('#decisionsBar'); if (bar) bar.hidden = !(this._hasPending || this._hasRemote); },
+    _sync: function () { var bar = $('#decisionsBar'); if (bar) bar.hidden = !this._hasPending; },
     render: function (d) {
         var list = $('#decisionsList'); if (!list) return;
         var pending = (d && Array.isArray(d.pending)) ? d.pending : [];
@@ -1470,22 +1490,6 @@ var Decisions = {
         });
         this._sync();
     },
-    renderRemote: function (r) {
-        var chip = $('#remoteChip'); if (!chip) return;
-        if (!r || !r.isRepo) { this._hasRemote = false; chip.innerHTML = ''; this._sync(); return; }
-        this._hasRemote = true;
-        if (!r.hasRemote) {
-            chip.innerHTML = '<span class="rc-branch">' + esc(r.branch || '?') + '</span> <span class="rc-dim">no remote</span>';
-        } else {
-            var ab = ((r.ahead ? '↑' + r.ahead : '') + ' ' + (r.behind ? '↓' + r.behind : '')).trim();
-            chip.innerHTML = '<span class="rc-branch">' + esc(r.branch || '') + '</span>' +
-                (ab ? ' <span class="rc-ab">' + esc(ab) + '</span>' : ' <span class="rc-dim">in sync</span>') +
-                ' <button class="rc-push" data-act="push">⤴ Push</button>';
-            var btn = chip.querySelector('[data-act="push"]');
-            if (btn) btn.onclick = function () { Decisions.push(); };
-        }
-        this._sync();
-    },
     decide: function (id, verdict) {
         if (!id || !window.boardDecide) return;
         banner(verdict === 'accept' ? 'merging…' : 'discarding…');
@@ -1496,14 +1500,6 @@ var Decisions = {
             // Reflect the new subtask state on the kanban immediately.
             if (window.crewBoard) Promise.resolve(crewBoard()).then(function (b) { if (b && b.subtasks) { App.crewBoard = b; if (App.popped.board) Tasks.render(); } });
         }).catch(function () { banner('decision failed', 'err'); });
-    },
-    push: function () {
-        if (!window.crewPush) return;
-        banner('pushing…');
-        Promise.resolve(window.crewPush()).then(function (res) {
-            banner(res && res.ok ? ('✓ pushed ' + (res.branch || '')) : ('⚠ ' + ((res && res.error) || 'push failed')), (res && res.ok) ? 'ok' : 'err');
-            Decisions._tick = 0; Decisions.refresh();   // force an immediate remote re-check
-        }).catch(function () { banner('push failed', 'err'); });
     }
 };
 
@@ -2854,6 +2850,10 @@ var App = {
         }
         var apply = function (cfg) {
             cfg = cfg || {};
+            // Your last-used picks (localStorage) win over config — so a restart pre-fills
+            // them without any config.json write. Config only supplies a fallback.
+            var saved = {}; try { saved = JSON.parse(localStorage.getItem('ade.crewModels') || '{}') || {}; } catch (e) {}
+            ['directorModel', 'researcherModel', 'coderModel', 'auditorModel'].forEach(function (k) { if (saved[k]) cfg[k] = saved[k]; });
             var byRole = { crewModelDirector: cfg.directorModel, crewModelResearcher: cfg.researcherModel, crewModelCoder: cfg.coderModel, crewModelAuditor: cfg.auditorModel };
             Object.keys(byRole).forEach(function (id) {
                 var sel = $('#' + id); if (!sel) return;
@@ -3067,6 +3067,16 @@ var App = {
                 skills: (self.crewTemplateSkills || []).concat(self.crewTeamSkill ? [self.crewTeamSkill] : []).filter(function (v, i, a) { return v && a.indexOf(v) === i; }),
                 hosts: ($('#crewHosts') && $('#crewHosts').value || '').trim()
             };
+            // Remember THIS run's per-role picks so a restart pre-fills them (no need to
+            // click "Set as default"). Stored in localStorage — a UI preference — so
+            // config.json stays MCP-only. (The explicit "Set as default" button still
+            // writes crew.*Model to config for the CLI engine, if you want that.)
+            try {
+                localStorage.setItem('ade.crewModels', JSON.stringify({
+                    directorModel: opts.directorModel, researcherModel: opts.researcherModel,
+                    coderModel: opts.coderModel, auditorModel: opts.auditorModel
+                }));
+            } catch (e) {}
             self.closeCrew();
             self.runCrew(task, opts);
         };
@@ -3237,12 +3247,16 @@ var App = {
                 // plain shell (no ollamadev). It's never the default selection. (General
                 // chat lives in its own 💬 Chat window — see the Chat controller.)
                 var shellOpt = '<option value="shell">🐚 shell — plain terminal</option>';
+                // Re-select the model you LAST used (persisted in ade.lastModel) over the
+                // configured default, so a restart picks up where you left off. Falls back
+                // to the config default, then whatever's installed.
+                var want = (App.lastModel && models.some(function (m) { return (m.name || m) === App.lastModel; })) ? App.lastModel : def;
                 sel.innerHTML = shellOpt + (models.map(function (m) {
                     var name = m.name || m;
-                    return '<option' + (name === def ? ' selected' : '') + '>' + esc(name) + '</option>';
+                    return '<option' + (name === want ? ' selected' : '') + '>' + esc(name) + '</option>';
                 }).join('') || '<option>llama3.2:latest</option>');
-                // If the default isn't in the list (e.g. not pulled), still select it.
-                if (def && sel.value !== def && [].some.call(sel.options, function (o) { return o.value === def; })) sel.value = def;
+                // If the wanted model isn't in the list (e.g. not pulled), still select it.
+                if (want && sel.value !== want && [].some.call(sel.options, function (o) { return o.value === want; })) sel.value = want;
                 // Seed the remembered chat/crew model from your configured default the first
                 // time (a programmatic .value set doesn't fire onchange). Drop a stale
                 // remembered model that's no longer installed so chat always has a real one.
@@ -3402,9 +3416,10 @@ var App = {
     startAutosave: function () {
         var self = this;
         var flush = function () {
-            // Skip the transient empty window mid-switch (terminals detached before
-            // the new ones spawn) so we never persist an empty state over a project.
-            if (!Workspaces.data.active || !self.terminals.length) return;
+            // Skip the transient empty window mid-switch (terminals detached + editor
+            // closed before the new ones spawn) so we never persist an empty state over a
+            // project. Editor-only sessions (dirty tabs, no terminals) still get saved.
+            if (!Workspaces.data.active || (!self.terminals.length && !Editor.tabs.length)) return;
             var snap; try { snap = JSON.stringify(self.captureState()); } catch (e) { return; }
             if (snap === self._lastSnap) return;          // unchanged → skip the write
             self._lastSnap = snap;
@@ -3428,7 +3443,7 @@ var App = {
         this.POP_VIEWS.forEach(function (v) { var b = self.popped[v]; if (b) panes[v] = { x: b.x, y: b.y, w: b.w, h: b.h }; });
         return {
             terminals: this.terminals.map(function (t) { return { id: t.id, model: t.model, kind: t.kind || '', cwd: t.cwd || '', session: t.chatSession || '', x: t.x, y: t.y, w: t.w, h: t.h, z: t.z }; }),
-            editorTabs: Editor.tabs.map(function (t) { return { path: t.path, name: t.name }; }),
+            editorTabs: Editor.snapshot(),   // dirty tabs carry their unsaved buffer
             // The canvas layout is now per-project: which view panes are open (+ geometry)
             // and the pan offset travel with the workspace, like the terminals do.
             panes: panes,
@@ -3462,7 +3477,11 @@ var App = {
         Editor.closeAll();
         // Opening a file auto-adds an editor pane; only force one when the project had
         // open files but no saved editor pane (otherwise honor the saved layout exactly).
-        (state.editorTabs || []).forEach(function (t) { Editor.open(t.path, t.name); });
+        (state.editorTabs || []).forEach(function (t) {
+            // Dirty tab → restore the saved unsaved buffer verbatim; clean tab → reload from disk.
+            if (t.dirty) Editor.openWith(t.path, t.name, t.content || '', true);
+            else Editor.open(t.path, t.name);
+        });
         var terms = state.terminals || [];
         // Free-layout: the MODE is global (set in init from localStorage); here we only
         // restore each pane's saved geometry (by id for re-attached, by index for

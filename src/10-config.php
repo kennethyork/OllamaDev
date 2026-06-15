@@ -15,21 +15,47 @@ class Config {
             'data' => ['directory' => '.ollamadev']
         ];
         $home = getenv('HOME') ?: '/tmp';
+        // Shared desktop/CLI prefs overlay. The ADE writes UI-changed engine settings
+        // (temperature, web/search toggles, voice model, crew models) HERE instead of
+        // config.json, so config.json holds only MCP servers — yet every interface
+        // (terminal, desktop, web) still honors them. Stored as flat dotted keys
+        // (e.g. "web.enabled": false) so they map cleanly onto the nested config.
+        $prefsOverlay = self::adePrefsOverlay($home);
+        $fileCfg = [];
         $paths = [$home.'/.ollamadev/config.json', $home.'/.config/ollamadev/config.json', '.ollamadev.json'];
         foreach ($paths as $path) {
             if (file_exists($path)) {
                 $json = json_decode(file_get_contents($path), true);
-                if ($json) {
-                    // Precedence: defaults < config file < environment. Env vars are
-                    // documented as overrides, so they must win over a config file
-                    // that hardcodes the same key (e.g. ollama.host).
-                    self::$config = array_replace_recursive($defaults, $json, $envOverrides);
-                    return self::$config;
-                }
+                if ($json) { $fileCfg = $json; break; }
             }
         }
-        self::$config = $defaults;
+        // Precedence: defaults < config.json < shared prefs < environment. Env vars are
+        // documented overrides (must win over a hardcoded config key); the shared prefs
+        // win over config.json so the ADE's toggles take effect without touching it.
+        self::$config = array_replace_recursive($defaults, $fileCfg, $prefsOverlay, $envOverrides);
         return self::$config;
+    }
+
+    // Build a nested config overlay from the flat dotted keys in ade-prefs.json
+    // (the desktop/CLI shared prefs file). Returns [] when absent/empty.
+    private static function adePrefsOverlay(string $home): array {
+        $f = $home . '/.ollamadev/ade-prefs.json';
+        if (!is_file($f)) return [];
+        $flat = json_decode((string) @file_get_contents($f), true);
+        if (!is_array($flat)) return [];
+        $overlay = [];
+        foreach ($flat as $dotted => $val) {
+            $keys = explode('.', (string) $dotted);
+            $ref = &$overlay;
+            while (count($keys) > 1) {
+                $k = array_shift($keys);
+                if (!isset($ref[$k]) || !is_array($ref[$k])) $ref[$k] = [];
+                $ref = &$ref[$k];
+            }
+            $ref[$keys[0]] = $val;
+            unset($ref);
+        }
+        return $overlay;
     }
 
     public static function get(string $key, $default = null) {

@@ -591,7 +591,7 @@ textarea.field { min-height: 84px; resize: vertical; line-height: 1.5; }
 .card .actions .accept { background: var(--ok); color: #08111f; border-color: transparent; font-weight: 700; }
 .card .actions .accept:hover { filter: brightness(1.1); }
 
-/* Unified Decisions panel + remote chip (Board view) */
+/* Unified Decisions panel (Board view) */
 #decisionsBar { padding: 9px 12px; border-bottom: 1px solid var(--border); background: var(--bg2); }
 .dec-head { display: flex; align-items: center; gap: 10px; }
 .dec-title { font-size: 12px; font-weight: 700; color: var(--accent); white-space: nowrap; }
@@ -604,13 +604,6 @@ textarea.field { min-height: 84px; resize: vertical; line-height: 1.5; }
 .dec-card .actions .accept { background: var(--ok); color: #08111f; border-color: transparent; font-weight: 700; }
 .dec-card .actions .accept:hover { filter: brightness(1.1); }
 .dec-card .actions .del:hover { color: var(--err); border-color: var(--err); }
-.remote-chip { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; font-size: 11px; font-family: var(--mono); color: var(--dim); }
-.remote-chip:empty { display: none; }
-.remote-chip .rc-branch { color: var(--fg); font-weight: 600; }
-.remote-chip .rc-ab { color: var(--warn); }
-.remote-chip .rc-dim { color: var(--faint); }
-.remote-chip .rc-push { background: var(--bg3); color: var(--fg); border: 1px solid var(--border); border-radius: 5px; padding: 2px 9px; cursor: pointer; font-size: 11px; }
-.remote-chip .rc-push:hover { border-color: var(--accent); color: var(--accent); }
 
 /* Touch input bar for terminals — hidden on desktop (physical keyboard), shown on small screens. */
 .term-touch { display: none; flex-direction: column; gap: 6px; padding: 6px; border-top: 1px solid var(--border); background: var(--bg2); }

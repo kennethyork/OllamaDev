@@ -16,7 +16,7 @@
     'webAccess', 'setWebAccess', 'searchEnabled', 'setSearchEnabled',
     'codeSearch', 'codeIndexStatus', 'codeIndexBuild', 'reviewDiff', 'temperature', 'setTemperature',
     'sttModel', 'setSttModel', 'sttHistory', 'sttClearHistory', 'openExternal', 'proxyFetch', 'crewModels', 'setCrewModels',
-    'crewSteer', 'boardList', 'boardDecide', 'crewPush', 'gitRemoteStatus',
+    'crewSteer', 'boardList', 'boardDecide',
     'skillsList', 'skillsGet', 'skillsSave', 'skillsRemove',
     'hooksList', 'hooksAdd', 'hooksRemove', 'chatList', 'chatDelete', 'chatExport'];
 

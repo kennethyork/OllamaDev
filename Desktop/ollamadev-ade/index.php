@@ -131,8 +131,6 @@ $app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $
     $b->bind('crewSteer',        fn(int $coder, string $msg): array => $bx->crewSteer($coder, $msg));
     $b->bind('boardList',        fn(): array => $bx->boardList());
     $b->bind('boardDecide',      fn(string $id, string $verdict = 'accept'): array => $bx->boardDecide($id, $verdict));
-    $b->bind('crewPush',         fn(): array => $bx->crewPush());
-    $b->bind('gitRemoteStatus',  fn(): array => $bx->gitRemoteStatus());
     $b->bind('skillsList',       fn(): array => $bx->skillsList());
     $b->bind('skillsGet',        fn(string $name): array => $bx->skillsGet($name));
     $b->bind('skillsSave',       fn(string $name, string $description, string $body): array => $bx->skillsSave($name, $description, $body));

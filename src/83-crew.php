@@ -1103,8 +1103,8 @@ class Crew {
 
     // ---- Held-branch actions (desktop Board + CLI) --------------------------
     // The crew runs as a subprocess and writes the live board; the desktop and the
-    // CLI act on held branches AFTER the run via these helpers. All local git — the
-    // only thing that ever touches the remote is pushRepo() (an explicit push).
+    // CLI act on held branches AFTER the run via these helpers. All LOCAL git —
+    // accepting a branch merges it into your current branch and never touches a remote.
 
     // The live crew board (single source the desktop polls). [] when none.
     public static function liveBoard(): array {
@@ -1194,38 +1194,5 @@ class Crew {
     public static function discardByN(int $n): array {
         $ref = self::heldRef($n);
         return ($ref['decisionId'] ?? '') !== '' ? self::decideCrewBranch($ref['decisionId'], 'deny') : self::discardHeldBranch($ref);
-    }
-
-    // Push the repo's current branch to its remote (sets upstream on first push).
-    public static function pushRepo(string $root = ''): array {
-        if ($root === '') $root = self::sh('git rev-parse --show-toplevel 2>/dev/null');
-        if ($root === '' || !is_dir($root)) return ['ok' => false, 'error' => 'repo not found'];
-        $g = 'git -C ' . escapeshellarg($root) . ' ';
-        if (self::sh($g . 'remote') === '') return ['ok' => false, 'error' => 'no remote configured — add one: git remote add origin <url>'];
-        $branch = self::sh($g . 'rev-parse --abbrev-ref HEAD 2>/dev/null');
-        if ($branch === '' || $branch === 'HEAD') return ['ok' => false, 'error' => 'not on a branch'];
-        $hasUp = self::sh($g . 'rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null') !== '';
-        $out = self::sh($hasUp ? $g . 'push 2>&1' : $g . 'push -u origin ' . escapeshellarg($branch) . ' 2>&1');
-        $low = strtolower($out);
-        $ok = strpos($low, 'fatal') === false && strpos($low, 'error:') === false && strpos($low, 'rejected') === false;
-        return ['ok' => $ok, 'branch' => $branch, 'out' => $out];
-    }
-    // Remote sync status for the desktop chip: ahead/behind vs the upstream.
-    public static function remoteStatus(string $root = ''): array {
-        if ($root === '') $root = self::sh('git rev-parse --show-toplevel 2>/dev/null');
-        if ($root === '' || !is_dir($root)) return ['isRepo' => false, 'hasRemote' => false];
-        $g = 'git -C ' . escapeshellarg($root) . ' ';
-        $branch = self::sh($g . 'rev-parse --abbrev-ref HEAD 2>/dev/null');
-        $remote = self::sh($g . 'remote');
-        if ($remote === '') return ['isRepo' => true, 'hasRemote' => false, 'branch' => $branch];
-        $up = self::sh($g . 'rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null');
-        $ahead = 0; $behind = 0;
-        if ($up !== '') {
-            $lr = self::sh($g . 'rev-list --left-right --count @{u}...HEAD 2>/dev/null');
-            if (preg_match('/(\d+)\s+(\d+)/', $lr, $m)) { $behind = (int)$m[1]; $ahead = (int)$m[2]; }
-        }
-        return ['isRepo' => true, 'hasRemote' => true, 'remote' => explode("\n", $remote)[0],
-            'branch' => $branch, 'upstream' => $up, 'ahead' => $ahead, 'behind' => $behind,
-            'dirty' => self::sh($g . 'status --porcelain') !== ''];
     }
 }
