@@ -46,6 +46,7 @@
     <a href="#mcp-lsp">MCP &amp; LSP</a>
     <a href="#search">Web search</a>
     <a href="#codeintel">Code intelligence</a>
+    <a href="#security">Secret scanning</a>
     <h4>Reference</h4>
     <a href="#config">Configuration</a>
     <a href="#env">Environment vars</a>
@@ -225,7 +226,8 @@ echo "summarize this" | ollamadev chat<button class="copy-btn">Copy</button></pr
         <tr><td><code>ollamadev test</code></td><td>Run the project's tests (auto-detected)</td></tr>
         <tr><td><code>ollamadev verify</code></td><td>Run tests, then let the agent fix failures until green (<code>--max N</code>)</td></tr>
         <tr><td><code>ollamadev diff</code></td><td>Working-tree diff for review (<code>--json</code>); powers the desktop/web <strong>⇄ Review</strong> panel</td></tr>
-        <tr><td><code>ollamadev commit</code></td><td>Commit with an AI-generated message (<code>-a</code> stage all, <code>-m</code> override)</td></tr>
+        <tr><td><code>ollamadev scan [path|--staged]</code></td><td>Scan a diff/file/dir for hardcoded secrets &amp; unsafe patterns (<code>--json</code>); exits non-zero on a HIGH finding</td></tr>
+        <tr><td><code>ollamadev commit</code></td><td>Commit with an AI-generated message (<code>-a</code> stage all, <code>-m</code> override). <strong>Blocks staged secrets</strong> unless <code>--force</code></td></tr>
         <tr><td><code>ollamadev pr create|review &lt;n&gt;</code></td><td>Open a PR, or review one with the local model (needs <code>gh</code>)</td></tr>
         <tr><td><code>ollamadev config get|set &lt;key&gt; [value]</code></td><td>Inspect or persist settings in <code>~/.ollamadev/config.json</code></td></tr>
         <tr><td><code>ollamadev skills</code></td><td>List / scaffold / install / export skills</td></tr>
@@ -323,6 +325,8 @@ ollamadev crew "big refactor" --hosts host-a,host-b --panes<button class="copy-b
       <li><strong>Live topology (cockpit)</strong> — in the ADE, the <strong>🛰 Crew topology</strong> window maps the run live: each coder's branch, the files it's touching, the Auditor's verdict, and real-time activity (✎ editing / 👁 reading / ⚡ running). Steer a coder from the Director box, or <code>--panes</code> for one tmux pane per Coder.</li>
       <li><strong>Voice-driven</strong> — in the ADE, launch and steer the crew by voice: <em>“start a crew to add tests”</em>, <em>“tell coder 2 to focus on edge cases”</em>.</li>
       <li><strong>Review gating</strong> — <code>--review</code> holds every branch for review; nothing auto-merges. Self-repo edits are gated automatically.</li>
+      <li><strong>Secret gate</strong> — the Auditor <strong>never auto-merges</strong> a branch that introduces a hardcoded secret (API key, token, private key); it's held with a <em>“🔑 secret detected”</em> reason. Same scanner as <code>ollamadev scan</code> — see <a href="#security">Security</a>.</li>
+      <li><strong>Accept from the board</strong> — held branches post to the unified Decisions board; accept (local merge) or discard in one click in the ADE (or <code>crew accept &lt;n&gt;</code> / <code>board accept &lt;id&gt;</code>). Each card has an <strong>inline diff</strong> you expand before deciding, and a conflicting accept offers to open a terminal to resolve it.</li>
       <li><strong>Team skill packs</strong> — Crews are seeded with relevant skills by focus; every by-project-type team also auto-loads its own skill. Disable with <code>--no-skills</code>.</li>
     </ul>
 
@@ -379,6 +383,20 @@ ollamadev pr review 42 --comment   <span class="cm"># review a PR with the local
       <li><strong>Semantic search</strong> needs an embedding model pulled once: <code>ollama pull nomic-embed-text</code>. The index lives in <code>.ollamadev/index/</code> and is rebuilt with <code>index build</code>. The agent can call it as the <code>code_search</code> tool, and the desktop/browser have a <strong>🔎 search panel</strong> in the sidebar (type a query → click a result to open it).</li>
       <li><strong>verify</strong> and the <code>run_tests</code> tool let the agent confirm its own changes; set <code>test.command</code> to override detection.</li>
       <li><strong>PR commands</strong> use the GitHub CLI (<code>gh</code>); <code>commit</code> is local and always available.</li>
+    </ul>
+
+    <h2 id="security" class="anchor">Secret scanning</h2>
+    <p>A built-in, dependency-free scanner catches hardcoded credentials and a few high-confidence unsafe patterns <em>before</em> they land — so a leaked key never slips into a commit or an auto-merged crew branch. Pure vanilla regex, fully local; matches are always redacted in output.</p>
+<pre class="code"><span class="cm"># scan the working-tree diff (what you're about to commit)</span>
+ollamadev scan
+ollamadev scan --staged        <span class="cm"># the staged diff only</span>
+ollamadev scan src/            <span class="cm"># a file or directory on disk</span>
+ollamadev scan --json          <span class="cm"># machine-readable; exits 1 on a HIGH finding</span><button class="copy-btn">Copy</button></pre>
+    <ul>
+      <li><strong>Detects</strong> — AWS / Google / GitHub / Slack / Stripe / OpenAI keys, private-key blocks, JWTs, credentials in URLs, generic hardcoded <code>api_key/secret/password</code> assignments, and dynamic <code>eval($…)</code> / shell-exec-of-a-variable. Obvious placeholders (<code>your_key_here</code>, <code>example</code>, <code>&lt;…&gt;</code>) are skipped to keep findings trustworthy.</li>
+      <li><strong>Commit gate</strong> — <code>ollamadev commit</code> blocks a staged HIGH-severity secret and asks before proceeding; <code>--force</code> overrides.</li>
+      <li><strong>Crew gate</strong> — the Auditor <strong>never auto-merges</strong> a coder branch that introduces a secret; it's held on the board with a <em>“🔑 secret detected”</em> reason for you to review.</li>
+      <li><strong>Exit code</strong> — non-zero when any HIGH finding is present, so it drops cleanly into a pre-commit hook or CI step.</li>
     </ul>
 
     <h2 id="config" class="anchor">Configuration</h2>

@@ -96,6 +96,8 @@
           <li>Each coder's <b>branch</b>, the <b>files</b> it's touching, and the Auditor's <b>verdict</b></li>
           <li>Real-time activity — <b>✎ editing · 👁 reading · ⚡ running</b></li>
           <li>Launch &amp; steer it by <b>voice</b>: <code>"start a crew to add tests"</code></li>
+          <li>The Auditor <b>never auto-merges a secret</b> — a leaked key holds the branch for review</li>
+          <li><b>Inline diff review</b> on the board — read every change before you Accept</li>
           <li>Run coders <b>in parallel</b> on one box; pick a model per role</li>
         </ul>
         <p style="margin-top:18px;font-size:0.9rem;color:var(--fg-faint);">The private, free answer to the cloud agent-canvases — but it runs entirely on your hardware.</p>
@@ -183,6 +185,11 @@
         <p>Edits show a colorized diff and ask first. Every change is checkpointed and reversible with <code>/undo</code> — and <code>ollamadev verify</code> runs your tests and fixes failures until they pass.</p>
       </div>
       <div class="card">
+        <span class="ico">🔑</span>
+        <h3>Secrets never auto-merge</h3>
+        <p>A built-in scanner flags hardcoded API keys, tokens, and private keys in every diff. The <b>crew Auditor holds</b> any branch that leaks one, <code>commit</code> blocks staged secrets, and <code>ollamadev scan</code> checks on demand — vanilla regex, all on-device.</p>
+      </div>
+      <div class="card">
         <span class="ico">👥</span>
         <h3>Crew — multi-agent</h3>
         <p>Director plans, coders build in isolated git worktrees, an Auditor gates every diff. Per-role models, an adversarial audit panel, and a live topology you watch.</p>
@@ -247,6 +254,8 @@
           <tr><td class="feat">Infinite agent canvas</td><td class="own">Yes</td><td>Some</td></tr>
           <tr><td class="feat">Worktree-per-agent + Auditor gate</td><td class="own">Yes</td><td>Varies</td></tr>
           <tr><td class="feat">Live crew topology</td><td class="own">Yes</td><td>Varies</td></tr>
+          <tr><td class="feat">Secret-leak gate (no auto-merge)</td><td class="own">Yes, built-in</td><td>Varies</td></tr>
+          <tr><td class="feat">Voice-steer the crew</td><td class="own">Yes, on-device</td><td>Varies</td></tr>
           <tr><td class="feat">Dependencies</td><td class="own">None (vanilla PHP)</td><td>Editor / Node / Electron</td></tr>
         </tbody>
       </table>
