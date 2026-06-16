@@ -604,8 +604,35 @@ if (trim((string) shell_exec('git --version 2>/dev/null')) !== '') {
     $bl2 = json_decode(trim($out), true);
     ok('the accepted decision leaves the pending queue', is_array($bl2) && count($bl2['pending'] ?? []) === 0, trim($out));
     shell_exec('rm -rf ' . escapeshellarg($ihome) . ' ' . escapeshellarg($irepo));
+
+    // Conflict path: an accept that can't merge cleanly aborts + reports branch/repoRoot
+    // (so the desktop can offer a one-click resolve), leaving the working tree clean.
+    $crepo = sys_get_temp_dir() . '/board_conf_' . getmypid();
+    @mkdir($crepo, 0777, true);
+    shell_exec('cd ' . escapeshellarg($crepo) . ' && git init -q && git config user.email t@t.t && git config user.name T && git symbolic-ref HEAD refs/heads/main && printf base > c.txt && git add -A && git commit -qm init && git checkout -q -b crew/conf && printf branchver > c.txt && git add -A && git commit -qm "crew: c" && git checkout -q main && printf mainver > c.txt && git add -A && git commit -qm "main: c"');
+    $cdec = ['id' => 'crew_conf1', 'kind' => 'crew_branch', 'summary' => 'coder #1: c — conflict', 'detail' => 'd',
+        'opts' => ['runId' => 'crew_c', 'n' => 1, 'branch' => 'crew/conf', 'repoRoot' => $crepo, 'base' => 'main'],
+        'status' => 'pending', 'verdict' => null, 'note' => null, 'created_at' => '2026-01-01T00:00:00+00:00', 'decided_at' => null];
+    $chome = sys_get_temp_dir() . '/board_confh_' . getmypid();
+    @mkdir($chome . '/.ollamadev/board/locks', 0777, true);
+    file_put_contents($chome . '/.ollamadev/board/decisions.jsonl', json_encode($cdec) . "\n");
+    file_put_contents($chome . '/.ollamadev/board/locks/crew_conf1.lock', 'crew_conf1');
+    [$out, , $code] = run_bin(['board', 'accept', 'crew_conf1', '--json'], '', ['HOME' => $chome], $crepo);
+    $cr = json_decode(trim($out), true);
+    ok('a conflicting accept aborts + reports conflict/branch/repoRoot', is_array($cr) && empty($cr['ok']) &&
+        !empty($cr['conflict']) && ($cr['branch'] ?? '') === 'crew/conf' && ($cr['repoRoot'] ?? '') === $crepo, trim($out));
+    ok('conflict leaves the working tree clean (merge aborted)',
+        trim((string)shell_exec('cd ' . escapeshellarg($crepo) . ' && git status --porcelain')) === '' &&
+        trim((string)@file_get_contents($crepo . '/c.txt')) === 'mainver');
+    shell_exec('rm -rf ' . escapeshellarg($chome) . ' ' . escapeshellarg($crepo));
 }
 shell_exec('rm -rf ' . escapeshellarg($bhome));
+// Desktop offers a one-click "resolve in a terminal" on a conflicting accept.
+// (NB: $repoRoot isn't defined this early in the file — derive the path directly.)
+$appjsConf = (string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/app.js');
+ok('desktop offers a resolve-in-terminal path on merge conflict',
+    strpos($appjsConf, '_offerResolve') !== false &&
+    strpos($appjsConf, "App.spawnCmd('shell', 'shell', root, 'git merge --no-ff '") !== false);
 
 // Separate-Director steering: `crew steer <#> "..."` / desktop box → run's steer.jsonl,
 // injected into the targeted coder between iterations (works sequential + forked).
@@ -1775,6 +1802,27 @@ ok('active workspace autosaves so the app resumes on reopen',
     strpos($appjs, '!self.terminals.length') !== false);
 ok('Bindings::wsSaveState accepts a JSON string + decodes', strpos($bind, 'function wsSaveState(string $id, string $state)') !== false && strpos($bind, 'json_decode($state') !== false);
 ok('Boson binds wsSaveState as a string', strpos((string)@file_get_contents($repoRoot . '/Desktop/ollamadev-ade/index.php'), "fn(string \$id, string \$state): bool => \$bx->wsSaveState") !== false);
+// Workspace state is capped so workspaces.json can't balloon: an oversized blob sheds
+// terminal `replay` (a convenience) FIRST, but keeps unsaved editor buffers (the user's work).
+ok('Workspaces::saveState caps the blob (sheds replay, keeps editor buffers)',
+    strpos((string)@file_get_contents($repoRoot . '/Desktop/ollamadev-ade/src/Workspaces.php'), 'function capState') !== false);
+if (class_exists('OllamaDev\\Workspaces') || @include_once($repoRoot . '/Desktop/ollamadev-ade/src/Workspaces.php')) {
+    $wh = sys_get_temp_dir() . '/odv-wscap-' . getmypid(); @mkdir($wh . '/.ollamadev', 0777, true);
+    $oldHome = getenv('HOME'); putenv('HOME=' . $wh); $_SERVER['HOME'] = $wh;
+    $ws = \OllamaDev\Workspaces::add($wh, 'capproj');
+    $big = str_repeat('x', 2200000);   // >2 MB scrollback → must be shed
+    \OllamaDev\Workspaces::saveState($ws['id'], [
+        'terminals' => [['id' => 't1', 'replay' => $big]],
+        'editorTabs' => [['path' => '/a.txt', 'name' => 'a.txt', 'dirty' => true, 'content' => 'UNSAVED WORK']],
+    ]);
+    $st = \OllamaDev\Workspaces::load()['workspaces'][0]['state'] ?? [];
+    $replayDropped = !isset($st['terminals'][0]['replay']);
+    $bufferKept = ($st['editorTabs'][0]['content'] ?? '') === 'UNSAVED WORK';
+    ok('oversized state sheds replay but preserves the unsaved editor buffer', $replayDropped && $bufferKept,
+        'replayDropped=' . var_export($replayDropped, true) . ' bufferKept=' . var_export($bufferKept, true));
+    putenv('HOME=' . $oldHome); $_SERVER['HOME'] = $oldHome;
+    @shell_exec('rm -rf ' . escapeshellarg($wh));
+}
 
 // ---- v4.3.0 — Crew roles: a per-subtask role catalog the Director assigns. ----
 $rolesSrc = (string)@file_get_contents($repoRoot . '/src/83a-crew-roles.php');
@@ -2197,10 +2245,15 @@ ok('find translates escaped glob wildcards (no broken regex)',
 $toolsSh = (string)@file_get_contents($repoRoot . '/tests/tools.sh');
 ok('tool tests assert side effects + atomicity', strpos($toolsSh, 'ATOMIC') !== false &&
     strpos($toolsSh, 'eff(') !== false && strpos($toolsSh, 'git_commit created the commit') !== false);
-if (isset($bin) && is_file($bin)) {
-    $tc = (string)@shell_exec('php ' . escapeshellarg($bin) . " config set tools.mode text 2>&1");
-    ok('tools.mode is a settable config key', stripos($tc, 'tools.mode') !== false);
-}
+// REGRESSION (root-caused 2026-06-15): the old test here ran `config set tools.mode text`
+// against the REAL $HOME on every smoke run, silently recreating the user's
+// ~/.ollamadev/config.json with the stale brittle-path key. It's gone. The real invariant
+// is that tools.mode is IGNORED: effectiveToolMode() resolves native/text from the CLIENT,
+// never from config — so a stale tools.mode can't sabotage tool-calling. Assert that, with
+// no file writes. See [[tools-mode-text-sabotages-cli]].
+ok('effectiveToolMode resolves from the client, never config (tools.mode can\'t sabotage)',
+    strpos($src, "method_exists(\$this->client, 'chatWithTools') ? 'native' : 'text'") !== false &&
+    strpos($src, "Config::get('tools.mode'") === false && strpos($src, "Config::get(\"tools.mode\"") === false);
 
 // ── Help docs can't drift from the registry (guard test) ─────────────────────
 // The 66-vs-95 drift happened because the tool count and category list in help

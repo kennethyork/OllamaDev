@@ -1544,11 +1544,24 @@ var Decisions = {
         banner(verdict === 'accept' ? 'merging…' : 'discarding…');
         Promise.resolve(window.boardDecide(id, verdict)).then(function (res) {
             if (res && res.ok) banner(verdict === 'accept' ? ('✓ merged ' + (res.merged || '')) : ('✓ discarded ' + (res.discarded || '')), 'ok');
-            else banner('⚠ ' + ((res && res.error) || 'failed') + (res && res.conflict ? ' (resolve the conflict, then retry)' : ''), 'err');
+            else if (res && res.conflict) Decisions._offerResolve(res);
+            else banner('⚠ ' + ((res && res.error) || 'failed'), 'err');
             Decisions.refresh();
             // Reflect the new subtask state on the kanban immediately.
             if (window.crewBoard) Promise.resolve(crewBoard()).then(function (b) { if (b && b.subtasks) { App.crewBoard = b; if (App.popped.board) Tasks.render(); } });
         }).catch(function () { banner('decision failed', 'err'); });
+    },
+    // Accept hit a merge conflict (the engine aborted the merge, leaving the tree clean).
+    // Offer to open a terminal in the project and re-run the merge so the user can resolve
+    // the conflicts and commit — far better than a dead-end "resolve manually" banner.
+    _offerResolve: function (res) {
+        var branch = res && res.branch, root = res && res.repoRoot;
+        if (!branch || !root || !App.spawnCmd) { banner('⚠ merge conflict on ' + (branch || 'the branch') + ' — resolve it manually', 'err'); return; }
+        banner('⚠ merge conflict on ' + branch, 'err');
+        var ok = window.confirm('Merge conflict on ' + branch + '.\n\nOpen a terminal in the project and start the merge so you can resolve it?\n\nIt runs:  git merge --no-ff ' + branch + '\nThen fix the conflicted files, `git add`, and `git commit`.');
+        if (!ok) return;
+        App.spawnCmd('shell', 'shell', root, 'git merge --no-ff ' + branch);
+        banner('resolve the conflicts in the terminal, then git add + commit', 'ok');
     }
 };
 

@@ -1152,7 +1152,10 @@ class Crew {
         $out = self::sh($g . 'merge --no-ff --no-edit ' . escapeshellarg($branch) . ' 2>&1');
         if (self::sh($g . 'ls-files -u') !== '') {
             self::sh($g . 'merge --abort 2>&1');
-            return ['ok' => false, 'conflict' => true, 'error' => 'merge conflict — resolve ' . $branch . ' manually', 'out' => $out];
+            // Carry branch + repoRoot so the desktop can offer a one-click "resolve in a
+            // terminal" (re-run the merge in the project to fix conflicts, then commit).
+            return ['ok' => false, 'conflict' => true, 'branch' => $branch, 'repoRoot' => $root,
+                'error' => 'merge conflict — resolve ' . $branch . ' manually', 'out' => $out];
         }
         if (isset($opts['n'])) self::setBoardState((int)$opts['n'], 'done');
         return ['ok' => true, 'merged' => $branch, 'out' => $out];

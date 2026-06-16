@@ -102,6 +102,7 @@ final class Workspaces
     // Persist the GUI window state (terminals, editor tabs, layout, view).
     public static function saveState(string $id, array $state): bool
     {
+        $state = self::capState($state);
         $d = self::load();
         $hit = false;
         foreach ($d['workspaces'] as &$w) {
@@ -110,5 +111,20 @@ final class Workspaces
         unset($w);
         if ($hit) self::save($d);
         return $hit;
+    }
+
+    // Keep a workspace's state blob bounded so workspaces.json can't balloon (and slow
+    // the GUI autosave). A terminal's read-only scrollback (`replay`) is a convenience,
+    // so it's shed FIRST when the blob is large. Unsaved editor buffers are the user's
+    // work and are NEVER dropped here.
+    private static function capState(array $state): array
+    {
+        $cap = 2000000; // ~2 MB per workspace
+        if (strlen((string) json_encode($state)) <= $cap) return $state;
+        if (!empty($state['terminals']) && is_array($state['terminals'])) {
+            foreach ($state['terminals'] as &$t) { if (is_array($t)) unset($t['replay']); }
+            unset($t);
+        }
+        return $state;
     }
 }
