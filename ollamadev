@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '0.9.36');
+define('OLLAMADEV_VERSION', '0.9.37');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -753,14 +753,7 @@ class LSPClient {
                     $diags[] = ['line' => (int)$m[1], 'col' => 1, 'severity' => 'error', 'message' => trim($output)];
                 }
             }
-        } elseif ($ext === 'js' || $ext === 'ts') {
-            $output = shell_exec("npx tsc --noEmit " . escapeshellarg($filePath) . " 2>&1");
-            if (!empty($output) && strpos($output, 'error') !== false) {
-                preg_match_all('/(\d+):(\d+)\s+error\s+(.*)/', $output, $matches, PREG_SET_ORDER);
-                foreach ($matches as $m) {
-                    $diags[] = ['line' => (int)$m[1], 'col' => (int)$m[2], 'severity' => 'error', 'message' => $m[3]];
-                }
-            }
+        // No JS/TS typecheck — that would need node, and OllamaDev is node-free.
         } elseif ($ext === 'py') {
             $output = shell_exec("python -m py_compile " . escapeshellarg($filePath) . " 2>&1");
             if (!empty($output)) {
@@ -2578,11 +2571,8 @@ class Verify {
         if ($override !== '') return ['cmd' => $override, 'label' => 'config'];
         $cwd = getcwd();
         $has = fn($f) => file_exists($cwd . '/' . $f);
-        if ($has('package.json')) {
-            $pj = json_decode((string)@file_get_contents($cwd . '/package.json'), true);
-            $t = $pj['scripts']['test'] ?? '';
-            if ($t && stripos($t, 'no test specified') === false) return ['cmd' => 'npm test --silent', 'label' => 'npm'];
-        }
+        // NOTE: no JS/node test runner — OllamaDev is node-free by design. Point a JS
+        // project's tests at a non-node command via `config set test.command "<cmd>"`.
         if ($has('phpunit.xml') || $has('phpunit.xml.dist')) {
             return ['cmd' => $has('vendor/bin/phpunit') ? './vendor/bin/phpunit' : 'phpunit', 'label' => 'phpunit'];
         }
@@ -4202,13 +4192,11 @@ Tools::register('format', function($p) {
             return "PHP syntax OK - use phpcbf for auto-formatting";
         }
         return $output;
-    } elseif ($ext === 'js' || $ext === 'ts') {
-        $output = shell_exec("npx prettier --check " . escapeshellarg($path) . " 2>&1");
-        return $output ?: "Formatted";
     } elseif ($ext === 'py') {
         $output = shell_exec("python -m black --check " . escapeshellarg($path) . " 2>&1");
         return $output ?: "Formatted";
     }
+    // No JS/TS formatter — prettier needs node, and OllamaDev is node-free by design.
     return "No formatter available for $ext";
 });
 
@@ -10934,7 +10922,7 @@ $GLOBALS['currentSessionModel'] = null;
     // search/…) but called none this turn — the "describes instead of acting" quit
     // that makes a local agent stop early. Edits are the strong sub-case above.
     // Deliberately first-person ("I'll run", "let me check") so advice phrasings
-    // like "you can run npm test" in a finished answer don't trigger a false nudge.
+    // like "you can run the tests" in a finished answer don't trigger a false nudge.
     public static function looksLikeUnactedAction(string $response): bool {
         if (self::looksLikeUnactedEdit($response)) return true;
         if (preg_match('/\busing the\s+\w+\s+tool\b/i', $response)) return true;
@@ -12581,7 +12569,7 @@ if ($argc >= 2 && $argv[1] === 'pr') {
 // Run the project's tests (auto-detected). `verify` adds a fix-until-green loop.
 if ($argc >= 2 && ($argv[1] === 'test' || $argv[1] === 'verify')) {
     $det = Verify::detect();
-    if (!$det) { echo "No test command detected (looked for npm/phpunit/composer/go/cargo/pytest/make).\n  Set one: ollamadev config set test.command \"<cmd>\"\n"; exit(1); }
+    if (!$det) { echo "No test command detected (looked for phpunit/composer/go/cargo/pytest/make).\n  Set one: ollamadev config set test.command \"<cmd>\"\n"; exit(1); }
     if ($argv[1] === 'test') {
         echo "Running tests: \033[36m{$det['cmd']}\033[0m\n\n";
         $res = Verify::run($det);
@@ -14327,10 +14315,9 @@ if ($cmd === 'chat') {
             if ($uri && file_exists($uri)) {
                 $content = file_get_contents($uri);
                 $ext = pathinfo($uri, PATHINFO_EXTENSION);
+                // No js/ts formatter — prettier needs node, and OllamaDev is node-free.
                 $cmd = match($ext) {
                     'php' => 'php -l -f',
-                    'js' => 'npx prettier --stdin-filepath',
-                    'ts' => 'npx prettier --stdin-filepath',
                     'py' => 'python3 -m black -',
                     'go' => 'gofmt',
                     'rs' => 'rustfmt',

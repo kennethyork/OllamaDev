@@ -114,14 +114,7 @@ class LSPClient {
                     $diags[] = ['line' => (int)$m[1], 'col' => 1, 'severity' => 'error', 'message' => trim($output)];
                 }
             }
-        } elseif ($ext === 'js' || $ext === 'ts') {
-            $output = shell_exec("npx tsc --noEmit " . escapeshellarg($filePath) . " 2>&1");
-            if (!empty($output) && strpos($output, 'error') !== false) {
-                preg_match_all('/(\d+):(\d+)\s+error\s+(.*)/', $output, $matches, PREG_SET_ORDER);
-                foreach ($matches as $m) {
-                    $diags[] = ['line' => (int)$m[1], 'col' => (int)$m[2], 'severity' => 'error', 'message' => $m[3]];
-                }
-            }
+        // No JS/TS typecheck — that would need node, and OllamaDev is node-free.
         } elseif ($ext === 'py') {
             $output = shell_exec("python -m py_compile " . escapeshellarg($filePath) . " 2>&1");
             if (!empty($output)) {

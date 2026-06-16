@@ -1295,7 +1295,7 @@ $GLOBALS['currentSessionModel'] = null;
     // search/…) but called none this turn — the "describes instead of acting" quit
     // that makes a local agent stop early. Edits are the strong sub-case above.
     // Deliberately first-person ("I'll run", "let me check") so advice phrasings
-    // like "you can run npm test" in a finished answer don't trigger a false nudge.
+    // like "you can run the tests" in a finished answer don't trigger a false nudge.
     public static function looksLikeUnactedAction(string $response): bool {
         if (self::looksLikeUnactedEdit($response)) return true;
         if (preg_match('/\busing the\s+\w+\s+tool\b/i', $response)) return true;

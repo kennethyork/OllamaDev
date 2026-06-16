@@ -900,13 +900,11 @@ Tools::register('format', function($p) {
             return "PHP syntax OK - use phpcbf for auto-formatting";
         }
         return $output;
-    } elseif ($ext === 'js' || $ext === 'ts') {
-        $output = shell_exec("npx prettier --check " . escapeshellarg($path) . " 2>&1");
-        return $output ?: "Formatted";
     } elseif ($ext === 'py') {
         $output = shell_exec("python -m black --check " . escapeshellarg($path) . " 2>&1");
         return $output ?: "Formatted";
     }
+    // No JS/TS formatter — prettier needs node, and OllamaDev is node-free by design.
     return "No formatter available for $ext";
 });
 

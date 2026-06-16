@@ -9,11 +9,8 @@ class Verify {
         if ($override !== '') return ['cmd' => $override, 'label' => 'config'];
         $cwd = getcwd();
         $has = fn($f) => file_exists($cwd . '/' . $f);
-        if ($has('package.json')) {
-            $pj = json_decode((string)@file_get_contents($cwd . '/package.json'), true);
-            $t = $pj['scripts']['test'] ?? '';
-            if ($t && stripos($t, 'no test specified') === false) return ['cmd' => 'npm test --silent', 'label' => 'npm'];
-        }
+        // NOTE: no JS/node test runner — OllamaDev is node-free by design. Point a JS
+        // project's tests at a non-node command via `config set test.command "<cmd>"`.
         if ($has('phpunit.xml') || $has('phpunit.xml.dist')) {
             return ['cmd' => $has('vendor/bin/phpunit') ? './vendor/bin/phpunit' : 'phpunit', 'label' => 'phpunit'];
         }

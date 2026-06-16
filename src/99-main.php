@@ -1163,7 +1163,7 @@ if ($argc >= 2 && $argv[1] === 'pr') {
 // Run the project's tests (auto-detected). `verify` adds a fix-until-green loop.
 if ($argc >= 2 && ($argv[1] === 'test' || $argv[1] === 'verify')) {
     $det = Verify::detect();
-    if (!$det) { echo "No test command detected (looked for npm/phpunit/composer/go/cargo/pytest/make).\n  Set one: ollamadev config set test.command \"<cmd>\"\n"; exit(1); }
+    if (!$det) { echo "No test command detected (looked for phpunit/composer/go/cargo/pytest/make).\n  Set one: ollamadev config set test.command \"<cmd>\"\n"; exit(1); }
     if ($argv[1] === 'test') {
         echo "Running tests: \033[36m{$det['cmd']}\033[0m\n\n";
         $res = Verify::run($det);
@@ -2909,10 +2909,9 @@ if ($cmd === 'chat') {
             if ($uri && file_exists($uri)) {
                 $content = file_get_contents($uri);
                 $ext = pathinfo($uri, PATHINFO_EXTENSION);
+                // No js/ts formatter — prettier needs node, and OllamaDev is node-free.
                 $cmd = match($ext) {
                     'php' => 'php -l -f',
-                    'js' => 'npx prettier --stdin-filepath',
-                    'ts' => 'npx prettier --stdin-filepath',
                     'py' => 'python3 -m black -',
                     'go' => 'gofmt',
                     'rs' => 'rustfmt',

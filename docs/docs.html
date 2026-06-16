@@ -347,7 +347,7 @@ ollamadev memory graph             <span class="cm"># print the link graph (--js
     <h2 id="mcp-lsp" class="anchor">MCP &amp; LSP</h2>
     <p><strong>MCP</strong> — connect Model Context Protocol servers over the standard stdio transport (JSON-RPC 2.0) or an HTTP/SSE fallback. Configure them under <code>mcpServers</code> in your config, or manage at runtime:</p>
 <pre class="code">ollamadev mcp list
-ollamadev mcp add filesystem "npx -y @modelcontextprotocol/server-filesystem /path"<button class="copy-btn">Copy</button></pre>
+ollamadev mcp add git "uvx mcp-server-git --repository /path"<button class="copy-btn">Copy</button></pre>
     <p><strong>LSP</strong> — built-in code intelligence (goto, find_refs, symbols, hover, diagnostics, format) plus an LSP <em>server</em> mode so editors can use OllamaDev for AI completions and diagnostics: <code>ollamadev lsp --port 4389</code>.</p>
 
     <h2 id="search" class="anchor">Web search</h2>
@@ -368,7 +368,7 @@ ollamadev index build          <span class="cm"># embed the repo (model: embed.m
 ollamadev code-search "where do we gate the agent's network tools"
 
 <span class="cm"># test-aware: run the suite, or fix failures until green</span>
-ollamadev test                 <span class="cm"># auto-detects npm/phpunit/composer/go/cargo/pytest/make</span>
+ollamadev test                 <span class="cm"># auto-detects phpunit/composer/go/cargo/pytest/make</span>
 ollamadev verify --max 4       <span class="cm"># run → agent fixes failures → re-run, until green</span>
 
 <span class="cm"># ship it</span>
@@ -407,9 +407,9 @@ ollamadev pr review 42 --comment   <span class="cm"># review a PR with the local
   "ui": { "markdown": true },
   "hooks": { "afterEdit": "echo edited" },
   "mcpServers": {
-    "filesystem": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
+    "git": {
+      "command": "uvx",
+      "args": ["mcp-server-git", "--repository", "/path"]
     }
   }
 }<button class="copy-btn">Copy</button></pre>

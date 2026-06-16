@@ -2008,8 +2008,9 @@ ok('code_search is an agent tool + has a schema', strpos($toolsSrc, "Tools::regi
 ok('CLI exposes index + code-search', strpos($mainSrc, "\$argv[1] === 'index'") !== false && strpos($mainSrc, "\$argv[1] === 'code-search'") !== false);
 ok('index ignores build/dep dirs', strpos($ci, "'.build'") !== false && strpos($ci, "'node_modules'") !== false && strpos($ci, "'vendor'") !== false);
 // 2) Verify / test-aware agent.
-ok('Verify detects common test runners', strpos($vf, 'class Verify') !== false &&
-    strpos($vf, 'phpunit') !== false && strpos($vf, 'go test') !== false && strpos($vf, 'pytest') !== false && strpos($vf, 'npm test') !== false);
+ok('Verify detects common test runners (node-free — no npm)', strpos($vf, 'class Verify') !== false &&
+    strpos($vf, 'phpunit') !== false && strpos($vf, 'go test') !== false && strpos($vf, 'pytest') !== false &&
+    stripos($vf, 'npm') === false);
 ok('run_tests is an agent tool + verify has a fix loop', strpos($toolsSrc, "Tools::register('run_tests'") !== false && strpos($vf, 'function fixLoop') !== false);
 ok('CLI exposes test + verify', strpos($mainSrc, "\$argv[1] === 'test'") !== false && strpos($mainSrc, "\$argv[1] === 'verify'") !== false);
 // 3) Git/PR workflow.
@@ -2017,14 +2018,21 @@ ok('GitFlow generates commit messages + PR text + review', strpos($gf, 'class Gi
     strpos($gf, 'function message') !== false && strpos($gf, 'function prText') !== false && strpos($gf, 'function review') !== false);
 ok('CLI exposes commit + pr create/review', strpos($mainSrc, "\$argv[1] === 'commit'") !== false &&
     strpos($mainSrc, "\$argv[1] === 'pr'") !== false && strpos($mainSrc, "'create'") !== false && strpos($mainSrc, "'review'") !== false);
-// Functional: detection + commit-message round-trips (no model needed for detect).
-if (isset($bin) && is_file($bin)) {
+// Functional: detection + run a NODE-FREE runner (make). Also guards that a JS project
+// (package.json) is NOT auto-run via npm anymore — OllamaDev is node-free.
+if (isset($bin) && is_file($bin) && trim((string)@shell_exec('command -v make 2>/dev/null')) !== '') {
     $td = sys_get_temp_dir() . '/odv-feat-' . getmypid();
     @mkdir($td, 0755, true);
-    @file_put_contents($td . '/package.json', '{"scripts":{"test":"exit 0"}}');
+    @file_put_contents($td . '/Makefile', "test:\n\t@true\n");
     $t = (string)@shell_exec('cd ' . escapeshellarg($td) . ' && php ' . escapeshellarg($bin) . ' test 2>&1');
-    ok('verify detects npm + runs the suite', stripos($t, 'npm test') !== false && stripos($t, 'passed') !== false);
-    @shell_exec('rm -rf ' . escapeshellarg($td));
+    ok('verify detects a node-free runner (make) + runs the suite', stripos($t, 'make test') !== false && stripos($t, 'passed') !== false, trim($t));
+    // A bare JS project must NOT be auto-detected (no npm fallback).
+    $jd = sys_get_temp_dir() . '/odv-js-' . getmypid();
+    @mkdir($jd, 0755, true);
+    @file_put_contents($jd . '/package.json', '{"scripts":{"test":"exit 0"}}');
+    $jt = (string)@shell_exec('cd ' . escapeshellarg($jd) . ' && php ' . escapeshellarg($bin) . ' test 2>&1');
+    ok('a JS project is NOT auto-run via npm (node-free)', stripos($jt, 'No test command detected') !== false && stripos($jt, 'npm') === false, trim($jt));
+    @shell_exec('rm -rf ' . escapeshellarg($td) . ' ' . escapeshellarg($jd));
 }
 
 // ---- v4.7.0 — code search in the desktop/web UI + landing cards. ----
