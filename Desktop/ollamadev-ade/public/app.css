@@ -602,7 +602,12 @@ textarea.field { min-height: 84px; resize: vertical; line-height: 1.5; }
 .dec-title { font-size: 12px; font-weight: 700; color: var(--accent); white-space: nowrap; }
 #decisionsList { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 #decisionsList:empty { display: none; }
-.dec-card { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border: 1px solid var(--warn); border-radius: var(--r-sm); background: linear-gradient(rgba(210,153,34,.08), transparent), var(--elev); }
+.dec-card { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 7px 10px; border: 1px solid var(--warn); border-radius: var(--r-sm); background: linear-gradient(rgba(210,153,34,.08), transparent), var(--elev); }
+/* Inline diff review: read a held branch's changes on the card before deciding. */
+.dec-card .actions .dec-diffbtn { color: var(--accent); border-color: var(--accent-soft); }
+.dec-diff { flex-basis: 100%; width: 100%; margin: 4px 0 2px; max-height: 320px; overflow: auto; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; font-family: var(--mono); font-size: 11px; line-height: 1.45; white-space: pre; }
+.dec-diff[hidden] { display: none; }
+.dec-diff span { display: block; min-height: 1.45em; }
 .dec-sum { flex: 1; min-width: 0; font-size: 12px; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dec-card .actions { display: flex; gap: 6px; flex: none; }
 .dec-card .actions button { font-size: 11px; padding: 3px 9px; border-radius: 5px; border: 1px solid var(--border); background: var(--bg3); color: var(--dim); cursor: pointer; }

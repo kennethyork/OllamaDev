@@ -1101,6 +1101,18 @@ if ($argc >= 2 && $argv[1] === 'commit') {
     if ($all) GitFlow::sh('git add -A 2>&1');
     $diff = GitFlow::sh('git diff --cached 2>/dev/null');
     if ($diff === '') { echo "Nothing staged. Stage changes (`git add`) or pass -a/--all.\n"; exit(1); }
+    // Secret gate: don't let a hardcoded credential slip into a commit. --force overrides.
+    $secHigh = array_values(array_filter(SecScan::scanDiff($diff), fn($f) => $f['severity'] === 'high'));
+    if ($secHigh && !in_array('--force', $argv, true)) {
+        echo "\033[31m🔒 " . count($secHigh) . " secret(s) in the staged diff:\033[0m\n";
+        foreach ($secHigh as $f) echo "  \033[31mHIGH\033[0m {$f['label']}  \033[2m{$f['file']}:{$f['line']}\033[0m  {$f['match']}\n";
+        echo "\033[2m  Remove it (env var / secret manager), or pass --force to commit anyway.\033[0m\n";
+        if (posix_isatty(STDIN)) {
+            echo "Commit anyway? [y/N] ";
+            $a = strtolower(trim((string)fgets(STDIN)));
+            if (!($a !== '' && $a[0] === 'y')) { echo "Aborted (changes stay staged).\n"; exit(1); }
+        } else { exit(1); }
+    }
     if ($msg === '') {
         echo "Generating commit message…\n";
         $msg = GitFlow::message($diff);
@@ -1176,6 +1188,40 @@ if ($argc >= 2 && ($argv[1] === 'test' || $argv[1] === 'verify')) {
     for ($i = 2; $i < $argc; $i++) if ($argv[$i] === '--max') $max = max(1, (int)($argv[$i + 1] ?? 4));
     echo "\033[1mVerify\033[0m \033[2m[{$det['cmd']}] · up to {$max} fix attempt(s)\033[0m\n";
     exit(Verify::fixLoop($det, $max));
+}
+
+// Secret + unsafe-pattern scanner. Default: scan the working-tree diff vs HEAD (what you're
+// about to commit). `scan --staged` = staged diff; `scan <path>` = a file/dir on disk.
+// `--json` for tooling; exits 1 when any HIGH-severity finding is present (CI/commit gate).
+if ($argc >= 2 && $argv[1] === 'scan') {
+    $json = in_array('--json', $argv, true);
+    $args = array_values(array_filter(array_slice($argv, 2), fn($a) => $a !== '--json'));
+    $findings = [];
+    if (isset($args[0]) && $args[0] !== '--staged' && $args[0] !== '--diff') {
+        $p = $args[0];
+        if (is_dir($p)) {
+            $files = [];
+            $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($p, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::LEAVES_ONLY, RecursiveIteratorIterator::CATCH_GET_CHILD);
+            foreach ($it as $f) { $fp = $f->getPathname(); if (strpos($fp, '/.git/') === false) $files[] = $fp; }
+            $findings = SecScan::scanFiles($files);
+        } else {
+            $findings = SecScan::scanFiles([$p]);
+        }
+    } else {
+        $staged = in_array('--staged', $args, true);
+        $diff = (string)@shell_exec('git diff ' . ($staged ? '--cached ' : 'HEAD ') . '2>/dev/null');
+        $findings = SecScan::scanDiff($diff);
+    }
+    $high = array_filter($findings, fn($f) => $f['severity'] === 'high');
+    if ($json) { echo json_encode(['findings' => array_values($findings), 'high' => count($high), 'total' => count($findings)]) . "\n"; exit($high ? 1 : 0); }
+    if (!$findings) { echo "\033[32m✓ no secrets or unsafe patterns found\033[0m\n"; exit(0); }
+    echo "\033[1m🔒 " . count($findings) . " finding(s)\033[0m " . (count($high) ? "\033[31m(" . count($high) . " high)\033[0m" : '') . "\n";
+    foreach ($findings as $f) {
+        $sev = $f['severity'] === 'high' ? "\033[31mHIGH\033[0m" : "\033[33mmed \033[0m";
+        echo "  {$sev}  {$f['label']}  \033[2m{$f['file']}:{$f['line']}\033[0m  {$f['match']}\n";
+    }
+    echo "\033[2m  Remove the secret (use an env var / secret manager), or rotate it if it leaked.\033[0m\n";
+    exit($high ? 1 : 0);
 }
 
 // Semantic code index — build/search a local embeddings index over this repo.

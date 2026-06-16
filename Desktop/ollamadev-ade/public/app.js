@@ -1453,6 +1453,10 @@ var Tasks = {
         var send = $('#directorSend'), msg = $('#directorMsg');
         if (!send || !msg || send._wired) return;
         send._wired = true;
+        // Voice-steer the crew: the 🎤 dictates a command into the steer box (local STT,
+        // nothing leaves the machine). You review the transcript, then Enter/Send sends it
+        // through the same "<#>: instruction" parser. The mic shows only when STT is on.
+        if (typeof Voice !== 'undefined' && Voice.init) Voice.init('directorMic', 'directorMsg');
         var fire = function () {
             var v = (msg.value || '').trim(); if (!v) return;
             var m = v.match(/^(\d+|all|\*|everyone)\s*[:>\-]\s*(.+)$/i);
@@ -1523,19 +1527,28 @@ var Decisions = {
     render: function (d) {
         var list = $('#decisionsList'); if (!list) return;
         var pending = (d && Array.isArray(d.pending)) ? d.pending : [];
+        this._pending = pending;   // kept so the diff toggle can look up a decision's full diff
         this._hasPending = pending.length > 0;
         list.innerHTML = pending.map(function (p) {
             var crew = p.kind === 'crew_branch';
             var icon = crew ? '🌿' : (p.kind === 'permission' ? '🔐' : '•');
-            return '<div class="dec-card">' +
+            var hasDiff = crew && p.detail && String(p.detail).trim() !== '';
+            return '<div class="dec-card" data-id="' + esc(p.id) + '">' +
                 '<div class="dec-sum">' + icon + ' ' + esc(p.summary || p.id) + '</div>' +
                 '<div class="actions">' +
+                (hasDiff ? '<button class="dec-diffbtn" data-act="dec-diff" data-id="' + esc(p.id) + '">⌄ diff</button>' : '') +
                 '<button class="run accept" data-act="dec-accept" data-id="' + esc(p.id) + '">✓ Accept</button>' +
                 '<button class="del" data-act="dec-deny" data-id="' + esc(p.id) + '">✕ ' + (crew ? 'Discard' : 'Deny') + '</button>' +
-                '</div></div>';
+                '</div>' +
+                '<pre class="dec-diff" data-id="' + esc(p.id) + '" hidden></pre>' +
+                '</div>';
         }).join('');
         list.querySelectorAll('[data-act="dec-accept"],[data-act="dec-deny"]').forEach(function (btn) {
             btn.onclick = function () { Decisions.decide(btn.dataset.id, btn.dataset.act === 'dec-accept' ? 'accept' : 'deny'); };
+        });
+        // Inline diff review: read the held branch's changes right on the card before deciding.
+        list.querySelectorAll('[data-act="dec-diff"]').forEach(function (btn) {
+            btn.onclick = function () { Decisions.toggleDiff(btn.dataset.id, btn); };
         });
         this._sync();
     },
@@ -1562,6 +1575,32 @@ var Decisions = {
         if (!ok) return;
         App.spawnCmd('shell', 'shell', root, 'git merge --no-ff ' + branch);
         banner('resolve the conflicts in the terminal, then git add + commit', 'ok');
+    },
+    // Expand/collapse the held branch's diff inline on its card. The diff already rides
+    // on the decision (p.detail), so this is a pure local toggle — no extra round-trip.
+    toggleDiff: function (id, btn) {
+        var list = $('#decisionsList'); if (!list) return;
+        var box = null;
+        list.querySelectorAll('.dec-diff').forEach(function (el) { if (el.dataset.id === id) box = el; });
+        if (!box) return;
+        if (!box.hidden) { box.hidden = true; if (btn) btn.textContent = '⌄ diff'; return; }
+        if (!box._rendered) {
+            var p = (this._pending || []).filter(function (x) { return x.id === id; })[0];
+            box.innerHTML = Decisions._diffHtml(p ? String(p.detail || '') : '');
+            box._rendered = true;
+        }
+        box.hidden = false; if (btn) btn.textContent = '⌃ hide';
+    },
+    // Colorize a unified diff (vanilla — same +/-/@@ classes as the Diff modal).
+    _diffHtml: function (text) {
+        if (!text) return '<span class="dim">(no diff)</span>';
+        return text.split(/\r?\n/).map(function (ln) {
+            var c = ln.charAt(0);
+            var cls = (c === '+' && ln.indexOf('+++') !== 0) ? 'd-add'
+                : (c === '-' && ln.indexOf('---') !== 0) ? 'd-del'
+                : (c === '@' ? 'd-hunk' : '');
+            return '<span class="' + cls + '">' + (esc(ln) || ' ') + '</span>';
+        }).join('');   // spans are display:block (CSS), so no newline joins (avoids double-spacing)
     }
 };
 

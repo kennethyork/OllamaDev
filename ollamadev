@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '0.9.37');
+define('OLLAMADEV_VERSION', '0.9.38');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -2712,6 +2712,98 @@ class GitFlow {
         if ($findings) { $out .= "\nFindings:\n"; foreach ($findings as $f) $out .= "  - " . (string)$f . "\n"; }
         else $out .= "\nNo blocking findings.\n";
         return rtrim($out);
+    }
+}
+// SECSCAN — a dependency-free secret + unsafe-pattern scanner. Catches hardcoded
+// credentials (API keys, tokens, private keys, passwords) and a few high-confidence
+// dangerous sinks BEFORE they land — in a commit, or in a crew coder's branch. Pure
+// vanilla PHP (regex only, no services). The crew Auditor uses it as a hard gate so
+// secret-bearing branches never auto-merge; the CLI `scan` command runs it on demand.
+class SecScan {
+    // Each rule: id, human label, severity (high|med), and a precise regex. Kept tight
+    // to favor precision (few false positives) over recall — a noisy scanner gets ignored.
+    public static function rules(): array {
+        return [
+            ['aws-akid',     'AWS access key id',        'high', '/\bAKIA[0-9A-Z]{16}\b/'],
+            ['aws-secret',   'AWS secret access key',    'high', '/\baws_secret_access_key\b\s*[=:]\s*[\'"][A-Za-z0-9\/+]{40}[\'"]/i'],
+            ['gcp-key',      'Google API key',           'high', '/\bAIza[0-9A-Za-z\-_]{35}\b/'],
+            ['github-token', 'GitHub token',             'high', '/\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36}\b|\bgithub_pat_[A-Za-z0-9_]{82}\b/'],
+            ['slack-token',  'Slack token',              'high', '/\bxox[baprs]-[A-Za-z0-9-]{10,}\b/'],
+            ['stripe-key',   'Stripe secret key',        'high', '/\bsk_live_[A-Za-z0-9]{16,}\b/'],
+            ['openai-key',   'OpenAI API key',           'high', '/\bsk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}\b|\bsk-proj-[A-Za-z0-9_-]{20,}\b/'],
+            ['private-key',  'Private key block',        'high', '/-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----/'],
+            ['jwt',          'JSON Web Token',           'med',  '/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/'],
+            ['basic-auth',   'Credentials in a URL',     'high', '/\b[a-z][a-z0-9+.\-]*:\/\/[^\/\s:@]+:[^\/\s:@]+@/i'],
+            ['generic-secret','Hardcoded secret/password','med', '/\b(?:api[_-]?key|secret|token|passwd|password|access[_-]?key|private[_-]?key)\b\s*[=:]\s*[\'"][^\'"\s]{8,}[\'"]/i'],
+            ['php-eval',     'Dynamic eval of a variable','med', '/\beval\s*\(\s*\$/'],
+            ['shell-var',    'Shell exec of a variable', 'med',  '/\b(?:shell_exec|exec|system|passthru|popen|proc_open)\s*\(\s*[^\'")]*\$/'],
+        ];
+    }
+
+    // Lines that are clearly placeholders/examples — never a real leak. Avoids flagging
+    // docs, env templates, and obvious dummies, which would train users to ignore findings.
+    private static function isPlaceholder(string $line): bool {
+        return (bool)preg_match('/\b(example|placeholder|dummy|your[_-]?(key|token|secret)|xxx+|<[^>]+>|changeme|redacted|\*{4,}|\.\.\.\.)/i', $line);
+    }
+
+    // Redact a matched secret so the scanner never echoes the full credential.
+    private static function redact(string $s): string {
+        $s = trim($s);
+        if (strlen($s) <= 10) return str_repeat('•', strlen($s));
+        return substr($s, 0, 4) . str_repeat('•', 6) . substr($s, -4);
+    }
+
+    // Scan raw text. $file is for reporting only. Returns a list of findings
+    // ['file','line','id','label','severity','match'(redacted)].
+    public static function scanText(string $text, string $file = ''): array {
+        $rules = self::rules();
+        $out = [];
+        $lines = preg_split('/\r\n|\r|\n/', $text);
+        foreach ($lines as $i => $line) {
+            if ($line === '' || self::isPlaceholder($line)) continue;
+            foreach ($rules as $r) {
+                if (preg_match($r[3], $line, $m)) {
+                    $out[] = ['file' => $file, 'line' => $i + 1, 'id' => $r[0],
+                        'label' => $r[1], 'severity' => $r[2], 'match' => self::redact($m[0])];
+                }
+            }
+        }
+        return $out;
+    }
+
+    // Scan a unified diff: only ADDED lines (start with a single '+'), so we flag what a
+    // change INTRODUCES, not pre-existing code. Tracks the +++ file headers for reporting.
+    public static function scanDiff(string $diff): array {
+        $out = []; $file = ''; $ln = 0;
+        foreach (preg_split('/\r\n|\r|\n/', $diff) as $line) {
+            if (strncmp($line, '+++ ', 4) === 0) { $file = preg_replace('#^\+\+\+ (b/)?#', '', $line); continue; }
+            if (preg_match('/^@@ -\d+(?:,\d+)? \+(\d+)/', $line, $m)) { $ln = (int)$m[1] - 1; continue; }
+            if ($line !== '' && $line[0] === '+' && strncmp($line, '+++', 3) !== 0) {
+                $ln++;
+                foreach (self::scanText(substr($line, 1), $file) as $f) { $f['line'] = $ln; $out[] = $f; }
+            } elseif ($line === '' || $line[0] === ' ') { $ln++; }
+        }
+        return $out;
+    }
+
+    // Scan specific files on disk (skips binaries + very large files).
+    public static function scanFiles(array $paths): array {
+        $out = [];
+        foreach ($paths as $p) {
+            if (!is_file($p) || filesize($p) > 2_000_000) continue;
+            $data = (string)@file_get_contents($p);
+            if ($data === '' || strpos(substr($data, 0, 8000), "\0") !== false) continue; // skip binary
+            foreach (self::scanText($data, $p) as $f) $out[] = $f;
+        }
+        return $out;
+    }
+
+    // Convenience for the crew/commit gate: scan a repo's pending changes (staged+unstaged
+    // diff against HEAD), or a given ref-range diff. Returns findings.
+    public static function scanGit(string $root = '', string $range = ''): array {
+        $g = 'git' . ($root !== '' ? ' -C ' . escapeshellarg($root) : '') . ' ';
+        $diff = (string)@shell_exec($g . 'diff ' . ($range !== '' ? escapeshellarg($range) . ' ' : 'HEAD ') . '2>/dev/null');
+        return self::scanDiff($diff);
     }
 }
 // EVAL — a fixed task suite that measures whether the agent actually completes
@@ -7553,6 +7645,14 @@ class Crew {
         $merged = []; $held = [];
         foreach ($results as $res) {
             if ($res['empty']) { $setState($res['n'], 'held'); continue; }
+            // SECURITY GATE: a branch that introduces a secret (API key, token, private
+            // key, hardcoded credential) is NEVER auto-merged — even if the Auditor passed
+            // it. Hold it for a human, with a clear reason. Vanilla regex scan, no deps.
+            $secHigh = class_exists('SecScan') ? array_filter(SecScan::scanDiff((string)($res['diff'] ?? '')), fn($f) => $f['severity'] === 'high') : [];
+            if ($secHigh) {
+                $held[] = $res; $hold($res, '🔑 secret detected (' . count($secHigh) . ') — not auto-merged');
+                echo "  {$y}held{$r} #{$res['n']} {$res['branch']} {$d}(🔑 secret detected — review before merging){$r}\n"; continue;
+            }
             if ($land === 'review') { $held[] = $res; $hold($res, 'review mode'); echo "  {$y}held{$r} #{$res['n']} {$res['branch']} {$d}(review mode){$r}\n"; continue; }
             if (empty($res['audit']['clean'])) { $held[] = $res; $hold($res, 'audit flagged'); echo "  {$y}held{$r} #{$res['n']} {$res['branch']} {$d}(audit flagged){$r}\n"; continue; }
             self::sh('git merge --no-ff --no-edit ' . escapeshellarg($res['branch']) . ' 2>&1');
@@ -12507,6 +12607,18 @@ if ($argc >= 2 && $argv[1] === 'commit') {
     if ($all) GitFlow::sh('git add -A 2>&1');
     $diff = GitFlow::sh('git diff --cached 2>/dev/null');
     if ($diff === '') { echo "Nothing staged. Stage changes (`git add`) or pass -a/--all.\n"; exit(1); }
+    // Secret gate: don't let a hardcoded credential slip into a commit. --force overrides.
+    $secHigh = array_values(array_filter(SecScan::scanDiff($diff), fn($f) => $f['severity'] === 'high'));
+    if ($secHigh && !in_array('--force', $argv, true)) {
+        echo "\033[31m🔒 " . count($secHigh) . " secret(s) in the staged diff:\033[0m\n";
+        foreach ($secHigh as $f) echo "  \033[31mHIGH\033[0m {$f['label']}  \033[2m{$f['file']}:{$f['line']}\033[0m  {$f['match']}\n";
+        echo "\033[2m  Remove it (env var / secret manager), or pass --force to commit anyway.\033[0m\n";
+        if (posix_isatty(STDIN)) {
+            echo "Commit anyway? [y/N] ";
+            $a = strtolower(trim((string)fgets(STDIN)));
+            if (!($a !== '' && $a[0] === 'y')) { echo "Aborted (changes stay staged).\n"; exit(1); }
+        } else { exit(1); }
+    }
     if ($msg === '') {
         echo "Generating commit message…\n";
         $msg = GitFlow::message($diff);
@@ -12582,6 +12694,40 @@ if ($argc >= 2 && ($argv[1] === 'test' || $argv[1] === 'verify')) {
     for ($i = 2; $i < $argc; $i++) if ($argv[$i] === '--max') $max = max(1, (int)($argv[$i + 1] ?? 4));
     echo "\033[1mVerify\033[0m \033[2m[{$det['cmd']}] · up to {$max} fix attempt(s)\033[0m\n";
     exit(Verify::fixLoop($det, $max));
+}
+
+// Secret + unsafe-pattern scanner. Default: scan the working-tree diff vs HEAD (what you're
+// about to commit). `scan --staged` = staged diff; `scan <path>` = a file/dir on disk.
+// `--json` for tooling; exits 1 when any HIGH-severity finding is present (CI/commit gate).
+if ($argc >= 2 && $argv[1] === 'scan') {
+    $json = in_array('--json', $argv, true);
+    $args = array_values(array_filter(array_slice($argv, 2), fn($a) => $a !== '--json'));
+    $findings = [];
+    if (isset($args[0]) && $args[0] !== '--staged' && $args[0] !== '--diff') {
+        $p = $args[0];
+        if (is_dir($p)) {
+            $files = [];
+            $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($p, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::LEAVES_ONLY, RecursiveIteratorIterator::CATCH_GET_CHILD);
+            foreach ($it as $f) { $fp = $f->getPathname(); if (strpos($fp, '/.git/') === false) $files[] = $fp; }
+            $findings = SecScan::scanFiles($files);
+        } else {
+            $findings = SecScan::scanFiles([$p]);
+        }
+    } else {
+        $staged = in_array('--staged', $args, true);
+        $diff = (string)@shell_exec('git diff ' . ($staged ? '--cached ' : 'HEAD ') . '2>/dev/null');
+        $findings = SecScan::scanDiff($diff);
+    }
+    $high = array_filter($findings, fn($f) => $f['severity'] === 'high');
+    if ($json) { echo json_encode(['findings' => array_values($findings), 'high' => count($high), 'total' => count($findings)]) . "\n"; exit($high ? 1 : 0); }
+    if (!$findings) { echo "\033[32m✓ no secrets or unsafe patterns found\033[0m\n"; exit(0); }
+    echo "\033[1m🔒 " . count($findings) . " finding(s)\033[0m " . (count($high) ? "\033[31m(" . count($high) . " high)\033[0m" : '') . "\n";
+    foreach ($findings as $f) {
+        $sev = $f['severity'] === 'high' ? "\033[31mHIGH\033[0m" : "\033[33mmed \033[0m";
+        echo "  {$sev}  {$f['label']}  \033[2m{$f['file']}:{$f['line']}\033[0m  {$f['match']}\n";
+    }
+    echo "\033[2m  Remove the secret (use an env var / secret manager), or rotate it if it leaked.\033[0m\n";
+    exit($high ? 1 : 0);
 }
 
 // Semantic code index — build/search a local embeddings index over this repo.

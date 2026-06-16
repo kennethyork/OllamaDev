@@ -633,6 +633,14 @@ $appjsConf = (string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-a
 ok('desktop offers a resolve-in-terminal path on merge conflict',
     strpos($appjsConf, '_offerResolve') !== false &&
     strpos($appjsConf, "App.spawnCmd('shell', 'shell', root, 'git merge --no-ff '") !== false);
+// Inline diff review: a held branch's diff (carried on the decision as `detail`) expands
+// on its Decisions card so you can read the changes before Accept. Engine stores the diff;
+// the board index keeps the full record (incl. detail); the UI toggles it locally.
+ok('board offers inline diff review before deciding',
+    strpos($appjsConf, 'data-act="dec-diff"') !== false && strpos($appjsConf, 'toggleDiff:') !== false &&
+    strpos($appjsConf, '_diffHtml:') !== false &&
+    strpos((string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/app.css'), '.dec-diff') !== false &&
+    strpos((string)@file_get_contents(dirname(__DIR__) . '/src/91-board.php'), "'detail' => \$detail") !== false);
 
 // Separate-Director steering: `crew steer <#> "..."` / desktop box → run's steer.jsonl,
 // injected into the targeted coder between iterations (works sequential + forked).
@@ -658,6 +666,11 @@ ok('coder recognizes a "model <name>" directive + hot-swaps its model', strpos($
 ok('live model swap is discoverable (console + desktop box)',
     strpos($src, "Swap a coder's model live") !== false &&
     strpos((string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/index.html'), '2: model llama3.3:70b') !== false);
+// Voice-steer: the Director bar has a 🎤 that dictates a steer command into the box
+// (local STT, reuses Voice.init); you review, then Send routes it through the steer parser.
+ok('voice-steer wires a mic into the Director steer box',
+    strpos((string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/index.html'), 'id="directorMic"') !== false &&
+    strpos((string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/app.js'), "Voice.init('directorMic', 'directorMsg')") !== false);
 shell_exec('rm -rf ' . escapeshellarg($shome));
 // Resume an interrupted run on a DIFFERENT model: --coder-model wins over saved.
 ok('crew resume accepts model overrides (flags win over saved)',
@@ -2033,6 +2046,36 @@ if (isset($bin) && is_file($bin) && trim((string)@shell_exec('command -v make 2>
     $jt = (string)@shell_exec('cd ' . escapeshellarg($jd) . ' && php ' . escapeshellarg($bin) . ' test 2>&1');
     ok('a JS project is NOT auto-run via npm (node-free)', stripos($jt, 'No test command detected') !== false && stripos($jt, 'npm') === false, trim($jt));
     @shell_exec('rm -rf ' . escapeshellarg($td) . ' ' . escapeshellarg($jd));
+}
+
+// ---- Secret + unsafe-pattern scanner (SecScan) — secrets never auto-merge/commit. ----
+$secSrc = (string)@file_get_contents($repoRoot . '/src/58-secscan.php');
+ok('SecScan class + scanText/scanDiff/scanFiles exist', strpos($secSrc, 'class SecScan') !== false &&
+    strpos($secSrc, 'function scanText') !== false && strpos($secSrc, 'function scanDiff') !== false && strpos($secSrc, 'function scanFiles') !== false);
+ok('SecScan redacts matches (never echoes a full secret)', strpos($secSrc, 'function redact') !== false && strpos($secSrc, 'isPlaceholder') !== false);
+ok('crew Auditor gates secrets (never auto-merges a leak)', strpos($crewSrc, 'SecScan::scanDiff') !== false && strpos($crewSrc, 'secret detected') !== false);
+ok('commit command gates staged secrets', strpos($mainSrc, "\$argv[1] === 'commit'") !== false &&
+    strpos($mainSrc, 'SecScan::scanDiff($diff)') !== false && strpos($mainSrc, "in_array('--force'") !== false);
+ok('CLI exposes a scan command (+ --json)', strpos($mainSrc, "\$argv[1] === 'scan'") !== false && strpos($mainSrc, 'SecScan::scanFiles') !== false);
+// Functional: scan a planted secret (exit 1, high>0), a clean file (exit 0), placeholder skipped.
+if (isset($bin) && is_file($bin)) {
+    $sd = sys_get_temp_dir() . '/odv-sec-' . getmypid(); @mkdir($sd, 0755, true);
+    file_put_contents($sd . '/leak.txt', "AWS_KEY = \"AKIAIOSFODNN7EXAMPLE\"\nexample = \"your_token_here\"\n");
+    file_put_contents($sd . '/clean.txt', "greeting = \"hello world\"\ncount = 42\n");
+    [$o1] = run_bin(['scan', $sd . '/leak.txt', '--json']);
+    $j1 = json_decode(trim($o1), true);
+    ok('scan flags a real AWS key (high) and redacts it', is_array($j1) && ($j1['high'] ?? 0) >= 1 &&
+        isset($j1['findings'][0]['match']) && strpos($j1['findings'][0]['match'], 'AKIAIOSFODNN7EXAMPLE') === false, trim($o1));
+    [, , $code1] = run_bin(['scan', $sd . '/leak.txt']);
+    ok('scan exits non-zero on a high-severity finding (gate)', $code1 === 1);
+    [$o2, , $code2] = run_bin(['scan', $sd . '/clean.txt', '--json']);
+    $j2 = json_decode(trim($o2), true);
+    ok('scan passes a clean file (exit 0, no findings)', $code2 === 0 && is_array($j2) && ($j2['total'] ?? -1) === 0, trim($o2));
+    file_put_contents($sd . '/ph.txt', "token = \"your_token_here\"\nkey = \"example_value_xxxx\"\n");
+    [$o3] = run_bin(['scan', $sd . '/ph.txt', '--json']);
+    $j3 = json_decode(trim($o3), true);
+    ok('scan does not flag obvious placeholders', is_array($j3) && ($j3['total'] ?? -1) === 0, trim($o3));
+    @shell_exec('rm -rf ' . escapeshellarg($sd));
 }
 
 // ---- v4.7.0 — code search in the desktop/web UI + landing cards. ----

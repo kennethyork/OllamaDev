@@ -398,6 +398,14 @@ class Crew {
         $merged = []; $held = [];
         foreach ($results as $res) {
             if ($res['empty']) { $setState($res['n'], 'held'); continue; }
+            // SECURITY GATE: a branch that introduces a secret (API key, token, private
+            // key, hardcoded credential) is NEVER auto-merged — even if the Auditor passed
+            // it. Hold it for a human, with a clear reason. Vanilla regex scan, no deps.
+            $secHigh = class_exists('SecScan') ? array_filter(SecScan::scanDiff((string)($res['diff'] ?? '')), fn($f) => $f['severity'] === 'high') : [];
+            if ($secHigh) {
+                $held[] = $res; $hold($res, '🔑 secret detected (' . count($secHigh) . ') — not auto-merged');
+                echo "  {$y}held{$r} #{$res['n']} {$res['branch']} {$d}(🔑 secret detected — review before merging){$r}\n"; continue;
+            }
             if ($land === 'review') { $held[] = $res; $hold($res, 'review mode'); echo "  {$y}held{$r} #{$res['n']} {$res['branch']} {$d}(review mode){$r}\n"; continue; }
             if (empty($res['audit']['clean'])) { $held[] = $res; $hold($res, 'audit flagged'); echo "  {$y}held{$r} #{$res['n']} {$res['branch']} {$d}(audit flagged){$r}\n"; continue; }
             self::sh('git merge --no-ff --no-edit ' . escapeshellarg($res['branch']) . ' 2>&1');
