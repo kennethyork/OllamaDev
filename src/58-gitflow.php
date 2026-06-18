@@ -7,7 +7,15 @@ class GitFlow {
     public static function isRepo(): bool { return self::sh('git rev-parse --is-inside-work-tree 2>/dev/null') === 'true'; }
     public static function gh(): string { return self::sh('command -v gh 2>/dev/null'); }
 
-    private static function model(): string { return (new Agent())->getModel(); }
+    // Model for the AI git workflow (commit message / PR draft / PR review). A dedicated
+    // `git.model` config key lets you run these on a different model than chat/agent
+    // (e.g. chat on qwen3.5, commits on gpt-oss); falls back to the default model.
+    private static function model(): string {
+        $agent = new Agent();
+        $m = trim((string) Config::get('git.model', ''));
+        if ($m !== '') return $agent->resolveModel($m) ?: $m;
+        return $agent->getModel();
+    }
 
     // The full working-tree diff for review: tracked changes vs HEAD plus
     // untracked files rendered as all-addition diffs (so new work shows too).

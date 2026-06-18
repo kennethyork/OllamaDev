@@ -2063,6 +2063,10 @@ ok('CLI exposes test + verify', strpos($mainSrc, "\$argv[1] === 'test'") !== fal
 // 3) Git/PR workflow.
 ok('GitFlow generates commit messages + PR text + review', strpos($gf, 'class GitFlow') !== false &&
     strpos($gf, 'function message') !== false && strpos($gf, 'function prText') !== false && strpos($gf, 'function review') !== false);
+// The AI git workflow can run on its own model (`git.model`) — e.g. chat on one model,
+// commits on another — falling back to the default when unset.
+ok('git workflow honors a dedicated git.model (falls back to default)',
+    strpos($gf, "Config::get('git.model'") !== false && strpos($gf, '->getModel()') !== false);
 ok('CLI exposes commit + pr create/review', strpos($mainSrc, "\$argv[1] === 'commit'") !== false &&
     strpos($mainSrc, "\$argv[1] === 'pr'") !== false && strpos($mainSrc, "'create'") !== false && strpos($mainSrc, "'review'") !== false);
 // Functional: detection + run a NODE-FREE runner (make). Also guards that a JS project
