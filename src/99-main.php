@@ -2557,11 +2557,14 @@ if ($cmd === 'chat') {
         if (!empty($copts['hosts'])) $bits[] = count($copts['hosts']) . ' hosts';
         echo "\n{$b}👥 OllamaDev Crew{$r} {$d}— the Director is ready" . ($bits ? ' · ' . implode(' · ', $bits) : '') . "{$r}\n";
         // Offer to resume an interrupted run for this repo before taking a new task.
+        // --resume-yes auto-confirms (no keypress) — used when the desktop RESTORES a crew
+        // window on app restart, so your crew + Director come back on their own.
+        $autoResume = in_array('--resume-yes', $argv, true) || in_array('-y', $argv, true);
         $interrupted = Crew::findResumable();
         if ($interrupted) {
             echo "{$y}  ⚠ an unfinished crew run is here:{$r} {$d}\"" . substr((string)($interrupted['task'] ?? ''), 0, 60) . "\"{$r}\n";
-            echo "{$c}Resume it? [Y/n]{$r} ";
-            $ans = strtolower(trim((string)fgets(STDIN)));
+            if ($autoResume) { echo "{$d}  auto-resuming…{$r}\n"; $ans = 'y'; }
+            else { echo "{$c}Resume it? [Y/n]{$r} "; $ans = strtolower(trim((string)fgets(STDIN))); }
             if ($ans === '' || $ans === 'y' || $ans === 'yes') {
                 // Honor any model flags the user launched `crew` with on the resume.
                 $rov = array_intersect_key($copts, array_flip(['directorModel', 'coderModel', 'auditorModel', 'researcherModel']));

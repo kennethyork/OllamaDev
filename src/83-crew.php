@@ -1144,7 +1144,12 @@ class Crew {
     }
 
     // Merge a held coder branch into the repo's current branch — LOCAL ONLY.
-    // Requires a clean tree on a real branch; aborts cleanly on conflict.
+    // Accept a held branch by MATERIALIZING its files straight into the project folder —
+    // no merge commit, no clean-tree requirement, no merge conflicts. We diff the branch
+    // against the commit the crew branched from, then write each added/modified file's
+    // branch version into the working tree (and stage it) and apply any deletions. The
+    // result: the crew's files just appear in your folder as ready-to-review changes you
+    // can commit (or undo) however you like. Works any time, even mid-edit.
     public static function acceptHeldBranch(array $opts): array {
         $root = (string)($opts['repoRoot'] ?? '');
         $branch = (string)($opts['branch'] ?? '');
@@ -1153,20 +1158,39 @@ class Crew {
         $g = 'git -C ' . escapeshellarg($root) . ' ';
         if (self::sh($g . 'rev-parse --verify ' . escapeshellarg($branch) . ' 2>/dev/null') === '')
             return ['ok' => false, 'error' => 'branch no longer exists: ' . $branch];
-        if (self::sh($g . 'rev-parse --abbrev-ref HEAD 2>/dev/null') === 'HEAD')
-            return ['ok' => false, 'error' => 'detached HEAD — check out a branch first'];
-        if (self::sh($g . 'status --porcelain --untracked-files=no') !== '')
-            return ['ok' => false, 'error' => 'uncommitted changes — commit or stash before merging'];
-        $out = self::sh($g . 'merge --no-ff --no-edit ' . escapeshellarg($branch) . ' 2>&1');
-        if (self::sh($g . 'ls-files -u') !== '') {
-            self::sh($g . 'merge --abort 2>&1');
-            // Carry branch + repoRoot so the desktop can offer a one-click "resolve in a
-            // terminal" (re-run the merge in the project to fix conflicts, then commit).
-            return ['ok' => false, 'conflict' => true, 'branch' => $branch, 'repoRoot' => $root,
-                'error' => 'merge conflict — resolve ' . $branch . ' manually', 'out' => $out];
+
+        // Which files did the crew touch? Diff the branch against its base (the commit it
+        // branched from) so we only write the crew's own files and never clobber unrelated
+        // work. Fall back to the merge-base, then HEAD, if no base was recorded.
+        $base = (string)($opts['base'] ?? '');
+        if ($base === '') $base = self::sh($g . 'merge-base HEAD ' . escapeshellarg($branch) . ' 2>/dev/null');
+        if ($base === '') $base = 'HEAD';
+        // -z: NUL-delimited, so paths with spaces/unicode are exact. Tokens stream as
+        // status, path [, path2 for renames/copies].
+        $raw = self::sh($g . 'diff --name-status -z ' . escapeshellarg($base) . ' ' . escapeshellarg($branch));
+        $tok = explode("\0", $raw);
+        $co = function (string $p) use ($g, $branch) { self::sh($g . 'checkout ' . escapeshellarg($branch) . ' -- ' . escapeshellarg($p) . ' 2>&1'); };
+        $del = function (string $p) use ($g) { self::sh($g . 'rm -f -q --ignore-unmatch -- ' . escapeshellarg($p) . ' 2>&1'); };
+        $created = []; $deleted = [];
+        for ($i = 0, $n = count($tok); $i < $n; ) {
+            $s = $tok[$i] ?? '';
+            if ($s === '') { $i++; continue; }
+            $code = $s[0];
+            if ($code === 'R' || $code === 'C') {            // rename/copy: old, new
+                $old = $tok[$i + 1] ?? ''; $new = $tok[$i + 2] ?? ''; $i += 3;
+                if ($code === 'R' && $old !== '') { $del($old); $deleted[] = $old; }
+                if ($new !== '') { $co($new); $created[] = $new; }
+            } else {
+                $path = $tok[$i + 1] ?? ''; $i += 2;
+                if ($path === '') continue;
+                if ($code === 'D') { $del($path); $deleted[] = $path; }
+                else { $co($path); $created[] = $path; }   // A / M / T
+            }
         }
+        if (!$created && !$deleted) return ['ok' => false, 'error' => 'this branch has no file changes to bring in', 'repoRoot' => $root, 'branch' => $branch];
         if (isset($opts['n'])) self::setBoardState((int)$opts['n'], 'done');
-        return ['ok' => true, 'merged' => $branch, 'out' => $out];
+        return ['ok' => true, 'merged' => $branch, 'created' => $created, 'deleted' => $deleted,
+            'out' => count($created) . ' file(s) written to your folder' . ($deleted ? ', ' . count($deleted) . ' removed' : '')];
     }
     // Discard (delete) a held coder branch. Recoverable via reflog until gc.
     public static function discardHeldBranch(array $opts): array {

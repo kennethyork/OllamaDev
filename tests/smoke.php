@@ -599,18 +599,19 @@ if (trim((string) shell_exec('git --version 2>/dev/null')) !== '') {
     file_put_contents($ihome . '/.ollamadev/board/decisions.jsonl', json_encode($dec) . "\n");
     file_put_contents($ihome . '/.ollamadev/board/locks/crew_smoke1.lock', 'crew_smoke1');
     [$out, , $code] = run_bin(['board', 'accept', 'crew_smoke1'], '', ['HOME' => $ihome], $irepo);
-    ok('board accept merges the held branch into the base', $code === 0 && is_file($irepo . '/b.txt'), trim($out));
+    ok('board accept materializes the held branch files into the folder', $code === 0 && is_file($irepo . '/b.txt'), trim($out));
     [$out] = run_bin(['board', 'list', '--json'], '', ['HOME' => $ihome], $irepo);
     $bl2 = json_decode(trim($out), true);
     ok('the accepted decision leaves the pending queue', is_array($bl2) && count($bl2['pending'] ?? []) === 0, trim($out));
     shell_exec('rm -rf ' . escapeshellarg($ihome) . ' ' . escapeshellarg($irepo));
 
-    // Conflict path: an accept that can't merge cleanly aborts + reports branch/repoRoot
-    // (so the desktop can offer a one-click resolve), leaving the working tree clean.
+    // Divergent path: accept MATERIALIZES the crew's version of a file straight into the
+    // folder even when it diverges from the working branch — no merge, no conflict, the
+    // crew's file just lands (as a ready-to-review working-tree change).
     $crepo = sys_get_temp_dir() . '/board_conf_' . getmypid();
     @mkdir($crepo, 0777, true);
     shell_exec('cd ' . escapeshellarg($crepo) . ' && git init -q && git config user.email t@t.t && git config user.name T && git symbolic-ref HEAD refs/heads/main && printf base > c.txt && git add -A && git commit -qm init && git checkout -q -b crew/conf && printf branchver > c.txt && git add -A && git commit -qm "crew: c" && git checkout -q main && printf mainver > c.txt && git add -A && git commit -qm "main: c"');
-    $cdec = ['id' => 'crew_conf1', 'kind' => 'crew_branch', 'summary' => 'coder #1: c — conflict', 'detail' => 'd',
+    $cdec = ['id' => 'crew_conf1', 'kind' => 'crew_branch', 'summary' => 'coder #1: c — diverged', 'detail' => 'd',
         'opts' => ['runId' => 'crew_c', 'n' => 1, 'branch' => 'crew/conf', 'repoRoot' => $crepo, 'base' => 'main'],
         'status' => 'pending', 'verdict' => null, 'note' => null, 'created_at' => '2026-01-01T00:00:00+00:00', 'decided_at' => null];
     $chome = sys_get_temp_dir() . '/board_confh_' . getmypid();
@@ -619,11 +620,11 @@ if (trim((string) shell_exec('git --version 2>/dev/null')) !== '') {
     file_put_contents($chome . '/.ollamadev/board/locks/crew_conf1.lock', 'crew_conf1');
     [$out, , $code] = run_bin(['board', 'accept', 'crew_conf1', '--json'], '', ['HOME' => $chome], $crepo);
     $cr = json_decode(trim($out), true);
-    ok('a conflicting accept aborts + reports conflict/branch/repoRoot', is_array($cr) && empty($cr['ok']) &&
-        !empty($cr['conflict']) && ($cr['branch'] ?? '') === 'crew/conf' && ($cr['repoRoot'] ?? '') === $crepo, trim($out));
-    ok('conflict leaves the working tree clean (merge aborted)',
-        trim((string)shell_exec('cd ' . escapeshellarg($crepo) . ' && git status --porcelain')) === '' &&
-        trim((string)@file_get_contents($crepo . '/c.txt')) === 'mainver');
+    ok('accept writes the branch file into the folder even when it diverges', $code === 0 &&
+        is_array($cr) && !empty($cr['ok']) && trim((string)@file_get_contents($crepo . '/c.txt')) === 'branchver', trim($out));
+    ok('materialized files are staged in the working tree (not committed)',
+        in_array('c.txt', (array)($cr['created'] ?? []), true) &&
+        trim((string)shell_exec('cd ' . escapeshellarg($crepo) . ' && git status --porcelain')) !== '');
     shell_exec('rm -rf ' . escapeshellarg($chome) . ' ' . escapeshellarg($crepo));
 }
 shell_exec('rm -rf ' . escapeshellarg($bhome));
@@ -633,6 +634,16 @@ $appjsConf = (string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-a
 ok('desktop offers a resolve-in-terminal path on merge conflict',
     strpos($appjsConf, '_offerResolve') !== false &&
     strpos($appjsConf, "App.spawnCmd('shell', 'shell', root, 'git merge --no-ff '") !== false);
+// A RESTORED board pane must self-populate (crew kanban + held-branch decisions), not come
+// back as an empty shell — so reopening the app resumes the board. mountPoppedPane's board
+// branch starts the crew poll and refreshes decisions; the poll fires immediately (no wait).
+ok('a restored board pane self-populates (crew poll + decisions)',
+    preg_match('/if \(view === .board.\) \{[^}]*startCrewPoll\(\)[^}]*Decisions\.refresh\(\)/', $appjsConf) === 1 &&
+    strpos($appjsConf, 'tick();') !== false);
+// A view-only window (just the board, no terminals/editor) still autosaves, else the board
+// wouldn't be in the saved state to restore.
+ok('autosave persists view-only windows (popped panes)',
+    strpos($appjsConf, 'Object.keys(self.popped || {}).length') !== false);
 // Inline diff review: a held branch's diff (carried on the decision as `detail`) expands
 // on its Decisions card so you can read the changes before Accept. Engine stores the diff;
 // the board index keeps the full record (incl. detail); the UI toggles it locally.
@@ -1795,6 +1806,29 @@ ok('terminal scrollback persists as a read-only replay on restart',
     strpos($appjs, 'if (replay) t.replaySnap = replay') !== false &&
     strpos((string)@file_get_contents($repoRoot . '/Desktop/ollamadev-ade/public/app.css'), '.term-replay') !== false);
 ok('terminals detach (pty kept alive) for re-attach on switch', strpos($appjs, 'Terminal.prototype.detach') !== false && strpos($appjs, 'attachTerminal:') !== false);
+// Confirm-on-close: the desktop X is intercepted natively (WindowClosing cancelled), routed
+// to an in-app confirm box, and the session is SAVED before the real close — so quitting
+// restores everything, not just the last 4s autosave. Desktop-only (no web bridge entry).
+$idxClose = (string)@file_get_contents($repoRoot . '/Desktop/ollamadev-ade/index.php');
+$quitHtml = (string)@file_get_contents($repoRoot . '/Desktop/ollamadev-ade/public/index.html');
+ok('desktop X shows a confirm box + saves before quitting',
+    strpos($idxClose, 'WindowClosing::class') !== false && strpos($idxClose, '$e->cancel()') !== false &&
+    strpos($idxClose, "\$b->bind('confirmQuit'") !== false && strpos($idxClose, 'App.requestQuit()') !== false &&
+    strpos($appjs, 'requestQuit: function') !== false && strpos($appjs, '_doQuit: function') !== false &&
+    strpos($appjs, 'Workspaces.saveCurrentState()).then(close)') !== false &&
+    strpos($quitHtml, 'id="quitOverlay"') !== false && strpos($quitHtml, 'id="quitConfirm"') !== false);
+// Every canvas window's X (terminals AND popped panes) confirms before closing — nothing
+// closes on a stray click. Both close handlers route through App.confirmAction + a modal.
+ok('canvas window X buttons confirm before closing',
+    strpos($appjs, 'confirmAction: function') !== false &&
+    strpos($appjs, "app.confirmAction('Close ' + nm") !== false &&            // terminal X
+    strpos($appjs, "self.confirmAction('Close the ' + self.POP_TITLE[view]") !== false &&   // popped pane X
+    strpos($quitHtml, 'id="confirmOverlay"') !== false && strpos($quitHtml, 'id="confirmYes"') !== false);
+// A restored crew window auto-resumes (no "Resume it? [Y/n]" keypress) via --resume-yes; the
+// engine resume is idempotent so it's safe, and the Director console never prompted anyway.
+ok('restored crew auto-resumes without a keypress',
+    strpos($appjs, "cli + ' crew --resume-yes'") !== false &&
+    strpos($src, '--resume-yes') !== false && strpos($src, '$autoResume') !== false);
 $idxhtml = (string)@file_get_contents($repoRoot . '/Desktop/ollamadev-ade/public/index.html');
 ok('project tab list present in the UI', strpos($idxhtml, 'id="wsBar"') !== false && strpos($idxhtml, 'id="wsStrip"') !== false);
 ok('project tabs render in the strip', strpos($appjs, "\$('#wsStrip')") !== false && strpos($appjs, 'ws-tab-item') !== false);

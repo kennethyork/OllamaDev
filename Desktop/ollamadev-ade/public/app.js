@@ -739,7 +739,10 @@ Terminal.prototype.mount = function (host) {
     zb.textContent = focused ? '⤡' : '⤢';
     zb.title = focused ? 'Restore (back to the other terminals)' : 'Focus (make this terminal bigger)';
     zb.onclick = function (e) { e.stopPropagation(); app.toggleZoom(self.id); };
-    host.querySelector('.x').onclick = function () { app.closeTerminal(self.id); };
+    host.querySelector('.x').onclick = function () {
+        var nm = isChat ? 'this chat' : (self.model ? '“' + self.model + '”' : 'this terminal');
+        app.confirmAction('Close ' + nm + '? Its session ends.', 'Close', function () { app.closeTerminal(self.id); });
+    };
     // Folder chip: click to edit this terminal's working folder inline. Enter respawns
     // it in the new directory; Esc/blur cancels. Each terminal can run in its own folder.
     var cd = host.querySelector('.term-cd');
@@ -1556,7 +1559,7 @@ var Decisions = {
         if (!id || !window.boardDecide) return;
         banner(verdict === 'accept' ? 'merging…' : 'discarding…');
         Promise.resolve(window.boardDecide(id, verdict)).then(function (res) {
-            if (res && res.ok) banner(verdict === 'accept' ? ('✓ merged ' + (res.merged || '')) : ('✓ discarded ' + (res.discarded || '')), 'ok');
+            if (res && res.ok) banner(verdict === 'accept' ? ('✓ ' + (res.out || 'files added to your folder')) : ('✓ discarded ' + (res.discarded || '')), 'ok');
             else if (res && res.conflict) Decisions._offerResolve(res);
             else banner('⚠ ' + ((res && res.error) || 'failed'), 'err');
             Decisions.refresh();
@@ -3283,7 +3286,7 @@ var App = {
         var self = this;
         if (this.crewPoll) return;
         var idle = 0;
-        this.crewPoll = setInterval(function () {
+        var tick = function () {
             Promise.resolve(window.crewBoard ? window.crewBoard() : null).then(function (b) {
                 // A "clear the board" (agent tool / `crew clear` / CLI) writes a cleared
                 // sentinel. Apply it once via a localStorage watermark — survives poll &
@@ -3309,8 +3312,11 @@ var App = {
                 if (b && b.active === false && !self.popped.board && !self.popped.topology) { if (++idle > 6) { clearInterval(self.crewPoll); self.crewPoll = null; } }
                 else idle = 0;
             }).catch(function () {});
-        }, 1500);
+        };
+        tick();                                  // immediate fill (e.g. a RESTORED board) — don't wait a full interval
+        this.crewPoll = setInterval(tick, 1500);
     },
+
     // The rail + Projects sidebar are an overlay drawer (☰) at every size, so the canvas
     // is full-bleed by default. Opening a window, picking a file/project, clicking the
     // canvas, or Esc closes it again. Works the same on desktop and mobile (web).
@@ -3522,8 +3528,10 @@ var App = {
         var flush = function () {
             // Skip the transient empty window mid-switch (terminals detached + editor
             // closed before the new ones spawn) so we never persist an empty state over a
-            // project. Editor-only sessions (dirty tabs, no terminals) still get saved.
-            if (!Workspaces.data.active || (!self.terminals.length && !Editor.tabs.length)) return;
+            // project. Editor-only sessions (dirty tabs, no terminals) still get saved, and
+            // so do view-only windows (e.g. just the crew board open) — otherwise a board
+            // with no terminal wouldn't be in the saved state and couldn't come back.
+            if (!Workspaces.data.active || (!self.terminals.length && !Editor.tabs.length && !Object.keys(self.popped || {}).length)) return;
             var snap; try { snap = JSON.stringify(self.captureState()); } catch (e) { return; }
             if (snap === self._lastSnap) return;          // unchanged → skip the write
             self._lastSnap = snap;
@@ -3533,6 +3541,49 @@ var App = {
         window.addEventListener('beforeunload', flush);
         window.addEventListener('pagehide', flush);
         document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') flush(); });
+        this._flushState = flush;   // reused by requestQuit so closing saves the latest state
+        // Wire the quit-confirm modal buttons (desktop X routes here via App.requestQuit).
+        var qc = $('#quitConfirm'), qx = $('#quitCancel'), qo = $('#quitOverlay');
+        if (qc) qc.onclick = function () { self._doQuit(); };
+        if (qx) qx.onclick = function () { if (qo) qo.hidden = true; self._quitting = false; };
+        if (qo) qo.onclick = function (e) { if (e.target === qo) { qo.hidden = true; self._quitting = false; } };
+    },
+    // Generic in-app confirm for closing a canvas window (terminal/pane). Every canvas X
+    // routes through here so nothing closes without asking. onYes runs only on confirm; if
+    // the modal markup is missing we fall back to a native confirm so a close never hangs.
+    confirmAction: function (message, yesLabel, onYes) {
+        var ov = $('#confirmOverlay');
+        if (!ov) { if (window.confirm(message || 'Close this window?')) onYes(); return; }
+        var msg = $('#confirmMsg'), yes = $('#confirmYes'), no = $('#confirmNo');
+        if (msg) msg.textContent = message || 'This window will close.';
+        if (yes) yes.textContent = yesLabel || 'Close';
+        var done = function () { ov.hidden = true; if (yes) yes.onclick = null; if (no) no.onclick = null; ov.onclick = null; };
+        if (yes) yes.onclick = function () { done(); try { onYes(); } catch (e) {} };
+        if (no) no.onclick = function () { done(); };
+        ov.onclick = function (e) { if (e.target === ov) done(); };
+        document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape') { done(); document.removeEventListener('keydown', esc); } });
+        ov.hidden = false;
+    },
+    // The desktop window X is intercepted natively (index.php cancels the close) and calls
+    // this so the user gets a confirm box instead of an instant exit. We DON'T close here —
+    // _doQuit saves first, then asks the native side to close for real.
+    requestQuit: function () {
+        if (this._quitting) return;
+        this._quitting = true;
+        var qo = $('#quitOverlay');
+        if (qo) { qo.hidden = false; return; }
+        this._doQuit();   // no modal in the DOM (shouldn't happen) → just save + quit
+    },
+    // Save the full session synchronously-ish, THEN tell the native side to close. Awaiting
+    // the save matters: the native close races process teardown, so we persist FIRST — that's
+    // why "everything comes back" now works on a real quit, not just the 4s autosave.
+    _doQuit: function () {
+        var qo = $('#quitOverlay'); if (qo) qo.hidden = true;
+        banner('saving your session…');
+        var close = function () { if (window.confirmQuit) window.confirmQuit(); };
+        try { if (this._flushState) this._flushState(); } catch (e) {}
+        try { Promise.resolve(Workspaces.saveCurrentState()).then(close).catch(close); }
+        catch (e) { close(); }
     },
     // Drop every terminal's UI but leave its pty running (workspace switch).
     detachTerminals: function () {
@@ -3604,7 +3655,10 @@ var App = {
         terms.forEach(function (ti) {
             if (self.live[ti.id]) return;
             if (ti.kind === 'director') self.spawnCmd('Director', 'director', ti.cwd, cli + ' crew director', ti.replay);
-            else if (ti.kind === 'crew') self.spawnCmd(ti.model, 'crew', ti.cwd, cli + ' crew', ti.replay);
+            // --resume-yes: a RESTORED crew window auto-resumes its interrupted run (no "Resume it? [Y/n]"
+            // keypress). If nothing's resumable it just lands at the Director prompt. The Director console
+            // (above) has no such prompt, so it already comes back on its own.
+            else if (ti.kind === 'crew') self.spawnCmd(ti.model, 'crew', ti.cwd, cli + ' crew --resume-yes', ti.replay);
             else if (ti.kind === 'chat') self.spawnChatWindow(ti.model, ti.session, ti.replay);   // resumes the saved chat session
             else self.spawnTerminal(ti.model, ti.cwd, ti.replay);
         });
@@ -3963,7 +4017,10 @@ var App = {
             '<div class="pop-pane-body"></div>';
         var el = $(this.POP_SEL[view]);
         if (el) { el.hidden = false; host.querySelector('.pop-pane-body').appendChild(el); }
-        host.querySelector('.x').onclick = function (e) { e.stopPropagation(); self.closePaneView(view); };
+        host.querySelector('.x').onclick = function (e) {
+            e.stopPropagation();
+            self.confirmAction('Close the ' + self.POP_TITLE[view] + ' window?', 'Close', function () { self.closePaneView(view); });
+        };
         host.querySelector('.zoom').onclick = function (e) { e.stopPropagation(); self.toggleZoom(b.id); };
         host.querySelector('.term-head').ondblclick = function (e) {
             if (e.target.closest('.x, .zoom')) return;
@@ -3972,7 +4029,10 @@ var App = {
         // Refresh live content once the pane has its real size (next frame), so the
         // graph canvas etc. measure correctly instead of off a 0-width host.
         setTimeout(function () {
-            if (view === 'board') Tasks.renderInto($('#board'));
+            // Board pane: mirror popView('board') so a RESTORED board self-populates —
+            // start the crew poll (fills the kanban) and refresh the held-branch
+            // decisions. Without these a reopened board came back as an empty shell.
+            if (view === 'board') { self.startCrewPoll(); Tasks.renderInto($('#board')); if (window.Decisions && Decisions.refresh) Decisions.refresh(); }
             else if (view === 'graph') { if (Graph.resize) Graph.resize(); Graph.load(); }
             else if (view === 'browser' && window.Browser && Browser.onShow) Browser.onShow();
             else if (view === 'search' && window.CodeSearch && CodeSearch.onShow) CodeSearch.onShow();

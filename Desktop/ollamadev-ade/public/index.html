@@ -230,6 +230,28 @@
         </section>
     </main>
 
+    <div id="confirmOverlay" class="modal-overlay" hidden>
+        <div class="modal">
+            <div class="modal-title">Close this window?</div>
+            <div id="confirmMsg" class="modal-sub dim">This window will close.</div>
+            <div class="modal-actions">
+                <button id="confirmNo">Cancel</button>
+                <button id="confirmYes" class="primary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="quitOverlay" class="modal-overlay" hidden>
+        <div class="modal">
+            <div class="modal-title">Quit OllamaDev?</div>
+            <div class="modal-sub dim">Your session — terminals, open files, the board, and layout — is saved and comes back next time you open this project.</div>
+            <div class="modal-actions">
+                <button id="quitCancel">Stay</button>
+                <button id="quitConfirm" class="primary">Save &amp; quit</button>
+            </div>
+        </div>
+    </div>
+
     <div id="folderOverlay" class="modal-overlay" hidden>
         <div class="modal">
             <div class="modal-title">📂 Open project folder</div>

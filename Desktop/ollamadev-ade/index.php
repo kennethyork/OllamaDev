@@ -23,6 +23,7 @@ use Boson\WebView\Api\Data\DataExtension;
 use Boson\WebView\Api\Security\SecurityExtension;
 use Boson\WebView\Api\Schemes\SchemesExtension;
 use Boson\WebView\Api\LifecycleEvents\LifecycleEventsExtension;
+use Boson\Window\Event\WindowClosing;
 use OllamaDev\Config;
 use OllamaDev\PtyManager;
 use OllamaDev\FileBrowser;
@@ -141,6 +142,23 @@ $app->on(\Boson\Event\ApplicationStarted::class, function () use ($app, $html, $
     $b->bind('chatList',         fn(): array => $bx->chatList());
     $b->bind('chatDelete',       fn(string $id): array => $bx->chatDelete($id));
     $b->bind('chatExport',       fn(string $id): array => $bx->chatExport($id));
+
+    // Confirm-on-close: the window X must not exit instantly. We intercept the close,
+    // cancel it, and ask the page to show its confirm box + SAVE the session. When the
+    // user confirms, JS calls confirmQuit() which flips the gate and closes for real
+    // (the gated second close passes straight through — no loop). Desktop-only, so it's
+    // NOT in Bindings::PUBLIC / the web bridge (a browser tab has no native window X).
+    $quit = (object) ['ok' => false];
+    $b->bind('confirmQuit', function () use ($app, $quit): bool {
+        $quit->ok = true;
+        $app->window->close();
+        return true;
+    });
+    $app->window->on(WindowClosing::class, function (WindowClosing $e) use ($app, $quit): void {
+        if ($quit->ok) return;                          // confirmed → let the real close through
+        $e->cancel();                                   // block the instant exit…
+        $app->window->webview->eval('window.App && App.requestQuit && App.requestQuit();');  // …ask in-app
+    });
 });
 
 $app->run();
