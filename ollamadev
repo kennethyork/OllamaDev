@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '0.9.41');
+define('OLLAMADEV_VERSION', '0.9.42');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -12671,9 +12671,11 @@ if ($argc >= 2 && $argv[1] === 'commit') {
 // Ship — the whole loop in one command: stage everything → scan for secrets → draft an AI
 // commit message (git.model) → commit → ASK before pushing. 100% local + Ollama; the only
 // network step is the final git push (to a remote you already configured), and it asks first.
+// --yes/-y auto-confirms (commit + push) for automation/CI; --force bypasses the secret gate.
 if ($argc >= 2 && $argv[1] === 'ship') {
     if (!GitFlow::isRepo()) { echo "Not a git repository.\n"; exit(1); }
     $force = in_array('--force', $argv, true);
+    $yes = in_array('--yes', $argv, true) || in_array('-y', $argv, true);   // automation: skip all prompts
     $tty = function_exists('posix_isatty') && @posix_isatty(STDIN);
     $msg = '';
     for ($i = 2; $i < $argc; $i++) if ($argv[$i] === '-m' || $argv[$i] === '--message') $msg = $argv[$i + 1] ?? '';
@@ -12689,7 +12691,8 @@ if ($argc >= 2 && $argv[1] === 'ship') {
         echo "\033[31m🔒 " . count($secHigh) . " secret(s) in the staged diff:\033[0m\n";
         foreach ($secHigh as $f) echo "  \033[31mHIGH\033[0m {$f['label']}  \033[2m{$f['file']}:{$f['line']}\033[0m  {$f['match']}\n";
         echo "\033[2m  Remove it (env var / secret manager), or pass --force to ship anyway.\033[0m\n";
-        if ($tty) {
+        // --yes does NOT bypass the secret gate — only --force does (security isn't a prompt).
+        if ($tty && !$yes) {
             echo "Ship anyway? [y/N] ";
             if (!preg_match('/^y/', strtolower(trim((string)fgets(STDIN))))) { echo "Aborted (changes stay staged).\n"; exit(1); }
         } else { exit(1); }
@@ -12702,7 +12705,7 @@ if ($argc >= 2 && $argv[1] === 'ship') {
         if ($msg === '') { echo "Couldn't generate a message. Pass one with -m \"...\".\n"; exit(1); }
     }
     echo "\n\033[1m" . $msg . "\033[0m\n\n";
-    if ($tty) {
+    if ($tty && !$yes) {
         echo "Commit with this message? [Y/n] ";
         $a = strtolower(trim((string)fgets(STDIN)));
         if (!($a === '' || $a[0] === 'y')) { echo "Aborted (changes stay staged).\n"; exit(1); }
@@ -12718,10 +12721,16 @@ if ($argc >= 2 && $argv[1] === 'ship') {
     $hasUpstream = GitFlow::sh('git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null') !== '';
     $remote = in_array('origin', $remotes, true) ? 'origin' : $remotes[0];
     $target = $hasUpstream ? GitFlow::sh('git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null') : ($remote . '/' . $branch . " \033[2m(new upstream)\033[0m");
-    if (!$tty) { echo "Committed. Re-run in a terminal to push — ship asks before it pushes.\n"; exit(0); }
-    echo "Push \033[1m{$branch}\033[0m → {$target}? [Y/n] ";
-    $a = strtolower(trim((string)fgets(STDIN)));
-    if (!($a === '' || $a[0] === 'y')) { echo "✓ Committed. Not pushed.\n"; exit(0); }
+    // --yes pushes without asking (automation). Otherwise ask in a terminal; a non-interactive
+    // run with no --yes commits but stops (so "ask before pushing" is never silently bypassed).
+    if ($yes) {
+        echo "Pushing \033[1m{$branch}\033[0m → {$target}…\n";
+    } else {
+        if (!$tty) { echo "Committed. Re-run in a terminal to push, or pass --yes for automation.\n"; exit(0); }
+        echo "Push \033[1m{$branch}\033[0m → {$target}? [Y/n] ";
+        $a = strtolower(trim((string)fgets(STDIN)));
+        if (!($a === '' || $a[0] === 'y')) { echo "✓ Committed. Not pushed.\n"; exit(0); }
+    }
     $push = $hasUpstream ? 'git push 2>&1' : 'git push -u ' . escapeshellarg($remote) . ' ' . escapeshellarg($branch) . ' 2>&1';
     echo GitFlow::sh($push) . "\n";
     // On a feature branch with gh available → hint the PR command (kept separate, not auto-run).
@@ -13639,7 +13648,7 @@ Commands:
   ollamadev models      List models; also: presets (recommended), cloud (☁ Ollama cloud), pull <alias>, chain (fallback)
   ollamadev diff        Show the working-tree diff for review (--json); powers the desktop Review panel
   ollamadev commit      Commit with an AI-generated message (-a stages all, -m to override)
-  ollamadev ship        Stage all → scan secrets → AI commit → ask before pushing (one command)
+  ollamadev ship        Stage all → scan secrets → AI commit → ask before pushing (one command; --yes for automation)
   ollamadev pr create|review <n>   Open a PR, or review one with the local model (needs gh)
   ollamadev config get|set <key> [value]   Inspect/persist ~/.ollamadev/config.json
   ollamadev skills      Manage skills (list/search/browse/add/install/export)
@@ -13677,6 +13686,7 @@ Git Commands:
 AI git workflow (local Ollama — uses git.model, e.g. gpt-oss):
   ollamadev commit           Commit with an AI-generated message (-a stages all, -m to override)
   ollamadev ship             One command: stage all → scan secrets → AI commit → ASK before pushing
+  ollamadev ship --yes       Same, non-interactive (auto-commit + push) for scripts/CI (--force bypasses secret gate)
   ollamadev pr create        Open a PR (AI title/body; needs gh)
   ollamadev pr review <n>    Review a PR with the local model (needs gh)
 

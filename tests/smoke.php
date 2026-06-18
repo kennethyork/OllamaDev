@@ -2076,6 +2076,12 @@ ok('CLI ship: stage + secret-gate + AI commit + ask-before-push',
     strpos($mainSrc, 'GitFlow::message($diff)') !== false &&
     strpos($mainSrc, 'Push ') !== false && strpos($mainSrc, '? [Y/n] ') !== false &&
     strpos($mainSrc, 'ollamadev ship') !== false);   // listed in help
+// ship --yes/-y: non-interactive automation (auto-commit + push), but the secret gate is
+// guarded by --force only — --yes must NOT slip a credential past it.
+ok('ship --yes automates commit+push without bypassing the secret gate',
+    strpos($mainSrc, "in_array('--yes', \$argv, true) || in_array('-y', \$argv, true)") !== false &&
+    strpos($mainSrc, 'if ($tty && !$yes) {') !== false &&   // secret-gate confirm gated on !yes
+    strpos($mainSrc, 'if ($yes) {') !== false);              // --yes pushes without asking
 // Functional: detection + run a NODE-FREE runner (make). Also guards that a JS project
 // (package.json) is NOT auto-run via npm anymore — OllamaDev is node-free.
 if (isset($bin) && is_file($bin) && trim((string)@shell_exec('command -v make 2>/dev/null')) !== '') {
