@@ -10,9 +10,15 @@ class Agent {
         $this->client = ModelClient::default();
         $models = $this->client->listModels();
         $default = Config::get('ollama.defaultModel', '');
+        // "Use cloud as default if one is installed" (ollama.preferCloud): when on, an
+        // installed :cloud model wins over the configured/local default — so the default
+        // tracks whatever cloud model you have, and falls back to local when none is.
+        $cloud = (Config::get('ollama.preferCloud', false) !== false && !empty($models)) ? Models::firstCloud($models) : '';
         // Prefer the configured/-m model if it's actually installed; otherwise
         // fall back to the first installed model so we never target a missing one.
-        if ($default && in_array($default, $models, true)) {
+        if ($cloud !== '') {
+            $this->model = $cloud;
+        } elseif ($default && in_array($default, $models, true)) {
             $this->model = $default;
         } elseif (!empty($models) && ($best = Models::bestInstalled($models)) !== '') {
             // No usable configured default — prefer a known tool-capable model

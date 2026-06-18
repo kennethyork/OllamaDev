@@ -15,8 +15,9 @@ class Crew {
     public static function run(string $task, array $opts = []): int {
         $task = trim($task);
         if ($task === '') { echo "Usage: ollamadev crew \"<high-level task>\"\n"; return 1; }
-        if (!self::isGitRepo()) { echo "\033[31mcrew needs a git repository.\033[0m  Run `git init` first.\n"; return 1; }
-        if (!self::gitWorktreeSupported()) { echo "\033[31mcrew needs `git worktree` (git 2.5+).\033[0m\n"; return 1; }
+        // Git-free: the crew works in any folder. Each coder edits a COPY of this folder;
+        // accept copies the changed files back in. No repo, worktrees, or branches needed.
+        $projectRoot = getcwd() ?: '.';
 
         $agent = new Agent();
         if (!$agent->checkConnection()) { echo "\033[31mCannot reach Ollama.\033[0m Start it with: ollama serve\n"; return 1; }
@@ -59,41 +60,14 @@ class Crew {
         // coder's worktree so they pick up domain conventions on demand.
         $teamSkills = ($opts['skills'] ?? true) !== false ? CrewSkills::resolve($focus, $opts['forceSkills'] ?? []) : [];
 
-        $base = self::sh('git rev-parse --abbrev-ref HEAD');
-        $baseCommit = self::sh('git rev-parse HEAD');
-        if ($baseCommit === '') { echo "\033[31mNo commits yet.\033[0m Make an initial commit first.\n"; return 1; }
-        $dirty = self::sh('git status --porcelain') !== '';
-        if ($dirty) echo "\033[33m  ⚠ working tree has uncommitted changes — coders branch from the last commit (HEAD), not your working copy.\033[0m\n";
+        $base = 'working copy';   // display label; the "base" is just your folder's current files
 
         $c = "\033[36m"; $d = "\033[2m"; $b = "\033[1m"; $g = "\033[32m"; $y = "\033[33m"; $r = "\033[0m";
-
-        // ---- Sync with the remote before coders branch (opt-out: --no-sync) ----
-        // Fetch always; fast-forward the base ONLY when the tree is clean and we're
-        // strictly behind (never a merge/rebase — that could conflict or rewrite the
-        // user's local work). This way coders branch from the latest remote commit.
-        if (($opts['sync'] ?? true) !== false && self::sh('git remote') !== '') {
-            $up = self::sh('git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null');
-            if ($up !== '') {
-                echo "  {$d}syncing with {$up}…{$r}\n";
-                self::sh('git fetch --quiet 2>&1');
-                if (!$dirty) {
-                    $behind = (int)self::sh('git rev-list --count HEAD..@{u} 2>/dev/null');
-                    $ahead  = (int)self::sh('git rev-list --count @{u}..HEAD 2>/dev/null');
-                    if ($behind > 0 && $ahead === 0) {
-                        self::sh('git merge --ff-only @{u} 2>&1');
-                        $baseCommit = self::sh('git rev-parse HEAD');
-                        echo "  {$g}↓{$r} {$d}fast-forwarded {$base} +{$behind} from {$up} (now @" . substr($baseCommit, 0, 7) . "){$r}\n";
-                    } elseif ($behind > 0) {
-                        echo "  {$y}⚠ {$base} is {$behind} behind and {$ahead} ahead of {$up} — not auto-merging; coders branch from local HEAD.{$r}\n";
-                    }
-                }
-            }
-        }
 
         // runId may be supplied (by --panes, so the pane watcher knows it up front).
         $runId = (string)($opts['runId'] ?? '');
         if (!preg_match('/^crew_[0-9_]+$/', $runId)) $runId = 'crew_' . date('Ymd_His');
-        echo "\n{$b}👥 OllamaDev Crew{$r}  {$d}model {$c}{$model}{$r}{$d} · base {$base}@" . substr($baseCommit, 0, 7) . ($amplify > 1 ? " · amplify ×{$amplify}" : '') . "{$r}\n";
+        echo "\n{$b}👥 OllamaDev Crew{$r}  {$d}model {$c}{$model}{$r}{$d} · " . (basename($projectRoot) ?: $projectRoot) . ($amplify > 1 ? " · amplify ×{$amplify}" : '') . "{$r}\n";
         if (!empty($teamSkills)) echo "  {$d}team skills: " . implode(', ', array_map(fn($s) => $s['name'], $teamSkills)) . "{$r}\n";
         // Show per-role models when any role differs from the base (mix-and-match).
         if ($mDirector !== $model || $mResearcher !== $model || $mCoder !== $model || $mAuditor !== $model || $mCoderList) {
@@ -134,14 +108,14 @@ class Crew {
         $logDir = dirname($boardFile) . '/' . $runId;
         @mkdir($logDir, 0755, true);
         $board = ['task' => $task, 'runId' => $runId, 'active' => true, 'model' => $model, 'logDir' => $logDir,
-            // repoRoot + base let the desktop act on held branches (merge/discard/push)
-            // without re-loading the run plan — the board file is the single source.
-            'repoRoot' => self::sh('git rev-parse --show-toplevel 2>/dev/null'), 'base' => $base,
+            // repoRoot (the project folder) lets the desktop act on held changesets without
+            // re-loading the run plan — the board file is the single source.
+            'repoRoot' => $projectRoot, 'base' => $base,
             // Additive (desktop topology view): per-role models + run shape. Display only.
             'models' => ['director' => $mDirector, 'researcher' => $mResearcher, 'coder' => $mCoder, 'auditor' => $mAuditor],
             'amplify' => $amplify, 'focus' => $focus, 'subtasks' => []];
         foreach ($subtasks as $i => $st) $board['subtasks'][] = ['n' => $i + 1, 'title' => $st['title'] ?? ('task ' . ($i + 1)), 'role' => $st['role'] ?? 'coder', 'state' => 'todo',
-            'branch' => self::branchFor($runId, $i + 1, $st['title'] ?? ('task' . ($i + 1))), 'model' => $coderModelFor($i + 1)];
+            'branch' => 'coder ' . ($i + 1), 'model' => $coderModelFor($i + 1)];
         $writeBoard = function () use (&$board, $boardFile) { $board['ts'] = time(); atomicWrite($boardFile, json_encode($board)); };
         $setState = function (int $n, string $s) use (&$board, $writeBoard) { foreach ($board['subtasks'] as &$bs) { if ($bs['n'] === $n) $bs['state'] = $s; } unset($bs); $writeBoard(); };
         // Additive: merge extra display fields (files owned, audit verdict) into a
@@ -155,31 +129,34 @@ class Crew {
         $diskPlan = [];
         foreach ($subtasks as $i => $st) {
             $n = $i + 1; $title = $st['title'] ?? ('task ' . $n);
-            $diskPlan[] = ['n' => $n, 'title' => $title, 'role' => $st['role'] ?? 'coder', 'prompt' => $st['prompt'] ?? '', 'branch' => self::branchFor($runId, $n, $title)];
+            $diskPlan[] = ['n' => $n, 'title' => $title, 'role' => $st['role'] ?? 'coder', 'prompt' => $st['prompt'] ?? '', 'branch' => 'coder ' . $n];
         }
         self::saveRun($runId, [
-            'runId' => $runId, 'task' => $task, 'base' => $base, 'baseCommit' => $baseCommit,
-            'repoRoot' => self::sh('git rev-parse --show-toplevel 2>/dev/null'),
+            'runId' => $runId, 'task' => $task, 'base' => $base, 'repoRoot' => $projectRoot,
             'model' => $model, 'opts' => $resumeOpts, 'subtasks' => $diskPlan, 'status' => 'running',
         ]);
 
-        // ---- Coders: one git worktree/branch each ----
+        // ---- Coders: each gets a fresh COPY of the project (a sandbox) to edit ----
+        // Sandboxes live in temp (removed after capture); the captured changesets live in
+        // the durable run dir so accept can copy them into your folder afterwards.
         $wtRoot = sys_get_temp_dir() . '/ollamadev-crew/' . $runId;
         @mkdir($wtRoot, 0755, true);
+        $csRoot = Config::dataDir() . '/crew/' . $runId . '/changeset';
+        @mkdir($csRoot, 0755, true);
         $results = [];
 
-        // Phase 1 (sequential): create every worktree up front. `git worktree add`
-        // mutates the shared repo, so it isn't safe to run concurrently.
+        // Phase 1: snapshot the project into one sandbox per coder.
         $jobs = [];
+        $excl = self::crewExcludes();
         foreach ($subtasks as $i => $st) {
             $n = $i + 1;
-            $branch = self::branchFor($runId, $n, $st['title'] ?? ('task' . $n));
             $wt = $wtRoot . '/c' . $n;
-            $add = self::sh('git worktree add -b ' . escapeshellarg($branch) . ' ' . escapeshellarg($wt) . ' ' . escapeshellarg($baseCommit) . ' 2>&1');
-            if (!is_dir($wt)) { echo "  {$y}skipped (worktree failed): {$add}{$r}\n"; $setState($n, 'held'); continue; }
-            if (!empty($teamSkills)) CrewSkills::materialize($teamSkills, $wt); // seed domain skills (git-excluded)
+            self::copyTree($projectRoot, $wt, $excl);
+            if (!is_dir($wt)) { echo "  {$y}skipped (could not create sandbox){$r}\n"; $setState($n, 'held'); continue; }
+            if (!empty($teamSkills)) CrewSkills::materialize($teamSkills, $wt); // seed domain skills
             $setState($n, 'doing');
-            $jobs[] = ['n' => $n, 'st' => $st, 'branch' => $branch, 'wt' => $wt, 'log' => $logDir . '/coder-' . $n . '.log'];
+            $jobs[] = ['n' => $n, 'st' => $st, 'branch' => 'coder ' . $n, 'wt' => $wt,
+                'root' => $projectRoot, 'store' => $csRoot . '/c' . $n, 'log' => $logDir . '/coder-' . $n . '.log'];
         }
 
         // Host pool for spreading coders across machines/GPUs (real parallel inference,
@@ -236,13 +213,13 @@ class Crew {
                     $pid = pcntl_fork();
                     if ($pid === 0) { // child: build in isolation, write the result, exit
                         self::runCoder($job['wt'], $job['st'], $coderModelFor($job['n']), $maxIter, $research, $task, $focus, $host, $job['log']);
-                        @file_put_contents($resFile, json_encode(self::collectCoderResult($job, $baseCommit)));
+                        @file_put_contents($resFile, json_encode(self::collectCoderResult($job)));
                         exit(0);
                     } elseif ($pid > 0) {
                         $pids[$pid] = ['job' => $job, 'file' => $resFile];
                     } else { // fork failed: run inline as a fallback
                         self::runCoder($job['wt'], $job['st'], $coderModelFor($job['n']), $maxIter, $research, $task, $focus, $host, $job['log']);
-                        $results[] = self::collectCoderResult($job, $baseCommit);
+                        $results[] = self::collectCoderResult($job);
                     }
                 }
                 foreach ($pids as $pid => $meta) {
@@ -262,7 +239,7 @@ class Crew {
                 echo "\n{$b}▸ Coder {$job['n']}{$r} {$d}[" . ($job['st']['role'] ?? 'coder') . "] {$job['branch']}" . ($host !== '' ? " · {$host}" : '') . "{$r}\n";
                 $jobModel = $coderModelFor($job['n']);
                 self::runCoder($job['wt'], $job['st'], $jobModel, $maxIter, $research, $task, $focus, $host, $job['log'], true);
-                $res = self::collectCoderResult($job, $baseCommit);
+                $res = self::collectCoderResult($job);
                 // Empty diff = the model didn't actually edit. Retry with a firm nudge,
                 // and AUTO-ESCALATE to a bigger installed model when one exists — so a
                 // weak coder that can't complete the task hands off to a stronger one.
@@ -277,7 +254,7 @@ class Crew {
                     $retry = $job['st'];
                     $retry['prompt'] = (string)($job['st']['prompt'] ?? '') . "\n\nIMPORTANT: Your previous attempt made NO file changes. You MUST actually create/edit the files by CALLING your write/edit/bash tools now — do not merely describe the change in text.";
                     self::runCoder($job['wt'], $retry, $retryModel, $maxIter, $research, $task, $focus, $host, $job['log'], true);
-                    $res = self::collectCoderResult($job, $baseCommit);
+                    $res = self::collectCoderResult($job);
                 }
                 echo "  " . ($res['empty'] ? "{$d}no changes{$r}" : count($res['files']) . " file(s) changed") . "\n";
                 $results[] = $res;
@@ -287,17 +264,17 @@ class Crew {
         // Surface each coder's changed files on the live board (topology view only).
         foreach ($results as $res) $setMeta((int)$res['n'], ['files' => array_slice($res['files'] ?? [], 0, 24), 'empty' => !empty($res['empty'])]);
 
-        // ---- Auditor reviews each diff, then gated landing (shared with resume). ----
-        self::auditAndLand($agent, $results, $opts, $base, $baseCommit, $mAuditor, $amplify, $task, $setState,
-            ['coderModel' => $mCoder, 'maxIter' => $maxIter, 'research' => $research, 'focus' => $focus, 'logDir' => $logDir, 'runId' => $runId], $setMeta);
+        // ---- Auditor reviews each changeset, then gated landing (shared with resume). ----
+        self::auditAndLand($agent, $results, $opts, $base, '', $mAuditor, $amplify, $task, $setState,
+            ['coderModel' => $mCoder, 'maxIter' => $maxIter, 'research' => $research, 'focus' => $focus, 'logDir' => $logDir, 'runId' => $runId, 'root' => $projectRoot], $setMeta);
         self::offerIdeas($runId, $agent, $task, $research, $results, $mDirector, $opts, $board, $writeBoard);
         self::rememberFacts($task, $research, $results, $mDirector, $opts);
         $board['active'] = false; $writeBoard();
         self::setRunStatus($runId, 'done');
 
-        // ---- Cleanup worktrees (keep branches) ----
-        foreach ($results as $res) self::sh('git worktree remove --force ' . escapeshellarg($res['wt']) . ' 2>&1');
-        @rmdir($wtRoot);
+        // ---- Cleanup sandboxes (the captured changesets stay in the run dir for accept) ----
+        foreach ($results as $res) if (!empty($res['wt'])) self::rmTree((string)$res['wt']);
+        self::rmTree($wtRoot);
         return 0;
     }
 
@@ -342,9 +319,9 @@ class Crew {
                     $setState($res['n'], 'doing');
                     $issues = trim(implode("\n- ", array_map('strval', $res['audit']['issues'] ?? [])));
                     $fixSt = ['title' => $res['title'], 'role' => 'coder',
-                        'prompt' => "An auditor reviewed your work and FLAGGED it. Fix ONLY these problems in this worktree by CALLING your write/edit tools — do not break unrelated code or just describe the fix.\nAuditor: " . (string)($res['audit']['summary'] ?? '') . ($issues !== '' ? "\nIssues:\n- " . $issues : '')];
+                        'prompt' => "An auditor reviewed your work and FLAGGED it. Fix ONLY these problems in this sandbox copy by CALLING your write/edit tools — do not break unrelated code or just describe the fix.\nAuditor: " . (string)($res['audit']['summary'] ?? '') . ($issues !== '' ? "\nIssues:\n- " . $issues : '')];
                     self::runCoder($res['wt'], $fixSt, (string)($ctx['coderModel'] ?? ''), (int)($ctx['maxIter'] ?? 10), (string)($ctx['research'] ?? ''), $task, (string)($ctx['focus'] ?? ''), '', ((string)($ctx['logDir'] ?? sys_get_temp_dir())) . '/coder-' . $res['n'] . '.log');
-                    $re = self::collectCoderResult(['n' => $res['n'], 'st' => ['title' => $res['title']], 'branch' => $res['branch'], 'wt' => $res['wt']], $baseCommit);
+                    $re = self::collectCoderResult(['n' => $res['n'], 'st' => ['title' => $res['title']], 'branch' => $res['branch'], 'wt' => $res['wt'], 'root' => $res['root'] ?? getcwd(), 'store' => $res['store'] ?? '']);
                     $res['diff'] = $re['diff']; $res['files'] = $re['files']; $res['empty'] = $re['empty'];
                     $res['audit'] = !empty($re['empty']) ? ['clean' => false, 'summary' => 'fix produced no changes', 'issues' => []] : self::audit($agent, $res['title'], $res['diff'], $task, $mAuditor, $amplify, $auditBrief);
                     echo "  {$d}↻ #{$res['n']} fix-back: " . ($res['audit']['clean'] ? "{$g}now clean{$r}" : "{$y}still flagged{$r}") . "\n";
@@ -353,35 +330,19 @@ class Crew {
             unset($res);
         }
 
-        // Self-modification safeguard: on the OllamaDev source default to review
-        // (hold everything) unless --auto-merge was passed. Other repos auto-merge.
+        // Self-modification safeguard: on the OllamaDev source default to review (hold
+        // everything) unless --auto-merge was passed. Other folders auto-apply clean work.
         $explicit = $opts['land'] ?? '';
         if ($explicit !== '') { $land = $explicit; }
-        elseif (self::isSelfRepo()) { $land = 'review'; echo "  {$y}⚠ self-modification detected (this is the OllamaDev source) — review mode forced; nothing auto-merges. Use --auto-merge to override.{$r}\n"; }
+        elseif (self::isSelfRepo()) { $land = 'review'; echo "  {$y}⚠ self-modification detected (this is the OllamaDev source) — review mode forced; nothing auto-applies. Use --auto-merge to override.{$r}\n"; }
         else { $land = Config::get('crew.land', 'auto'); }
-        // Landing needs a clean tree on a real branch. A DIRTY tree makes `git merge`
-        // refuse to run — yet the conflict check below wouldn't fire, so it'd report
-        // "merged" when nothing merged. A DETACHED HEAD would put the merge commit on
-        // no branch (lost on the next checkout). In either case, hold everything and
-        // tell the user to resolve it, rather than silently mis-merge.
-        if ($land !== 'review') {
-            if (self::sh('git rev-parse --abbrev-ref HEAD 2>/dev/null') === 'HEAD') {
-                echo "  {$y}⚠ detached HEAD — holding all branches (check out a branch first, then merge them yourself).{$r}\n";
-                $land = 'review';
-            } elseif (self::sh('git status --porcelain --untracked-files=no') !== '') {
-                echo "  {$y}⚠ uncommitted changes in the working tree — holding all branches (commit or stash, then merge them yourself).{$r}\n";
-                $land = 'review';
-            }
-        }
-        echo "\n{$b}▸ Landing{$r}" . ($land === 'review' ? " {$d}(review mode — nothing auto-merges){$r}" : '') . "\n";
-        // A held branch is a real, blocking decision: post it to the unified Board so
-        // the desktop/CLI can accept (merge) or discard it with one click. The
-        // decision carries everything an accept needs (repoRoot/base/branch) so no
-        // re-loading the run plan. We stash the decision id back on the board subtask
-        // so the kanban held-card buttons and the Decisions panel act on the same id.
-        $repoRoot = self::sh('git rev-parse --show-toplevel 2>/dev/null');
+        echo "\n{$b}▸ Landing{$r}" . ($land === 'review' ? " {$d}(review mode — nothing auto-applies; accept from the board){$r}" : '') . "\n";
+        // A held changeset is a real, blocking decision: post it to the unified Board so the
+        // desktop/CLI can accept (write the files into your folder) or discard it. The
+        // decision carries the changeset STORE + project root, so accept needs no run plan.
+        $repoRoot = (string)($ctx['root'] ?? getcwd());
         $runId = (string)($ctx['runId'] ?? '');
-        $hold = function (array $res, string $reason) use ($setState, $setMeta, $repoRoot, $base, $runId) {
+        $hold = function (array $res, string $reason) use ($setState, $setMeta, $repoRoot, $runId) {
             $setState($res['n'], 'held');
             $id = '';
             if (class_exists('Board')) {
@@ -389,37 +350,41 @@ class Crew {
                 $id = Board::enqueue('crew_branch',
                     'coder #' . $res['n'] . ': ' . (string)($res['title'] ?? 'task') . ' — ' . $reason,
                     strlen($diff) > 60000 ? substr($diff, 0, 60000) . "\n… (diff truncated)" : $diff,
-                    ['runId' => $runId, 'n' => $res['n'], 'branch' => (string)($res['branch'] ?? ''),
-                     'repoRoot' => $repoRoot, 'base' => $base, 'reason' => $reason,
+                    ['runId' => $runId, 'n' => $res['n'], 'label' => (string)($res['branch'] ?? ('coder ' . $res['n'])),
+                     'repoRoot' => $repoRoot, 'store' => (string)($res['store'] ?? ''), 'reason' => $reason,
                      'files' => array_slice($res['files'] ?? [], 0, 40)]);
             }
-            if ($setMeta) $setMeta((int)$res['n'], ['held' => true, 'reason' => $reason, 'decisionId' => $id, 'branch' => (string)($res['branch'] ?? '')]);
+            if ($setMeta) $setMeta((int)$res['n'], ['held' => true, 'reason' => $reason, 'decisionId' => $id, 'store' => (string)($res['store'] ?? ''), 'branch' => (string)($res['branch'] ?? '')]);
         };
-        $merged = []; $held = [];
+        $applied = []; $held = []; $touched = [];   // $touched: files already written this run (overlap guard)
         foreach ($results as $res) {
             if ($res['empty']) { $setState($res['n'], 'held'); continue; }
-            // SECURITY GATE: a branch that introduces a secret (API key, token, private
-            // key, hardcoded credential) is NEVER auto-merged — even if the Auditor passed
-            // it. Hold it for a human, with a clear reason. Vanilla regex scan, no deps.
+            // SECURITY GATE: a changeset that introduces a secret is NEVER auto-applied —
+            // even if the Auditor passed it. Hold it for a human. Vanilla regex scan, no deps.
             $secHigh = class_exists('SecScan') ? array_filter(SecScan::scanDiff((string)($res['diff'] ?? '')), fn($f) => $f['severity'] === 'high') : [];
             if ($secHigh) {
-                $held[] = $res; $hold($res, '🔑 secret detected (' . count($secHigh) . ') — not auto-merged');
-                echo "  {$y}held{$r} #{$res['n']} {$res['branch']} {$d}(🔑 secret detected — review before merging){$r}\n"; continue;
+                $held[] = $res; $hold($res, '🔑 secret detected (' . count($secHigh) . ') — not auto-applied');
+                echo "  {$y}held{$r} #{$res['n']} {$d}(🔑 secret detected — review before accepting){$r}\n"; continue;
             }
-            if ($land === 'review') { $held[] = $res; $hold($res, 'review mode'); echo "  {$y}held{$r} #{$res['n']} {$res['branch']} {$d}(review mode){$r}\n"; continue; }
-            if (empty($res['audit']['clean'])) { $held[] = $res; $hold($res, 'audit flagged'); echo "  {$y}held{$r} #{$res['n']} {$res['branch']} {$d}(audit flagged){$r}\n"; continue; }
-            self::sh('git merge --no-ff --no-edit ' . escapeshellarg($res['branch']) . ' 2>&1');
-            if (self::sh('git status --porcelain') !== '' && self::sh('git ls-files -u') !== '') {
-                self::sh('git merge --abort 2>&1');
-                $held[] = $res; $hold($res, 'merge conflict'); echo "  {$y}held{$r} #{$res['n']} {$res['branch']} {$d}(merge conflict — review manually){$r}\n";
-            } else {
-                $merged[] = $res; $setState($res['n'], 'done'); echo "  {$g}merged{$r} #{$res['n']} {$res['branch']}\n";
+            if ($land === 'review') { $held[] = $res; $hold($res, 'review mode'); echo "  {$y}held{$r} #{$res['n']} {$d}(review mode){$r}\n"; continue; }
+            if (empty($res['audit']['clean'])) { $held[] = $res; $hold($res, 'audit flagged'); echo "  {$y}held{$r} #{$res['n']} {$d}(audit flagged){$r}\n"; continue; }
+            // Overlap guard (no git to merge for us): if this changeset touches a file an
+            // earlier coder already wrote this run, HOLD it rather than silently overwrite.
+            $overlap = array_values(array_intersect($res['files'] ?? [], array_keys($touched)));
+            if ($overlap) {
+                $held[] = $res; $hold($res, 'overlaps coder #' . $touched[$overlap[0]] . ' on ' . $overlap[0]);
+                echo "  {$y}held{$r} #{$res['n']} {$d}(overlaps another coder — review which version to keep){$r}\n"; continue;
             }
+            $ap = self::applyChangeset((string)($res['store'] ?? ''), $repoRoot);
+            if (empty($ap['ok'])) { $held[] = $res; $hold($res, 'could not write files'); echo "  {$y}held{$r} #{$res['n']} {$d}(could not write files){$r}\n"; continue; }
+            foreach ($res['files'] ?? [] as $f) $touched[$f] = $res['n'];
+            $applied[] = $res; $setState($res['n'], 'done');
+            echo "  {$g}applied{$r} #{$res['n']} {$d}(" . count($ap['created']) . " file(s) written to your folder){$r}\n";
         }
-        echo "\n{$b}Summary{$r}  {$g}" . count($merged) . " merged{$r} · {$y}" . count($held) . " held{$r}\n";
+        echo "\n{$b}Summary{$r}  {$g}" . count($applied) . " applied{$r} · {$y}" . count($held) . " held{$r}\n";
         if ($held) {
-            echo "  {$d}Accept or discard held branches from the desktop Board (or the CLI):{$r}\n";
-            foreach ($held as $res) echo "    ollamadev crew accept {$res['n']}   {$d}# merge  ·  ollamadev crew discard {$res['n']}  # delete branch{$r}\n";
+            echo "  {$d}Accept (write the files into your folder) or discard held work from the desktop Board (or the CLI):{$r}\n";
+            foreach ($held as $res) echo "    ollamadev crew accept {$res['n']}   {$d}# write files  ·  ollamadev crew discard {$res['n']}  # drop{$r}\n";
         }
     }
 
@@ -427,7 +392,6 @@ class Crew {
     // keep branches that already have work, then audit + land. Idempotent — safe to
     // run repeatedly until everything has landed or been held.
     public static function resume(string $runId = '', array $overrides = []): int {
-        if (!self::isGitRepo()) { echo "\033[31mcrew needs a git repository.\033[0m\n"; return 1; }
         $run = $runId !== '' ? self::loadRun($runId) : self::findResumable();
         if (!$run) { echo "No resumable crew run found for this repo.\n"; return 1; }
         $runId = (string)$run['runId'];
@@ -459,7 +423,8 @@ class Crew {
             return $m === '' ? $model : ($agent->resolveModel($m) ?: $m);
         };
         $mCoder = $rm('coderModel'); $mAuditor = $rm('auditorModel');
-        $baseCommit = (string)$run['baseCommit']; $base = (string)$run['base']; $task = (string)$run['task'];
+        $base = (string)$run['base']; $task = (string)$run['task'];
+        $projectRoot = (string)($run['repoRoot'] ?? getcwd());
         $amplify = max(1, (int)($opts['amplify'] ?? 1));
         $maxIter = max(2, (int)Config::get('crew.coderIterations', 10));
         $focus = trim((string)($opts['focus'] ?? ''));
@@ -468,7 +433,7 @@ class Crew {
         // Re-use the shared research vault if it survived.
         $research = (string)@file_get_contents(Config::dataDir() . '/crew/' . $runId . '/research.md') ?: '';
 
-        echo "\n{$b}👥 Resuming crew{$r} {$d}\"" . substr($task, 0, 60) . "\" · " . count($subtasks) . " subtasks · base {$base}@" . substr($baseCommit, 0, 7) . "{$r}\n";
+        echo "\n{$b}👥 Resuming crew{$r} {$d}\"" . substr($task, 0, 60) . "\" · " . count($subtasks) . " subtasks · " . (basename($projectRoot) ?: $projectRoot) . "{$r}\n";
         self::setRunStatus($runId, 'running');
 
         // Board so the desktop reflects the resumed run too.
@@ -476,53 +441,54 @@ class Crew {
         $boardFile = $home . '/.ollamadev/crew/current.json'; @mkdir(dirname($boardFile), 0755, true);
         $logDir = dirname($boardFile) . '/' . $runId; @mkdir($logDir, 0755, true);
         $board = ['task' => $task, 'runId' => $runId, 'active' => true, 'model' => $model, 'logDir' => $logDir,
-            'repoRoot' => self::sh('git rev-parse --show-toplevel 2>/dev/null'), 'base' => $base,
+            'repoRoot' => $projectRoot, 'base' => $base,
             'models' => ['director' => $rm('directorModel'), 'researcher' => $rm('researcherModel'), 'coder' => $mCoder, 'auditor' => $mAuditor],
             'amplify' => $amplify, 'focus' => $focus, 'subtasks' => []];
         foreach ($subtasks as $st) $board['subtasks'][] = ['n' => $st['n'], 'title' => $st['title'] ?? ('task ' . $st['n']), 'role' => $st['role'] ?? 'coder', 'state' => 'todo',
-            'branch' => (string)($st['branch'] ?? self::branchFor($runId, (int)$st['n'], (string)($st['title'] ?? ''))), 'model' => $mCoder];
+            'branch' => (string)($st['branch'] ?? ('coder ' . $st['n'])), 'model' => $mCoder];
         $writeBoard = function () use (&$board, $boardFile) { $board['ts'] = time(); atomicWrite($boardFile, json_encode($board)); };
         $setState = function (int $n, string $s) use (&$board, $writeBoard) { foreach ($board['subtasks'] as &$bs) { if ($bs['n'] === $n) $bs['state'] = $s; } unset($bs); $writeBoard(); };
         $setMeta = function (int $n, array $kv) use (&$board, $writeBoard) { foreach ($board['subtasks'] as &$bs) { if ($bs['n'] === $n) foreach ($kv as $k => $v) $bs[$k] = $v; } unset($bs); $writeBoard(); };
         $writeBoard();
 
         $wtRoot = sys_get_temp_dir() . '/ollamadev-crew/' . $runId; @mkdir($wtRoot, 0755, true);
+        $csRoot = Config::dataDir() . '/crew/' . $runId . '/changeset'; @mkdir($csRoot, 0755, true);
+        $excl = self::crewExcludes();
         $results = [];
         echo "\n{$b}▸ Coders{$r} {$d}(finishing what didn't complete)…{$r}\n";
         foreach ($subtasks as $st) {
-            $n = (int)$st['n']; $branch = (string)$st['branch']; $title = (string)($st['title'] ?? "task $n"); $prompt = (string)($st['prompt'] ?? ''); $role = (string)($st['role'] ?? 'coder');
-            $hasBranch = self::sh('git rev-parse --verify ' . escapeshellarg($branch) . ' 2>/dev/null') !== '';
-            $built = $hasBranch && self::sh('git rev-list ' . escapeshellarg($baseCommit . '..' . $branch) . ' 2>/dev/null') !== '';
-            if ($built) {
+            $n = (int)$st['n']; $branch = (string)($st['branch'] ?? ('coder ' . $n)); $title = (string)($st['title'] ?? "task $n"); $prompt = (string)($st['prompt'] ?? ''); $role = (string)($st['role'] ?? 'coder');
+            $store = $csRoot . '/c' . $n;
+            // Already captured a changeset on a prior run? Reuse it (idempotent resume).
+            $manifest = is_file($store . '/manifest.json') ? json_decode((string)@file_get_contents($store . '/manifest.json'), true) : null;
+            if (is_array($manifest) && (($manifest['created'] ?? []) || ($manifest['modified'] ?? []) || ($manifest['deleted'] ?? []))) {
                 $setState($n, 'doing');
-                $diff = self::sh('git diff ' . escapeshellarg($baseCommit) . ' ' . escapeshellarg($branch));
-                $files = array_values(array_filter(explode("\n", self::sh('git diff --name-only ' . escapeshellarg($baseCommit) . ' ' . escapeshellarg($branch)))));
+                $files = array_values(array_unique(array_merge($manifest['created'] ?? [], $manifest['modified'] ?? [], $manifest['deleted'] ?? [])));
                 echo "  {$g}✓{$r} #{$n} {$d}already built (" . count($files) . " file(s)){$r}\n";
-                $results[] = ['n' => $n, 'title' => $title, 'branch' => $branch, 'wt' => '', 'diff' => $diff, 'files' => $files, 'empty' => $diff === ''];
+                $results[] = ['n' => $n, 'title' => $title, 'branch' => $branch, 'wt' => '', 'root' => $projectRoot, 'store' => $store,
+                    'diff' => (string)@file_get_contents($store . '/diff.txt'), 'files' => $files, 'empty' => !$files];
                 continue;
             }
-            // Pending: clear any stale worktree/branch, then (re)build in a fresh one.
+            // Pending: rebuild in a fresh sandbox copy of the project.
             $wt = $wtRoot . '/c' . $n;
-            self::sh('git worktree remove --force ' . escapeshellarg($wt) . ' 2>&1'); self::sh('git worktree prune 2>&1');
-            if ($hasBranch) self::sh('git branch -D ' . escapeshellarg($branch) . ' 2>&1');
-            self::sh('git worktree add -b ' . escapeshellarg($branch) . ' ' . escapeshellarg($wt) . ' ' . escapeshellarg($baseCommit) . ' 2>&1');
-            if (!is_dir($wt)) { echo "  {$y}#{$n} skipped (worktree failed){$r}\n"; $setState($n, 'held'); continue; }
+            self::rmTree($wt); self::copyTree($projectRoot, $wt, $excl);
+            if (!is_dir($wt)) { echo "  {$y}#{$n} skipped (sandbox failed){$r}\n"; $setState($n, 'held'); continue; }
             if (!empty($teamSkills)) CrewSkills::materialize($teamSkills, $wt);
             $setState($n, 'doing');
             echo "\n{$b}▸ Coder {$n}{$r} {$d}[{$role}] {$branch} (resuming){$r}\n";
             self::runCoder($wt, ['title' => $title, 'role' => $role, 'prompt' => $prompt], $mCoder, $maxIter, $research, $task, $focus, '', $logDir . '/coder-' . $n . '.log');
-            $results[] = self::collectCoderResult(['n' => $n, 'st' => ['title' => $title], 'branch' => $branch, 'wt' => $wt], $baseCommit);
+            $results[] = self::collectCoderResult(['n' => $n, 'st' => ['title' => $title], 'branch' => $branch, 'wt' => $wt, 'root' => $projectRoot, 'store' => $store]);
         }
 
         foreach ($results as $res) $setMeta((int)$res['n'], ['files' => array_slice($res['files'] ?? [], 0, 24), 'empty' => !empty($res['empty'])]);
-        self::auditAndLand($agent, $results, $opts, $base, $baseCommit, $mAuditor, $amplify, $task, $setState,
-            ['coderModel' => $mCoder, 'maxIter' => $maxIter, 'research' => $research, 'focus' => $focus, 'logDir' => $logDir, 'runId' => $runId], $setMeta);
+        self::auditAndLand($agent, $results, $opts, $base, '', $mAuditor, $amplify, $task, $setState,
+            ['coderModel' => $mCoder, 'maxIter' => $maxIter, 'research' => $research, 'focus' => $focus, 'logDir' => $logDir, 'runId' => $runId, 'root' => $projectRoot], $setMeta);
         self::offerIdeas($runId, $agent, $task, $research, $results, $mCoder, $opts, $board, $writeBoard);
         self::rememberFacts($task, $research, $results, $mCoder, $opts);
         $board['active'] = false; $writeBoard();
         self::setRunStatus($runId, 'done');
-        foreach ($results as $res) if (!empty($res['wt'])) self::sh('git worktree remove --force ' . escapeshellarg($res['wt']) . ' 2>&1');
-        @rmdir($wtRoot);
+        foreach ($results as $res) if (!empty($res['wt'])) self::rmTree((string)$res['wt']);
+        self::rmTree($wtRoot);
         return 0;
     }
 
@@ -667,23 +633,15 @@ class Crew {
     }
 
     // Commit a coder's work (excluding .ollamadev) and capture its diff/files.
-    private static function collectCoderResult(array $job, string $baseCommit): array {
-        $wt = $job['wt']; $st = $job['st']; $n = $job['n'];
-        self::sh('git -C ' . escapeshellarg($wt) . ' add -A -- . ' . escapeshellarg(':(exclude).ollamadev'));
-        $changed = self::sh('git -C ' . escapeshellarg($wt) . ' diff --cached --name-only') !== '';
-        if ($changed) {
-            // A fresh repo (or CI box) often has no user.name/user.email, which makes
-            // `git commit` fail — and then the branch is empty and the work is lost.
-            // Supply a crew identity ONLY when none is configured (-c overrides, so
-            // we must not pass it when the user has a real identity set).
-            $ident = self::sh('git -C ' . escapeshellarg($wt) . ' config user.email') === ''
-                ? ' -c user.name=' . escapeshellarg('OllamaDev Crew') . ' -c user.email=' . escapeshellarg('crew@ollamadev.local')
-                : '';
-            self::sh('git -C ' . escapeshellarg($wt) . $ident . ' commit -q -m ' . escapeshellarg('crew: ' . ($st['title'] ?? 'task ' . $n)) . ' 2>&1');
-        }
-        $diff = self::sh('git -C ' . escapeshellarg($wt) . ' diff ' . escapeshellarg($baseCommit) . ' HEAD');
-        $files = array_values(array_filter(explode("\n", self::sh('git -C ' . escapeshellarg($wt) . ' diff --name-only ' . escapeshellarg($baseCommit) . ' HEAD'))));
-        return ['n' => $n, 'title' => $st['title'] ?? 'task', 'branch' => $job['branch'], 'wt' => $wt, 'diff' => $diff, 'files' => $files, 'empty' => $diff === ''];
+    // Capture what a coder changed in its sandbox as a durable changeset (files + diff),
+    // ready for the Auditor to review and for accept to copy into your folder.
+    private static function collectCoderResult(array $job): array {
+        $n = $job['n']; $st = $job['st'];
+        $cs = self::captureChangeset((string)($job['root'] ?? getcwd()), (string)$job['wt'], (string)$job['store']);
+        return ['n' => $n, 'title' => $st['title'] ?? 'task', 'branch' => $job['branch'] ?? ('coder ' . $n),
+            'wt' => $job['wt'], 'store' => $cs['store'], 'root' => (string)($job['root'] ?? getcwd()),
+            'diff' => $cs['diff'], 'files' => $cs['files'], 'created' => $cs['created'],
+            'modified' => $cs['modified'], 'deleted' => $cs['deleted'], 'empty' => $cs['empty']];
     }
 
     // Coder: a bounded agent loop in the worktree (auto permissions, isolated).
@@ -693,7 +651,7 @@ class Crew {
         // pinned model (if any, else the crew's coder model), and its permission mode.
         $role = CrewRoles::get((string)($st['role'] ?? 'coder'));
         $persona = $role['prompt'] !== '' ? $role['prompt']
-            : "You are a coding agent in an isolated git worktree. You MUST actually make the changes by calling your tools (write/edit/bash) — do not merely describe them. Keep changes focused; when the files are written, stop.";
+            : "You are a coding agent working in an isolated COPY of the project. You MUST actually make the changes by calling your tools (write/edit/bash) — do not merely describe them. Keep changes focused; when the files are written, stop.";
         $useModel = ($role['model'] ?? '') !== '' ? $role['model'] : $model;
         $roleMode = ($role['permission'] ?? 'auto') === 'readonly' ? 'readonly' : 'auto';
 
@@ -1065,7 +1023,7 @@ class Crew {
     // Newest unfinished run (status != 'done') belonging to the current repo, or null.
     public static function findResumable(): ?array {
         $home = getenv('HOME') ?: sys_get_temp_dir();
-        $root = self::sh('git rev-parse --show-toplevel 2>/dev/null');
+        $root = getcwd() ?: '';
         if ($root === '') return null;
         $cands = [];
         foreach (glob($home . '/.ollamadev/crew/*/run.json') ?: [] as $f) {
@@ -1109,6 +1067,102 @@ class Crew {
     private static function gitWorktreeSupported(): bool { return stripos(self::sh('git worktree -h 2>&1'), 'usage') !== false || self::sh('git worktree list 2>/dev/null') !== ''; }
     private static function sh(string $cmd): string { return trim((string)@shell_exec($cmd)); }
 
+    // ---- Git-free crew storage --------------------------------------------------
+    // Each coder works in a plain COPY of your project (a "sandbox"); we capture the
+    // files it changed as a "changeset" (the actual file contents + a diff) on disk,
+    // and ACCEPT copies those files straight into your folder. No git worktrees,
+    // branches, or merges — works in any directory, and you see real files after accept.
+
+    // Names skipped when copying / diffing (VCS, deps, our own data). Matched at ANY depth.
+    private static function crewExcludes(): array {
+        return ['.git', '.hg', '.svn', '.ollamadev', 'node_modules', '.DS_Store', 'ollamadev-crew'];
+    }
+    // List a directory's files as [relativePath => absolutePath], honoring excludes.
+    private static function listFilesRel(string $root, array $excl): array {
+        $out = [];
+        if (!is_dir($root)) return $out;
+        try {
+            $dir = new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS);
+            $filtered = new RecursiveCallbackFilterIterator($dir, fn($c) => !in_array($c->getFilename(), $excl, true));
+            $it = new RecursiveIteratorIterator($filtered, RecursiveIteratorIterator::LEAVES_ONLY, RecursiveIteratorIterator::CATCH_GET_CHILD);
+            foreach ($it as $f) if ($f->isFile()) $out[str_replace('\\', '/', substr($f->getPathname(), strlen($root) + 1))] = $f->getPathname();
+        } catch (\Throwable $e) {}
+        return $out;
+    }
+    // Recursively copy $src → $dst, skipping excluded names at any depth.
+    private static function copyTree(string $src, string $dst, array $excl): void {
+        @mkdir($dst, 0755, true);
+        try {
+            $dir = new RecursiveDirectoryIterator($src, FilesystemIterator::SKIP_DOTS);
+            $filtered = new RecursiveCallbackFilterIterator($dir, fn($c) => !in_array($c->getFilename(), $excl, true));
+            $it = new RecursiveIteratorIterator($filtered, RecursiveIteratorIterator::SELF_FIRST, RecursiveIteratorIterator::CATCH_GET_CHILD);
+            foreach ($it as $item) {
+                $rel = substr($item->getPathname(), strlen($src) + 1);
+                $target = $dst . '/' . $rel;
+                if ($item->isDir()) @mkdir($target, 0755, true);
+                else { @mkdir(dirname($target), 0755, true); @copy($item->getPathname(), $target); }
+            }
+        } catch (\Throwable $e) {}
+    }
+    private static function rmTree(string $dir): void {
+        if (!is_dir($dir)) { @unlink($dir); return; }
+        $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
+        foreach ($it as $f) { $f->isDir() ? @rmdir($f->getPathname()) : @unlink($f->getPathname()); }
+        @rmdir($dir);
+    }
+    // A readable unified-style diff for one file. Full-replacement hunk (no LCS dep) — keeps
+    // the `diff --git` header so the secret scanner + the UI's file-count/colorizer work.
+    private static function fileDiff(string $path, string $old, string $new): string {
+        $h = "diff --git a/$path b/$path\n";
+        if (strlen($old) > 200000 || strlen($new) > 200000 || strpos(substr($new . $old, 0, 8000), "\0") !== false)
+            return $h . "Binary or large file — not shown.\n";
+        $h .= $old === '' ? "--- /dev/null\n+++ b/$path\n" : ($new === '' ? "--- a/$path\n+++ /dev/null\n" : "--- a/$path\n+++ b/$path\n");
+        $ol = $old === '' ? [] : explode("\n", $old);
+        $nl = $new === '' ? [] : explode("\n", $new);
+        $h .= '@@ -1,' . count($ol) . ' +1,' . count($nl) . " @@\n";
+        foreach ($ol as $l) $h .= '-' . $l . "\n";
+        foreach ($nl as $l) $h .= '+' . $l . "\n";
+        return $h;
+    }
+    // Compare a coder's sandbox to the project, copy the changed files into a durable
+    // changeset store, write a manifest + diff, and return a summary. This is what makes
+    // "accept" able to drop real files into your folder later.
+    private static function captureChangeset(string $projectRoot, string $sandbox, string $storeDir): array {
+        $excl = self::crewExcludes();
+        $proj = self::listFilesRel($projectRoot, $excl);
+        $sand = self::listFilesRel($sandbox, $excl);
+        self::rmTree($storeDir); @mkdir($storeDir . '/files', 0755, true);
+        $created = []; $modified = []; $deleted = []; $diff = '';
+        foreach ($sand as $rel => $abs) {
+            $new = (string)@file_get_contents($abs);
+            $isNew = !isset($proj[$rel]);
+            $old = $isNew ? '' : (string)@file_get_contents($proj[$rel]);
+            if ($isNew) $created[] = $rel; elseif ($old !== $new) $modified[] = $rel; else continue;
+            $diff .= self::fileDiff($rel, $old, $new);
+            $t = $storeDir . '/files/' . $rel; @mkdir(dirname($t), 0755, true); @copy($abs, $t);
+        }
+        foreach ($proj as $rel => $abs) if (!isset($sand[$rel])) { $deleted[] = $rel; $diff .= self::fileDiff($rel, (string)@file_get_contents($abs), ''); }
+        @file_put_contents($storeDir . '/manifest.json', json_encode(['created' => $created, 'modified' => $modified, 'deleted' => $deleted, 'projectRoot' => $projectRoot]));
+        @file_put_contents($storeDir . '/diff.txt', $diff);
+        $files = array_values(array_unique(array_merge($created, $modified, $deleted)));
+        return ['created' => $created, 'modified' => $modified, 'deleted' => $deleted, 'files' => $files,
+            'diff' => $diff, 'store' => $storeDir, 'empty' => !$files];
+    }
+    // Accept: copy a stored changeset's files into the project folder (apply deletions too).
+    public static function applyChangeset(string $storeDir, string $projectRoot): array {
+        $m = json_decode((string)@file_get_contents($storeDir . '/manifest.json'), true);
+        if (!is_array($m)) return ['ok' => false, 'error' => 'changeset missing or unreadable'];
+        $wrote = []; $removed = [];
+        foreach (array_merge($m['created'] ?? [], $m['modified'] ?? []) as $rel) {
+            $from = $storeDir . '/files/' . $rel; $to = $projectRoot . '/' . $rel;
+            if (!is_file($from)) continue;
+            @mkdir(dirname($to), 0755, true);
+            if (@copy($from, $to)) $wrote[] = $rel;
+        }
+        foreach ($m['deleted'] ?? [] as $rel) if (@unlink($projectRoot . '/' . $rel)) $removed[] = $rel;
+        return ['ok' => true, 'created' => $wrote, 'deleted' => $removed];
+    }
+
     // ---- Held-branch actions (desktop Board + CLI) --------------------------
     // The crew runs as a subprocess and writes the live board; the desktop and the
     // CLI act on held branches AFTER the run via these helpers. All LOCAL git —
@@ -1120,13 +1174,18 @@ class Crew {
         $d = json_decode((string)@file_get_contents($home . '/.ollamadev/crew/current.json'), true);
         return is_array($d) ? $d : [];
     }
-    // Resolve a coder number on the live board to its branch/repo/decision id.
+    // Resolve a coder number on the live board to its changeset store / project / decision id.
     private static function heldRef(int $n): array {
         $bd = self::liveBoard();
-        $root = (string)($bd['repoRoot'] ?? '') ?: self::sh('git rev-parse --show-toplevel 2>/dev/null');
-        $ref = ['branch' => '', 'repoRoot' => $root, 'base' => (string)($bd['base'] ?? ''), 'n' => $n, 'decisionId' => ''];
+        $root = (string)($bd['repoRoot'] ?? '') ?: (getcwd() ?: '.');
+        $ref = ['label' => 'coder ' . $n, 'repoRoot' => $root, 'store' => '', 'n' => $n, 'decisionId' => ''];
         foreach (($bd['subtasks'] ?? []) as $s) {
-            if ((int)($s['n'] ?? 0) === $n) { $ref['branch'] = (string)($s['branch'] ?? ''); $ref['decisionId'] = (string)($s['decisionId'] ?? ''); break; }
+            if ((int)($s['n'] ?? 0) === $n) {
+                $ref['label'] = (string)($s['branch'] ?? ('coder ' . $n));
+                $ref['store'] = (string)($s['store'] ?? '');
+                $ref['decisionId'] = (string)($s['decisionId'] ?? '');
+                break;
+            }
         }
         return $ref;
     }
@@ -1143,64 +1202,31 @@ class Crew {
         atomicWrite($f, json_encode($bd));
     }
 
-    // Merge a held coder branch into the repo's current branch — LOCAL ONLY.
-    // Accept a held branch by MATERIALIZING its files straight into the project folder —
-    // no merge commit, no clean-tree requirement, no merge conflicts. We diff the branch
-    // against the commit the crew branched from, then write each added/modified file's
-    // branch version into the working tree (and stage it) and apply any deletions. The
-    // result: the crew's files just appear in your folder as ready-to-review changes you
-    // can commit (or undo) however you like. Works any time, even mid-edit.
+    // Accept a held changeset by COPYING its files straight into your folder — creating any
+    // folders as needed and applying deletions. No git, no merge, no clean-tree requirement:
+    // the crew's files just appear in your project, ready to review/run. (Method name kept
+    // for the desktop/CLI callers; it now applies a changeset, not a git branch.)
     public static function acceptHeldBranch(array $opts): array {
-        $root = (string)($opts['repoRoot'] ?? '');
-        $branch = (string)($opts['branch'] ?? '');
-        if ($root === '' || !is_dir($root)) return ['ok' => false, 'error' => 'repo not found'];
-        if ($branch === '') return ['ok' => false, 'error' => 'no branch on this decision'];
-        $g = 'git -C ' . escapeshellarg($root) . ' ';
-        if (self::sh($g . 'rev-parse --verify ' . escapeshellarg($branch) . ' 2>/dev/null') === '')
-            return ['ok' => false, 'error' => 'branch no longer exists: ' . $branch];
-
-        // Which files did the crew touch? Diff the branch against its base (the commit it
-        // branched from) so we only write the crew's own files and never clobber unrelated
-        // work. Fall back to the merge-base, then HEAD, if no base was recorded.
-        $base = (string)($opts['base'] ?? '');
-        if ($base === '') $base = self::sh($g . 'merge-base HEAD ' . escapeshellarg($branch) . ' 2>/dev/null');
-        if ($base === '') $base = 'HEAD';
-        // -z: NUL-delimited, so paths with spaces/unicode are exact. Tokens stream as
-        // status, path [, path2 for renames/copies].
-        $raw = self::sh($g . 'diff --name-status -z ' . escapeshellarg($base) . ' ' . escapeshellarg($branch));
-        $tok = explode("\0", $raw);
-        $co = function (string $p) use ($g, $branch) { self::sh($g . 'checkout ' . escapeshellarg($branch) . ' -- ' . escapeshellarg($p) . ' 2>&1'); };
-        $del = function (string $p) use ($g) { self::sh($g . 'rm -f -q --ignore-unmatch -- ' . escapeshellarg($p) . ' 2>&1'); };
-        $created = []; $deleted = [];
-        for ($i = 0, $n = count($tok); $i < $n; ) {
-            $s = $tok[$i] ?? '';
-            if ($s === '') { $i++; continue; }
-            $code = $s[0];
-            if ($code === 'R' || $code === 'C') {            // rename/copy: old, new
-                $old = $tok[$i + 1] ?? ''; $new = $tok[$i + 2] ?? ''; $i += 3;
-                if ($code === 'R' && $old !== '') { $del($old); $deleted[] = $old; }
-                if ($new !== '') { $co($new); $created[] = $new; }
-            } else {
-                $path = $tok[$i + 1] ?? ''; $i += 2;
-                if ($path === '') continue;
-                if ($code === 'D') { $del($path); $deleted[] = $path; }
-                else { $co($path); $created[] = $path; }   // A / M / T
-            }
-        }
-        if (!$created && !$deleted) return ['ok' => false, 'error' => 'this branch has no file changes to bring in', 'repoRoot' => $root, 'branch' => $branch];
+        $root = (string)($opts['repoRoot'] ?? '') ?: getcwd();
+        $store = (string)($opts['store'] ?? '');
+        $label = (string)($opts['label'] ?? ($opts['branch'] ?? 'changeset'));
+        if (!is_dir($root)) return ['ok' => false, 'error' => 'project folder not found: ' . $root];
+        if ($store === '' || !is_dir($store)) return ['ok' => false, 'error' => 'no saved changeset for this decision (re-run the crew)'];
+        $ap = self::applyChangeset($store, $root);
+        if (empty($ap['ok'])) return ['ok' => false, 'error' => (string)($ap['error'] ?? 'could not write files'), 'repoRoot' => $root];
+        $created = $ap['created']; $deleted = $ap['deleted'];
+        if (!$created && !$deleted) return ['ok' => false, 'error' => 'this changeset has no files to write', 'repoRoot' => $root];
         if (isset($opts['n'])) self::setBoardState((int)$opts['n'], 'done');
-        return ['ok' => true, 'merged' => $branch, 'created' => $created, 'deleted' => $deleted,
+        return ['ok' => true, 'merged' => $label, 'created' => $created, 'deleted' => $deleted,
             'out' => count($created) . ' file(s) written to your folder' . ($deleted ? ', ' . count($deleted) . ' removed' : '')];
     }
-    // Discard (delete) a held coder branch. Recoverable via reflog until gc.
+    // Discard a held changeset: delete its saved files. Your folder is untouched.
     public static function discardHeldBranch(array $opts): array {
-        $root = (string)($opts['repoRoot'] ?? '');
-        $branch = (string)($opts['branch'] ?? '');
-        if ($root === '' || !is_dir($root)) return ['ok' => false, 'error' => 'repo not found'];
-        if ($branch === '') return ['ok' => false, 'error' => 'no branch on this decision'];
-        $out = self::sh('git -C ' . escapeshellarg($root) . ' branch -D ' . escapeshellarg($branch) . ' 2>&1');
+        $store = (string)($opts['store'] ?? '');
+        $label = (string)($opts['label'] ?? ($opts['branch'] ?? 'changeset'));
+        if ($store !== '' && is_dir($store)) self::rmTree($store);
         if (isset($opts['n'])) self::setBoardState((int)$opts['n'], 'discarded');
-        return ['ok' => true, 'discarded' => $branch, 'out' => $out];
+        return ['ok' => true, 'discarded' => $label];
     }
     // Apply a Board verdict to a decision: for crew_branch, accept=merge / deny=discard
     // (the git op runs first; the Board is only marked decided if it succeeded so a

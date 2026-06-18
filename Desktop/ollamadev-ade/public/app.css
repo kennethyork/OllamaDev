@@ -534,6 +534,10 @@ textarea.field { min-height: 84px; resize: vertical; line-height: 1.5; }
 .col[data-col="todo"] .dotc { background: var(--faint); }
 .col[data-col="doing"] .dotc { background: var(--accent); }
 .col[data-col="done"] .dotc { background: var(--ok); }
+.col[data-col="held"] .dotc { background: var(--warn); }
+/* Held column reads as "needs your decision" — a soft warn tint + header color. */
+.col[data-col="held"] { border-color: var(--warn); }
+.col[data-col="held"] .col-head { color: var(--warn); }
 .col-body { flex: 1; padding: 10px; display: flex; flex-direction: column; gap: 9px; }
 .card { background: var(--elev); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 10px 11px; cursor: grab; transition: border-color .12s, transform .05s; }
 .card:hover { border-color: var(--faint); }
@@ -592,9 +596,13 @@ textarea.field { min-height: 84px; resize: vertical; line-height: 1.5; }
 .card.crew .cmeta { margin-top: 6px; font-size: 11px; color: var(--dim); }
 .card.crew.held .cmeta { color: var(--warn); }
 .card.crew .actions { margin-top: 8px; }
-/* Accept (merge) reads as a positive/green action vs the accent-blue "Run". */
+/* Accept (writes files into the folder) reads as a positive/green action vs accent-blue "Run". */
 .card .actions .accept { background: var(--ok); color: #08111f; border-color: transparent; font-weight: 700; }
 .card .actions .accept:hover { filter: brightness(1.1); }
+/* Held card: let actions wrap (diff + accept + discard) and accent the inline diff toggle. */
+.card.crew.held .actions { flex-wrap: wrap; }
+.card .actions .dec-diffbtn { color: var(--accent); border-color: var(--accent-soft); }
+.card .card-diff { max-height: 220px; margin-top: 8px; }
 
 /* Unified Decisions panel (Board view) */
 #decisionsBar { padding: 9px 12px; border-bottom: 1px solid var(--border); background: var(--bg2); }

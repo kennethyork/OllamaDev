@@ -56,6 +56,13 @@ class Models {
         return $t !== '' && (str_ends_with($t, '-cloud') || str_ends_with($t, ':cloud'));
     }
 
+    // First installed cloud model from a list of tags (or '' if none). Used when the
+    // user prefers a cloud model as the default whenever one is installed.
+    public static function firstCloud(array $models): string {
+        foreach ($models as $m) { $m = (string)$m; if ($m !== '' && self::isCloud($m)) return $m; }
+        return '';
+    }
+
     // Is this /api/tags entry a cloud model? Ollama flags them with a remote host
     // (the daemon proxies to ollama.com) — the authoritative signal for an
     // INSTALLED model, with the name suffix as a fallback.

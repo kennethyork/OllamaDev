@@ -1397,7 +1397,9 @@ var Tasks = {
     del: function (id) { this.items = this.items.filter(function (x) { return x.id !== id; }); this.save(); this.render(); },
     run: function (id) { var t = this.items.find(function (x) { return x.id === id; }); if (!t) return; this.move(id, 'doing'); App.runTaskInAgent(t.title); },
     // Map a crew subtask state to a board column (held shows in Doing, flagged).
-    crewCol: function (state) { return state === 'done' ? 'done' : (state === 'todo' ? 'todo' : 'doing'); },
+    // Held branches get their OWN column (not buried in "Doing") so they're easy to find
+    // and accept/discard. Everything else maps to todo/doing/done.
+    crewCol: function (state) { return state === 'held' ? 'held' : (state === 'done' ? 'done' : (state === 'todo' ? 'todo' : 'doing')); },
     render: function () {
         // Separate Director: show the steering bar only while a run is active.
         var dbar = $('#directorBar'); if (dbar) dbar.hidden = !(App.crewBoard && App.crewBoard.active);
@@ -1410,23 +1412,38 @@ var Tasks = {
         var crew = (App.crewBoard && Array.isArray(App.crewBoard.subtasks)) ? App.crewBoard.subtasks : [];
         // Crew's auto-suggested next steps (ideas) land in To-do as 💡 cards.
         var ideas = (App.crewBoard && Array.isArray(App.crewBoard.ideas)) ? App.crewBoard.ideas : [];
-        board.innerHTML = this.COLS.map(function (c) {
+        // Show a dedicated "Held" column only when something is actually held (branches
+        // awaiting your accept/discard) — otherwise it'd be a permanently-empty 4th column.
+        var cols = this.COLS.slice();
+        if (crew.some(function (s) { return s.state === 'held'; })) cols.push(['held', 'Held']);
+        board.style.gridTemplateColumns = 'repeat(' + cols.length + ', minmax(0, 1fr))';
+        board.innerHTML = cols.map(function (c) {
             // Director's plan as live, read-only crew cards.
             var crewInCol = crew.filter(function (s) { return self.crewCol(s.state) === c[0]; });
             var crewCards = crewInCol.map(function (s) {
                 var held = s.state === 'held';
                 // The Director tags each subtask with a role (coder/tester/docs/…); show it.
                 var role = (s.role && s.role !== 'coder') ? '<span class="role">' + esc(s.role) + '</span>' : '';
-                // A held branch carries a Board decision id — surface Accept (merge) /
-                // Discard (delete) right on the card. Both route through boardDecide so
-                // the kanban and the Decisions panel act on the same id.
+                // A held branch carries a Board decision id — surface Accept (write the files
+                // into your folder) / Discard right on the card, PLUS an inline diff peek so
+                // you can review the change without leaving the kanban. The diff rides on the
+                // matching Decisions entry (detail); we look it up by decision id.
+                var dec = (held && s.decisionId && Decisions._pending)
+                    ? Decisions._pending.filter(function (p) { return p.id === s.decisionId; })[0] : null;
+                var diff = dec ? String(dec.detail || '') : '';
+                var nFiles = diff ? (diff.match(/(^|\n)diff --git /g) || []).length : 0;
                 var acts = (held && s.decisionId) ? '<div class="actions">' +
-                    '<button class="run accept" data-act="accept-branch" data-id="' + esc(s.decisionId) + '">✓ Accept</button>' +
+                    (diff ? '<button class="dec-diffbtn" data-act="card-diff" data-id="' + esc(s.decisionId) + '">⌄ diff</button>' : '') +
+                    '<button class="run accept" data-act="accept-branch" data-id="' + esc(s.decisionId) + '">✓ Accept' + (nFiles ? ' (' + nFiles + ')' : '') + '</button>' +
                     '<button class="del" data-act="discard-branch" data-id="' + esc(s.decisionId) + '">✕ Discard</button></div>' : '';
-                var meta = held ? ('⚠ held' + (s.reason ? ' · ' + esc(s.reason) : '')) : (s.state === 'doing' ? '● working' : esc(s.state));
+                var meta = held
+                    ? ('⚠ held' + (s.reason ? ' · ' + esc(s.reason) : '') + (nFiles ? ' · ' + nFiles + ' file' + (nFiles > 1 ? 's' : '') : ''))
+                    : (s.state === 'doing' ? '● working' : esc(s.state));
                 return '<div class="card crew' + (held ? ' held' : '') + '">' +
                     '<div class="title">🤖 ' + esc(s.title) + role + '</div>' +
-                    '<div class="cmeta">' + meta + '</div>' + acts + '</div>';
+                    '<div class="cmeta">' + meta + '</div>' + acts +
+                    (diff ? '<pre class="dec-diff card-diff" data-id="' + esc(s.decisionId) + '" hidden></pre>' : '') +
+                    '</div>';
             }).join('');
             // Suggested next-step ideas show as To-do cards you can run with one click.
             var ideaCards = c[0] !== 'todo' ? '' : ideas.map(function (idea) {
@@ -1482,11 +1499,31 @@ var Tasks = {
         board.querySelectorAll('[data-act="run-idea"]').forEach(function (btn) {
             btn.onclick = function () { App.runTaskInAgent(btn.dataset.idea); };
         });
-        // Held-branch Accept (merge) / Discard (delete) — same path as the Decisions panel.
+        // Inline diff peek on a held card — toggle the branch's diff right on the kanban
+        // (same colorizer the Decisions panel uses). The diff was stashed on the <pre> card.
+        board.querySelectorAll('[data-act="card-diff"]').forEach(function (btn) {
+            btn.onclick = function (e) {
+                e.stopPropagation();
+                var id = btn.dataset.id, box = null;
+                board.querySelectorAll('.card-diff').forEach(function (el) { if (el.dataset.id === id) box = el; });
+                if (!box) return;
+                if (!box.hidden) { box.hidden = true; btn.textContent = '⌄ diff'; return; }
+                if (!box._rendered) {
+                    var p = (Decisions._pending || []).filter(function (x) { return x.id === id; })[0];
+                    box.innerHTML = Decisions._diffHtml(p ? String(p.detail || '') : '');
+                    box._rendered = true;
+                }
+                box.hidden = false; btn.textContent = '⌃ hide';
+            };
+        });
+        // Held-branch Accept (writes the files into your folder) / Discard — same path as the
+        // Decisions panel. Discard is destructive (drops the branch), so it confirms first.
         board.querySelectorAll('[data-act="accept-branch"],[data-act="discard-branch"]').forEach(function (btn) {
             btn.onclick = function (e) {
                 e.stopPropagation();
-                Decisions.decide(btn.dataset.id, btn.dataset.act === 'accept-branch' ? 'accept' : 'deny');
+                if (btn.dataset.act === 'accept-branch') { Decisions.decide(btn.dataset.id, 'accept'); return; }
+                App.confirmAction('Discard this branch? Its code is dropped (recoverable via git reflog).', 'Discard',
+                    function () { Decisions.decide(btn.dataset.id, 'deny'); });
             };
         });
         board.querySelectorAll('.card').forEach(function (card) {
@@ -1506,6 +1543,7 @@ var Tasks = {
             });
         });
         board.querySelectorAll('.col').forEach(function (col) {
+            if (col.dataset.col === 'held') return;   // Held is crew-only — not a manual-task drop target
             col.addEventListener('dragover', function (e) { e.preventDefault(); col.classList.add('drag-over'); });
             col.addEventListener('dragleave', function () { col.classList.remove('drag-over'); });
             col.addEventListener('drop', function (e) {

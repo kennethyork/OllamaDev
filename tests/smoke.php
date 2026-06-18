@@ -510,10 +510,13 @@ echo "\n== Crew (bench) ==\n";
 // Offline guards
 [$out] = run_bin(['crew']);
 ok('crew with no task prints usage', stripos($out, 'Usage: ollamadev crew') !== false);
-$ngdir = sys_get_temp_dir() . '/crew_nogit_' . getmypid(); @mkdir($ngdir, 0755, true);
-[$out] = run_bin(['crew', 'do a thing'], '', [], $ngdir);
-ok('crew outside a git repo errors', stripos($out, 'needs a git repository') !== false, trim($out));
-shell_exec('rm -rf ' . escapeshellarg($ngdir));
+// Crew is GIT-FREE now: it works in any folder (no "needs a git repository" gate). Asserted
+// at the source level so we don't trigger a real crew run (which would hit Ollama) in smoke.
+$crewSrcEarly = (string)@file_get_contents(dirname(__DIR__) . '/src/83-crew.php');
+ok('crew works in any folder (no git-repo requirement)',
+    stripos($crewSrcEarly, 'needs a git repository') === false &&
+    strpos($crewSrcEarly, '$projectRoot = getcwd()') !== false &&
+    strpos($crewSrcEarly, 'self::copyTree($projectRoot, $wt') !== false);
 // Unit: JSON extraction + slug (extract the Crew class from the binary)
 if (preg_match('/class Crew \{.*?\n\}/s', $src, $fm)) {
     eval(str_replace(
@@ -586,46 +589,57 @@ ok('board list is empty in a fresh HOME', stripos($out, 'No pending decisions') 
 [$out] = run_bin(['board', 'list', '--json'], '', ['HOME' => $bhome]);
 $bl = json_decode(trim($out), true);
 ok('board list --json returns a pending/recent shape', is_array($bl) && array_key_exists('pending', $bl), trim($out));
-// Integration: a crafted held crew_branch decision is accepted = merged locally.
-if (trim((string) shell_exec('git --version 2>/dev/null')) !== '') {
+// Integration: accept a held crew changeset = the stored files are COPIED into your folder.
+// Git-free — works in a plain (non-git) directory; accept creates folders + files + deletions.
+{
     $ihome = sys_get_temp_dir() . '/board_int_' . getmypid();
-    $irepo = sys_get_temp_dir() . '/board_repo_' . getmypid();
+    $iproj = sys_get_temp_dir() . '/board_proj_' . getmypid();
+    $store = $ihome . '/.ollamadev/crew/crew_s/changeset/c1';
     @mkdir($ihome . '/.ollamadev/board/locks', 0777, true);
-    @mkdir($irepo, 0777, true);
-    shell_exec('cd ' . escapeshellarg($irepo) . ' && git init -q && git config user.email t@t.t && git config user.name T && git symbolic-ref HEAD refs/heads/main && printf a > a.txt && git add -A && git commit -qm init && git checkout -q -b crew/x && printf b > b.txt && git add -A && git commit -qm "crew: b" && git checkout -q main');
-    $dec = ['id' => 'crew_smoke1', 'kind' => 'crew_branch', 'summary' => 'coder #1: b — review mode', 'detail' => 'd',
-        'opts' => ['runId' => 'crew_s', 'n' => 1, 'branch' => 'crew/x', 'repoRoot' => $irepo, 'base' => 'main'],
+    @mkdir($iproj, 0777, true);
+    @mkdir($store . '/files/src/util', 0777, true);
+    // A plain project (NOT a git repo): one existing file + one to be deleted.
+    file_put_contents($iproj . '/app.php', "old\n");
+    file_put_contents($iproj . '/delete-me.txt', "x\n");
+    // A captured changeset: new file in a NEW nested folder + a modify + a delete.
+    file_put_contents($store . '/files/src/util/helper.js', "hi\n");
+    file_put_contents($store . '/files/app.php', "new\n");
+    file_put_contents($store . '/manifest.json', json_encode(['created' => ['src/util/helper.js'], 'modified' => ['app.php'], 'deleted' => ['delete-me.txt']]));
+    file_put_contents($store . '/diff.txt', "diff --git a/src/util/helper.js b/src/util/helper.js\n--- /dev/null\n+++ b/src/util/helper.js\n+hi\n");
+    $dec = ['id' => 'crew_smoke1', 'kind' => 'crew_branch', 'summary' => 'coder #1: helper', 'detail' => 'd',
+        'opts' => ['runId' => 'crew_s', 'n' => 1, 'label' => 'coder 1', 'repoRoot' => $iproj, 'store' => $store],
         'status' => 'pending', 'verdict' => null, 'note' => null, 'created_at' => '2026-01-01T00:00:00+00:00', 'decided_at' => null];
     file_put_contents($ihome . '/.ollamadev/board/decisions.jsonl', json_encode($dec) . "\n");
     file_put_contents($ihome . '/.ollamadev/board/locks/crew_smoke1.lock', 'crew_smoke1');
-    [$out, , $code] = run_bin(['board', 'accept', 'crew_smoke1'], '', ['HOME' => $ihome], $irepo);
-    ok('board accept materializes the held branch files into the folder', $code === 0 && is_file($irepo . '/b.txt'), trim($out));
-    [$out] = run_bin(['board', 'list', '--json'], '', ['HOME' => $ihome], $irepo);
+    [$out, , $code] = run_bin(['board', 'accept', 'crew_smoke1', '--json'], '', ['HOME' => $ihome], $iproj);
+    $cr = json_decode(trim($out), true);
+    ok('board accept copies the changeset files into a plain (non-git) folder',
+        $code === 0 && is_array($cr) && !empty($cr['ok']) &&
+        is_file($iproj . '/src/util/helper.js') &&                       // new file in a new folder
+        trim((string)@file_get_contents($iproj . '/app.php')) === 'new' && // modified
+        !is_file($iproj . '/delete-me.txt'), trim($out));                  // deleted
+    [$out] = run_bin(['board', 'list', '--json'], '', ['HOME' => $ihome], $iproj);
     $bl2 = json_decode(trim($out), true);
     ok('the accepted decision leaves the pending queue', is_array($bl2) && count($bl2['pending'] ?? []) === 0, trim($out));
-    shell_exec('rm -rf ' . escapeshellarg($ihome) . ' ' . escapeshellarg($irepo));
+    shell_exec('rm -rf ' . escapeshellarg($ihome) . ' ' . escapeshellarg($iproj));
 
-    // Divergent path: accept MATERIALIZES the crew's version of a file straight into the
-    // folder even when it diverges from the working branch — no merge, no conflict, the
-    // crew's file just lands (as a ready-to-review working-tree change).
-    $crepo = sys_get_temp_dir() . '/board_conf_' . getmypid();
-    @mkdir($crepo, 0777, true);
-    shell_exec('cd ' . escapeshellarg($crepo) . ' && git init -q && git config user.email t@t.t && git config user.name T && git symbolic-ref HEAD refs/heads/main && printf base > c.txt && git add -A && git commit -qm init && git checkout -q -b crew/conf && printf branchver > c.txt && git add -A && git commit -qm "crew: c" && git checkout -q main && printf mainver > c.txt && git add -A && git commit -qm "main: c"');
-    $cdec = ['id' => 'crew_conf1', 'kind' => 'crew_branch', 'summary' => 'coder #1: c — diverged', 'detail' => 'd',
-        'opts' => ['runId' => 'crew_c', 'n' => 1, 'branch' => 'crew/conf', 'repoRoot' => $crepo, 'base' => 'main'],
+    // Discard: the saved changeset is dropped; your folder is untouched.
+    $dhome = sys_get_temp_dir() . '/board_disc_' . getmypid();
+    $dproj = sys_get_temp_dir() . '/board_dproj_' . getmypid();
+    $dstore = $dhome . '/.ollamadev/crew/crew_d/changeset/c1';
+    @mkdir($dhome . '/.ollamadev/board/locks', 0777, true); @mkdir($dproj, 0777, true); @mkdir($dstore . '/files', 0777, true);
+    file_put_contents($dproj . '/keep.php', "keep\n");
+    file_put_contents($dstore . '/files/new.php', "x\n");
+    file_put_contents($dstore . '/manifest.json', json_encode(['created' => ['new.php'], 'modified' => [], 'deleted' => []]));
+    $ddec = ['id' => 'crew_disc1', 'kind' => 'crew_branch', 'summary' => 'coder #1', 'detail' => 'd',
+        'opts' => ['runId' => 'crew_d', 'n' => 1, 'label' => 'coder 1', 'repoRoot' => $dproj, 'store' => $dstore],
         'status' => 'pending', 'verdict' => null, 'note' => null, 'created_at' => '2026-01-01T00:00:00+00:00', 'decided_at' => null];
-    $chome = sys_get_temp_dir() . '/board_confh_' . getmypid();
-    @mkdir($chome . '/.ollamadev/board/locks', 0777, true);
-    file_put_contents($chome . '/.ollamadev/board/decisions.jsonl', json_encode($cdec) . "\n");
-    file_put_contents($chome . '/.ollamadev/board/locks/crew_conf1.lock', 'crew_conf1');
-    [$out, , $code] = run_bin(['board', 'accept', 'crew_conf1', '--json'], '', ['HOME' => $chome], $crepo);
-    $cr = json_decode(trim($out), true);
-    ok('accept writes the branch file into the folder even when it diverges', $code === 0 &&
-        is_array($cr) && !empty($cr['ok']) && trim((string)@file_get_contents($crepo . '/c.txt')) === 'branchver', trim($out));
-    ok('materialized files are staged in the working tree (not committed)',
-        in_array('c.txt', (array)($cr['created'] ?? []), true) &&
-        trim((string)shell_exec('cd ' . escapeshellarg($crepo) . ' && git status --porcelain')) !== '');
-    shell_exec('rm -rf ' . escapeshellarg($chome) . ' ' . escapeshellarg($crepo));
+    file_put_contents($dhome . '/.ollamadev/board/decisions.jsonl', json_encode($ddec) . "\n");
+    file_put_contents($dhome . '/.ollamadev/board/locks/crew_disc1.lock', 'crew_disc1');
+    [$out, , $code] = run_bin(['board', 'deny', 'crew_disc1', '--json'], '', ['HOME' => $dhome], $dproj);
+    ok('discard drops the changeset and never writes to your folder',
+        $code === 0 && !is_dir($dstore) && !is_file($dproj . '/new.php') && is_file($dproj . '/keep.php'), trim($out));
+    shell_exec('rm -rf ' . escapeshellarg($dhome) . ' ' . escapeshellarg($dproj));
 }
 shell_exec('rm -rf ' . escapeshellarg($bhome));
 // Desktop offers a one-click "resolve in a terminal" on a conflicting accept.
@@ -652,6 +666,19 @@ ok('board offers inline diff review before deciding',
     strpos($appjsConf, '_diffHtml:') !== false &&
     strpos((string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/app.css'), '.dec-diff') !== false &&
     strpos((string)@file_get_contents(dirname(__DIR__) . '/src/91-board.php'), "'detail' => \$detail") !== false);
+// Held branches get their OWN kanban column (not buried in Doing) so they're easy to find
+// and accept — it appears only when something is held.
+ok('held branches get a dedicated, acceptable Held column',
+    strpos($appjsConf, "state === 'held' ? 'held'") !== false &&
+    strpos($appjsConf, "cols.push(['held', 'Held'])") !== false &&
+    strpos((string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/app.css'), '.col[data-col="held"]') !== false);
+// Held KANBAN cards also peek the diff inline (file count + Accept(N) + ⌄ diff), and Discard
+// confirms first. Reuses the Decisions diff colorizer; no separate panel trip needed.
+ok('held kanban cards show file count + inline diff + confirmed discard',
+    strpos($appjsConf, 'data-act="card-diff"') !== false && strpos($appjsConf, 'card-diff') !== false &&
+    strpos($appjsConf, "✓ Accept' + (nFiles ? ' (' + nFiles + ')' : '')") !== false &&
+    strpos($appjsConf, "App.confirmAction('Discard this branch?") !== false &&
+    strpos((string)@file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/app.css'), '.card .card-diff') !== false);
 
 // Separate-Director steering: `crew steer <#> "..."` / desktop box → run's steer.jsonl,
 // injected into the targeted coder between iterations (works sequential + forked).
@@ -722,9 +749,9 @@ ok('desktop terminals support a per-terminal working folder', strpos($bind, 'ter
 //     verdict — ADDITIVE display fields; orchestration is untouched.
 $ihtml_c = (string) @file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/public/index.html');
 $brjs = (string) @file_get_contents(dirname(__DIR__) . '/Desktop/ollamadev-ade/web/bridge.js');
-ok('crew board carries per-role models + branch for the topology view',
+ok('crew board carries per-role models + coder label for the topology view',
     strpos($src, "'models' => ['director' => \$mDirector") !== false &&
-    strpos($src, "'branch' => self::branchFor(\$runId, \$i + 1") !== false);
+    strpos($src, "'branch' => 'coder ' . (\$i + 1)") !== false);
 ok('crew board gains a setMeta channel for files + audit verdict (additive)',
     strpos($src, '$setMeta = function (int $n, array $kv)') !== false &&
     strpos($src, "'audit' => \$av, 'issues' =>") !== false &&
@@ -820,8 +847,8 @@ ok('desktop applies the cleared sentinel to manual cards', strpos($appjs, 'ade.b
 // Source wiring: the four roles + worktree + json-mode are present
 ok('crew has a Researcher role', strpos($src, 'Researcher worker') !== false || strpos($src, 'function research(') !== false);
 ok('crew Director uses JSON mode', strpos($src, 'chatJson(') !== false);
-ok('crew Coder uses git worktrees', strpos($src, 'git worktree add') !== false);
-ok('crew Auditor + auto-merge wired', strpos($src, "git merge --no-ff") !== false && strpos($src, 'function audit(') !== false);
+ok('crew Coder works in a folder-copy sandbox (no git)', strpos($src, 'self::copyTree($projectRoot, $wt') !== false && strpos($src, 'function captureChangeset(') !== false);
+ok('crew Auditor + auto-apply (changeset) wired', strpos($src, 'self::applyChangeset(') !== false && strpos($src, 'function audit(') !== false);
 // Amplify: self-consistency planning + an adversarial multi-pass audit panel.
 ok('crew amplify: plan self-consistency', strpos($src, 'function planOnce(') !== false && strpos($src, 'array_count_values(array_map(\'count\'') !== false);
 ok('crew amplify: adversarial audit panel', strpos($src, 'function auditOnce(') !== false && strpos($src, '$clean > $passes / 2') !== false);
@@ -955,10 +982,12 @@ if (preg_match('/function runShell\(.*?\n\}/s', $src, $rsm)) {
 ok('bash + grep route through runShell (timeout + output cap)', substr_count($src, 'runShell(') >= 4);
 ok('grep skips binary files (-rIn) and bounds output', strpos($src, 'grep -rIn') !== false);
 ok('glob caps its result list', strpos($src, 'array_slice($files, 0, 500)') !== false);
-ok('crew holds branches on a dirty tree / detached HEAD (no false merge)',
-    strpos($src, 'uncommitted changes in the working tree') !== false
-    && strpos($src, 'detached HEAD') !== false
-    && strpos($src, 'status --porcelain --untracked-files=no') !== false);
+// Git-free landing: clean changesets auto-APPLY (copy files into the folder); overlapping
+// or flagged ones are HELD for review. No git merge / dirty-tree / detached-HEAD gymnastics.
+ok('crew landing applies clean changesets and holds overlaps (no git merge)',
+    strpos($src, 'self::applyChangeset(') !== false
+    && strpos($src, 'overlaps coder #') !== false
+    && strpos($src, "git merge --no-ff") === false);
 
 // Network-flake resilience: transient failures (dropped conn / 5xx) retry with
 // backoff; a clean 4xx doesn't (it won't fix itself).
@@ -2200,6 +2229,11 @@ ok('CLI models exposes presets / pull / chain', strpos($mainSrc, "\$sub === 'pre
 ok('agent falls back to a tool-capable model when native tools unsupported', strpos($agentSrc, 'Models::toolFallback(') !== false &&
     strpos($agentSrc, 'triedFallback') !== false && strpos($agentSrc, 'model.autoFallback') !== false);
 ok('agent default-selects the best installed chain model', strpos($agentSrc, 'Models::bestInstalled(') !== false);
+// ollama.preferCloud: when on, an installed :cloud model is the default (wins over the
+// configured/local default); falls back to local when no cloud model is installed.
+ok('agent prefers an installed cloud model as default when ollama.preferCloud is on',
+    strpos($agentSrc, "Config::get('ollama.preferCloud'") !== false && strpos($agentSrc, 'Models::firstCloud(') !== false &&
+    strpos($modelsSrc, 'function firstCloud(') !== false);
 ok('Models can classify tool support + find any installed tool-capable model',
     strpos($modelsSrc, 'function toolsSupported(') !== false && strpos($modelsSrc, 'function anyToolCapable(') !== false);
 ok('agent auto-pick prefers a tool-capable model over an arbitrary first-listed one',
