@@ -2069,6 +2069,13 @@ ok('git workflow honors a dedicated git.model (falls back to default)',
     strpos($gf, "Config::get('git.model'") !== false && strpos($gf, '->getModel()') !== false);
 ok('CLI exposes commit + pr create/review', strpos($mainSrc, "\$argv[1] === 'commit'") !== false &&
     strpos($mainSrc, "\$argv[1] === 'pr'") !== false && strpos($mainSrc, "'create'") !== false && strpos($mainSrc, "'review'") !== false);
+// `ship` = one-command stage → secret-scan → AI commit → ASK before pushing (never auto-pushes).
+ok('CLI ship: stage + secret-gate + AI commit + ask-before-push',
+    strpos($mainSrc, "\$argv[1] === 'ship'") !== false &&
+    strpos($mainSrc, "git add -A") !== false && strpos($mainSrc, 'SecScan::scanDiff($diff)') !== false &&
+    strpos($mainSrc, 'GitFlow::message($diff)') !== false &&
+    strpos($mainSrc, 'Push ') !== false && strpos($mainSrc, '? [Y/n] ') !== false &&
+    strpos($mainSrc, 'ollamadev ship') !== false);   // listed in help
 // Functional: detection + run a NODE-FREE runner (make). Also guards that a JS project
 // (package.json) is NOT auto-run via npm anymore — OllamaDev is node-free.
 if (isset($bin) && is_file($bin) && trim((string)@shell_exec('command -v make 2>/dev/null')) !== '') {

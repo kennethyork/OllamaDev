@@ -3,7 +3,7 @@
 // OllamaDev - Single-file PHP binary
 // Built from modular source
 
-define('OLLAMADEV_VERSION', '0.9.40');
+define('OLLAMADEV_VERSION', '0.9.41');
 $GLOBALS['editedFiles'] = [];
 
 // Shipped binary: keep warnings/errors visible but never spew engine
@@ -12668,6 +12668,68 @@ if ($argc >= 2 && $argv[1] === 'commit') {
     exit(0);
 }
 
+// Ship — the whole loop in one command: stage everything → scan for secrets → draft an AI
+// commit message (git.model) → commit → ASK before pushing. 100% local + Ollama; the only
+// network step is the final git push (to a remote you already configured), and it asks first.
+if ($argc >= 2 && $argv[1] === 'ship') {
+    if (!GitFlow::isRepo()) { echo "Not a git repository.\n"; exit(1); }
+    $force = in_array('--force', $argv, true);
+    $tty = function_exists('posix_isatty') && @posix_isatty(STDIN);
+    $msg = '';
+    for ($i = 2; $i < $argc; $i++) if ($argv[$i] === '-m' || $argv[$i] === '--message') $msg = $argv[$i + 1] ?? '';
+
+    // 1) Stage everything (tracked + new files).
+    GitFlow::sh('git add -A 2>&1');
+    $diff = GitFlow::sh('git diff --cached 2>/dev/null');
+    if ($diff === '') { echo "Nothing to ship — the working tree is clean.\n"; exit(0); }
+
+    // 2) Secret gate — never ship a hardcoded credential. --force (or a confirm) overrides.
+    $secHigh = array_values(array_filter(SecScan::scanDiff($diff), fn($f) => $f['severity'] === 'high'));
+    if ($secHigh && !$force) {
+        echo "\033[31m🔒 " . count($secHigh) . " secret(s) in the staged diff:\033[0m\n";
+        foreach ($secHigh as $f) echo "  \033[31mHIGH\033[0m {$f['label']}  \033[2m{$f['file']}:{$f['line']}\033[0m  {$f['match']}\n";
+        echo "\033[2m  Remove it (env var / secret manager), or pass --force to ship anyway.\033[0m\n";
+        if ($tty) {
+            echo "Ship anyway? [y/N] ";
+            if (!preg_match('/^y/', strtolower(trim((string)fgets(STDIN))))) { echo "Aborted (changes stay staged).\n"; exit(1); }
+        } else { exit(1); }
+    }
+
+    // 3) AI commit message (gpt-oss via git.model), unless -m was given.
+    if ($msg === '') {
+        echo "Generating commit message…\n";
+        $msg = GitFlow::message($diff);
+        if ($msg === '') { echo "Couldn't generate a message. Pass one with -m \"...\".\n"; exit(1); }
+    }
+    echo "\n\033[1m" . $msg . "\033[0m\n\n";
+    if ($tty) {
+        echo "Commit with this message? [Y/n] ";
+        $a = strtolower(trim((string)fgets(STDIN)));
+        if (!($a === '' || $a[0] === 'y')) { echo "Aborted (changes stay staged).\n"; exit(1); }
+    }
+    $tmp = tempnam(sys_get_temp_dir(), 'odvs'); file_put_contents($tmp, $msg);
+    echo GitFlow::sh('git commit -F ' . escapeshellarg($tmp) . ' 2>&1') . "\n";
+    @unlink($tmp);
+
+    // 4) ASK before pushing (the user chose this — ship never auto-pushes).
+    $branch = GitFlow::sh('git rev-parse --abbrev-ref HEAD 2>/dev/null');
+    $remotes = array_values(array_filter(explode("\n", GitFlow::sh('git remote 2>/dev/null'))));
+    if (!$remotes) { echo "\033[2mCommitted locally. No git remote configured — add one (git remote add origin <url>) then push.\033[0m\n"; exit(0); }
+    $hasUpstream = GitFlow::sh('git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null') !== '';
+    $remote = in_array('origin', $remotes, true) ? 'origin' : $remotes[0];
+    $target = $hasUpstream ? GitFlow::sh('git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null') : ($remote . '/' . $branch . " \033[2m(new upstream)\033[0m");
+    if (!$tty) { echo "Committed. Re-run in a terminal to push — ship asks before it pushes.\n"; exit(0); }
+    echo "Push \033[1m{$branch}\033[0m → {$target}? [Y/n] ";
+    $a = strtolower(trim((string)fgets(STDIN)));
+    if (!($a === '' || $a[0] === 'y')) { echo "✓ Committed. Not pushed.\n"; exit(0); }
+    $push = $hasUpstream ? 'git push 2>&1' : 'git push -u ' . escapeshellarg($remote) . ' ' . escapeshellarg($branch) . ' 2>&1';
+    echo GitFlow::sh($push) . "\n";
+    // On a feature branch with gh available → hint the PR command (kept separate, not auto-run).
+    if (!in_array($branch, ['main', 'master'], true) && GitFlow::gh() !== '')
+        echo "\033[2mOn a feature branch — open a PR with: ollamadev pr create\033[0m\n";
+    exit(0);
+}
+
 // PR workflow — open a PR from this branch, or review a PR. Reaches GitHub via gh.
 if ($argc >= 2 && $argv[1] === 'pr') {
     $sub = $argv[2] ?? '';
@@ -12979,7 +13041,7 @@ _ollamadev() {
             return 0
             ;;
         *)
-            COMPREPLY=($(compgen -W 'chat new list load resume pull init crew board terminal git lsp models eval diff verify test commit pr help --help --version --model --prompt --continue --resume --dry-run -h -v' -- "${cur}"))
+            COMPREPLY=($(compgen -W 'chat new list load resume pull init crew board terminal git lsp models eval diff verify test commit ship pr help --help --version --model --prompt --continue --resume --dry-run -h -v' -- "${cur}"))
             ;;
     esac
     return 0
@@ -13018,7 +13080,7 @@ ZSH;
         echo <<<'FISH'
 # OllamaDev Fish Shell Completion
 
-complete -c ollamadev -n '__fish_use_subcommand' -a 'chat new list load resume pull init crew board terminal git lsp models help' -d 'Command'
+complete -c ollamadev -n '__fish_use_subcommand' -a 'chat new list load resume pull init crew board terminal git lsp models commit ship pr help' -d 'Command'
 complete -c ollamadev -n '__fish_seen_subcommand_from terminal' -a 'create spawn list attach start stop pause resume broadcast delete log' -d 'Terminal command'
 complete -c ollamadev -n '__fish_seen_subcommand_from git' -a 'status diff log branch commit push pull stash checkout add' -d 'Git command'
 complete -c ollamadev -s h -l help -d 'Show help'
@@ -13577,6 +13639,7 @@ Commands:
   ollamadev models      List models; also: presets (recommended), cloud (☁ Ollama cloud), pull <alias>, chain (fallback)
   ollamadev diff        Show the working-tree diff for review (--json); powers the desktop Review panel
   ollamadev commit      Commit with an AI-generated message (-a stages all, -m to override)
+  ollamadev ship        Stage all → scan secrets → AI commit → ask before pushing (one command)
   ollamadev pr create|review <n>   Open a PR, or review one with the local model (needs gh)
   ollamadev config get|set <key> [value]   Inspect/persist ~/.ollamadev/config.json
   ollamadev skills      Manage skills (list/search/browse/add/install/export)
@@ -13611,9 +13674,16 @@ Git Commands:
   ollamadev git pull         Pull from remote
   ollamadev git stash        Stash changes
 
+AI git workflow (local Ollama — uses git.model, e.g. gpt-oss):
+  ollamadev commit           Commit with an AI-generated message (-a stages all, -m to override)
+  ollamadev ship             One command: stage all → scan secrets → AI commit → ASK before pushing
+  ollamadev pr create        Open a PR (AI title/body; needs gh)
+  ollamadev pr review <n>    Review a PR with the local model (needs gh)
+
 Examples:
   ollamadev git status
   ollamadev git commit "Fix bug"
+  ollamadev ship             # the whole loop; nothing pushes without you saying yes
 GIT
         ],
         'terminal' => [
