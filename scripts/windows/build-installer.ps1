@@ -79,7 +79,14 @@ $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
 $g.Clear([System.Drawing.Color]::FromArgb(13, 17, 23))
 $pen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(88, 166, 255), 18)
-$g.DrawLines($pen, @((New-Object System.Drawing.Point 72, 80), (New-Object System.Drawing.Point 128, 128), (New-Object System.Drawing.Point 72, 176)))
+# DrawLines needs a strongly-typed Point[] — a bare @(...) is Object[] and newer PowerShell
+# refuses the overload ("Cannot convert ... System.Object[] ... to System.Drawing.Point").
+$pts = [System.Drawing.Point[]]@(
+    (New-Object System.Drawing.Point 72, 80),
+    (New-Object System.Drawing.Point 128, 128),
+    (New-Object System.Drawing.Point 72, 176)
+)
+$g.DrawLines($pen, $pts)
 $g.DrawLine($pen, 140, 176, 196, 176)
 $g.Dispose()
 $icon = [System.Drawing.Icon]::FromHandle($bmp.GetHicon())
